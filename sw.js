@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cuaderno-v1';
+const CACHE_NAME = 'cuaderno-v3';
 const CORE_ASSETS = [
   './',
   './index.html',
