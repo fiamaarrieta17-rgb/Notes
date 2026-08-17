@@ -9,8 +9,8 @@
 
 <!-- PWA -->
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#232220">
-<meta name="background-color" content="#232220">
+<meta name="theme-color" content="#1B1D24">
+<meta name="background-color" content="#1B1D24">
 <meta name="description" content="Cuaderno digital: escribí, dibujá y organizá tus páginas.">
 
 <!-- Icons -->
@@ -25,15 +25,15 @@
 <meta name="apple-mobile-web-app-title" content="Mis Notas">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   :root{
-    --ink:#2B2A28; --ink-soft:#57534C; --paper:#FBF8F2;
-    --panel:#232220; --panel-2:#2B2A28; --panel-edge:#3A3835;
-    --cream:#EDEAE2; --cream-dim:#9C978C;
-    --pine:#3E6259; --line-blue:#AFC4DA; --grid-line:#DCD3C0; --dot:#C7BCA5;
-    --desk:#1C1B19;
+    --ink:#232529; --ink-soft:#57534C; --paper:#FBF8F2;
+    --panel:#1B1D24; --panel-2:#20222B; --panel-edge:#2C2F38;
+    --cream:#EDEDF2; --cream-dim:#9799A6;
+    --pine:#3448C5; --danger:#B23A48; --line-blue:#AFC4DA; --grid-line:#DCD3C0; --dot:#C7BCA5;
+    --desk:#15161B;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
   button, .tab, .swatch, input[type=range], #kebabBtn, .zoombtn{ touch-action:manipulation; }
@@ -68,17 +68,21 @@
     overflow-y:auto;-webkit-overflow-scrolling:touch;
   }
   #homeHeader{
-    display:flex;align-items:center;justify-content:space-between;
-    padding:16px 16px 4px;flex-shrink:0;
+    display:flex;align-items:flex-end;justify-content:space-between;
+    padding:20px 16px 6px;flex-shrink:0;gap:12px;flex-wrap:wrap;
+  }
+  #homeEyebrow{
+    font-size:10px;letter-spacing:.18em;color:var(--cream-dim);font-weight:600;
+    margin-bottom:5px;text-transform:uppercase;
   }
   #homeHeader h1{
-    font-family:'Space Grotesk',sans-serif;font-size:19px;font-weight:700;
+    font-family:'Source Serif 4',Georgia,serif;font-size:24px;font-weight:600;
     color:var(--cream);margin:0;
   }
   #addFolderBtn{
     background:var(--pine);border:none;color:#fff;font-family:'Inter',sans-serif;
-    font-weight:600;font-size:13px;padding:8px 13px;border-radius:8px;cursor:pointer;
-    display:flex;align-items:center;gap:6px;
+    font-weight:600;font-size:13px;padding:10px 16px;border-radius:10px;cursor:pointer;
+    display:flex;align-items:center;gap:7px;flex-shrink:0;
   }
   #addFolderBtn:hover{opacity:.9;}
   #folderGrid{
@@ -93,35 +97,48 @@
   #folderEmpty svg{width:40px;height:40px;opacity:.5;}
   #folderEmpty p{margin:0;font-size:13px;max-width:220px;line-height:1.5;}
   .folderCard{
-    background:var(--panel-2);border:1px solid var(--panel-edge);border-radius:12px;
-    overflow:hidden;cursor:pointer;display:flex;flex-direction:column;
-    transition:border-color .15s ease,transform .1s ease;
+    background:transparent;border:none;border-radius:0;
+    overflow:visible;cursor:pointer;display:flex;flex-direction:column;gap:8px;
+    transition:transform .1s ease;
   }
   .folderCard:active{transform:scale(.97);}
-  .folderCard:hover{border-color:var(--pine);}
   .folderThumb{
-    aspect-ratio:1240/1754;background:var(--paper);position:relative;
-    display:flex;align-items:center;justify-content:center;overflow:hidden;
+    aspect-ratio:3/4;background:var(--paper);position:relative;overflow:hidden;
+    display:flex;align-items:center;justify-content:center;border-radius:8px;
+    box-shadow:0 6px 16px rgba(0,0,0,.35);
+  }
+  .folderCard:hover .folderThumb{box-shadow:0 8px 22px rgba(0,0,0,.45);}
+  .folderThumb::before{
+    content:'';position:absolute;left:0;top:0;bottom:0;width:7px;
+    background:var(--pine);z-index:2;
   }
   .folderThumb img{width:100%;height:100%;object-fit:cover;object-position:top;display:block;}
   .folderThumb .folderIcon{width:34%;height:34%;color:var(--dot);opacity:.6;}
-  .folderInfo{padding:9px 10px;display:flex;align-items:flex-start;gap:6px;}
+  .folderThumbLines{
+    position:absolute;left:22px;top:26px;right:14px;display:flex;
+    flex-direction:column;gap:11px;z-index:1;
+  }
+  .folderThumbLines div{height:2px;background:var(--grid-line);border-radius:1px;}
+  .folderThumbLines div:nth-child(1){width:70%;}
+  .folderThumbLines div:nth-child(2){width:90%;}
+  .folderThumbLines div:nth-child(3){width:55%;}
+  .folderInfo{padding:0 2px;display:flex;align-items:flex-start;gap:6px;}
   .folderTextWrap{flex:1;min-width:0;}
   .folderName{
-    font-size:13px;font-weight:600;color:var(--cream);white-space:nowrap;
+    font-size:13.5px;font-weight:600;color:var(--cream);white-space:nowrap;
     overflow:hidden;text-overflow:ellipsis;
   }
   .folderName[contenteditable="true"]{
     outline:none;background:rgba(255,255,255,.08);border-radius:3px;
     white-space:normal;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;
   }
-  .folderMeta{font-size:11px;color:var(--cream-dim);margin-top:2px;}
+  .folderMeta{font-size:11.5px;color:var(--cream-dim);margin-top:2px;}
   .folderDel{
-    flex-shrink:0;width:20px;height:20px;border-radius:50%;display:flex;
-    align-items:center;justify-content:center;color:var(--cream-dim);font-size:13px;
-    opacity:.6;transition:opacity .15s,background .15s,color .15s;
+    flex-shrink:0;width:26px;height:26px;border-radius:7px;display:flex;
+    align-items:center;justify-content:center;color:var(--cream-dim);font-size:14px;
+    opacity:.7;transition:opacity .15s,background .15s,color .15s;
   }
-  .folderDel:hover{opacity:1;background:rgba(181,80,46,.35);color:#fff;}
+  .folderDel:hover{opacity:1;background:rgba(178,58,72,.4);color:#fff;}
 
   #backHomeBtn{
     flex-shrink:0;background:transparent;border:none;color:var(--cream-dim);
@@ -162,7 +179,7 @@
     color:var(--cream-dim);transition:opacity .15s ease,background .15s ease;
   }
   .tab.active .del{opacity:.7;}
-  .tab .del:hover{opacity:1;background:rgba(181,80,46,.35);color:#fff;}
+  .tab .del:hover{opacity:1;background:rgba(178,58,72,.4);color:#fff;}
   .tab.active{background:var(--pine);color:#fff;}
   .tab.active .label{color:#fff;}
   #addPage{
@@ -209,6 +226,11 @@
   }
   .swatch:hover{transform:scale(1.1);}
   .swatch.active{border-color:var(--cream);}
+  .swatch-add{
+    background:conic-gradient(from 0deg,#F5D949,#8FD14F,#7FC7E8,#B79CF0,#F28FB0,#F5A25D,#F5D949);
+    display:flex;align-items:center;justify-content:center;color:#fff;
+  }
+  .swatch-add svg{width:9px;height:9px;filter:drop-shadow(0 0 1px rgba(0,0,0,.8));}
 
   input[type=range]{width:52px;accent-color:var(--pine);height:16px;flex-shrink:0;}
 
@@ -247,7 +269,7 @@
     border-radius:6px;padding:6px 10px;font-family:'Inter',sans-serif;font-size:12px;
     cursor:pointer;width:100%;
   }
-  button.action:hover{border-color:#B5502E;color:var(--cream);}
+  button.action:hover{border-color:var(--danger);color:var(--cream);}
   .zoomrow{display:flex;align-items:center;gap:6px;}
   button.zoombtn{
     background:var(--panel);border:1px solid var(--panel-edge);color:var(--cream);
@@ -294,7 +316,7 @@
     padding:20px;width:100%;max-width:340px;max-height:82vh;display:flex;flex-direction:column;
     box-shadow:0 24px 60px rgba(0,0,0,.6);
   }
-  #exportPanel h3{margin:0 0 4px;font-family:'Space Grotesk',sans-serif;font-size:16px;color:var(--cream);}
+  #exportPanel h3{margin:0 0 4px;font-family:'Inter',sans-serif;font-size:16px;font-weight:600;color:var(--cream);}
   .exportHint{margin:0 0 10px;font-size:12px;color:var(--cream-dim);}
   #exportPageList{overflow-y:auto;flex:1;min-height:40px;max-height:38vh;border-top:1px solid var(--panel-edge);border-bottom:1px solid var(--panel-edge);padding:6px 0;margin-bottom:10px;}
   .exportRow{display:flex;align-items:center;gap:9px;padding:7px 2px;font-size:13px;color:var(--cream);cursor:pointer;}
@@ -353,7 +375,10 @@
 <div id="app">
   <div id="homeView">
     <div id="homeHeader">
-      <h1>Mis carpetas</h1>
+      <div>
+        <div id="homeEyebrow">Apuntes</div>
+        <h1>Mis carpetas</h1>
+      </div>
       <button id="addFolderBtn">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         Carpeta
@@ -400,6 +425,7 @@
     </button>
     <div class="divider"></div>
     <div class="grp" id="swatches"></div>
+    <input type="color" id="colorPicker" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;">
     <div class="divider"></div>
     <input type="range" id="widthRange" min="1" max="14" value="3" title="Grosor">
    </div>
@@ -520,12 +546,16 @@
 
   const PAPER_DOT = {blanco:"#B8B3A8", rayado:"#AFC4DA", cuadriculado:"#DCD3C0", punteado:"#C7BCA5"};
   const INK_COLORS = [
-    {name:"Grafito", hex:"#2B2A28"}, {name:"Pino", hex:"#3E6259"},
-    {name:"Océano", hex:"#3E5C76"}, {name:"Óxido", hex:"#B5502E"}, {name:"Ocre", hex:"#C99A3C"},
+    {name:"Grafito", hex:"#2B2A28"}, {name:"Negro", hex:"#000000"}, {name:"Pino", hex:"#3E6259"},
+    {name:"Océano", hex:"#3E5C76"}, {name:"Azul", hex:"#2E5EAA"}, {name:"Violeta", hex:"#6E5AA8"},
+    {name:"Óxido", hex:"#B5502E"}, {name:"Rojo", hex:"#C43D3D"}, {name:"Ocre", hex:"#C99A3C"},
+    {name:"Verde oliva", hex:"#6B7A3A"}, {name:"Marrón", hex:"#7A5230"}, {name:"Gris", hex:"#8A8580"},
   ];
   const MARK_COLORS = [
-    {name:"Amarillo", hex:"#F5D949"}, {name:"Verde", hex:"#8FD14F"},
-    {name:"Rosa", hex:"#F28FB0"}, {name:"Celeste", hex:"#7FC7E8"}, {name:"Naranja", hex:"#F5A25D"},
+    {name:"Amarillo", hex:"#F5D949"}, {name:"Verde", hex:"#8FD14F"}, {name:"Menta", hex:"#6FE3C6"},
+    {name:"Rosa", hex:"#F28FB0"}, {name:"Fucsia", hex:"#E85DB0"}, {name:"Celeste", hex:"#7FC7E8"},
+    {name:"Azul", hex:"#7A9CF0"}, {name:"Naranja", hex:"#F5A25D"}, {name:"Rojo", hex:"#F0776E"},
+    {name:"Lila", hex:"#B79CF0"},
   ];
   const TOOL_RANGE = {
     pen:{min:1,max:14,def:3}, eraser:{min:6,max:50,def:18},
@@ -533,6 +563,7 @@
   };
 
   let folders = [], currentFolderId = null;
+  let customInkColors = [], customMarkColors = [];
   let pages = [], currentPageId = null, strokes = [], redoStack = [];
   let tool = 'pen';
   let inkColor = INK_COLORS[0].hex, markColor = MARK_COLORS[0].hex;
@@ -567,6 +598,7 @@
   const toolEraserBtn = document.getElementById('toolEraser');
   const toolPanBtn = document.getElementById('toolPan');
   const swatchesEl = document.getElementById('swatches');
+  const colorPickerInput = document.getElementById('colorPicker');
   const widthRange = document.getElementById('widthRange');
   const paperSelect = document.getElementById('paperSelect');
   const penOnlyChk = document.getElementById('penOnly');
@@ -617,20 +649,56 @@
     const hide = (tool==='eraser' || tool==='pan');
     swatchesEl.style.display = hide ? 'none' : 'flex';
     if(hide) return;
-    const list = usesMark ? MARK_COLORS : INK_COLORS;
+    const presets = usesMark ? MARK_COLORS : INK_COLORS;
+    const customs = usesMark ? customMarkColors : customInkColors;
     const active = usesMark ? markColor : inkColor;
     swatchesEl.innerHTML = '';
-    list.forEach(c=>{
+
+    function makeSwatch(hex, name){
       const sw = document.createElement('div');
-      sw.className = 'swatch' + (c.hex===active ? ' active':'');
-      sw.style.background = c.hex; sw.title = c.name;
+      sw.className = 'swatch' + (hex.toLowerCase()===active.toLowerCase() ? ' active':'');
+      sw.style.background = hex; sw.title = name || hex;
       sw.addEventListener('click', ()=>{
-        if(usesMark) markColor = c.hex; else inkColor = c.hex;
+        if(usesMark) markColor = hex; else inkColor = hex;
         renderSwatches();
       });
-      swatchesEl.appendChild(sw);
+      return sw;
+    }
+
+    presets.forEach(c=> swatchesEl.appendChild(makeSwatch(c.hex, c.name)));
+    customs.forEach(hex=> swatchesEl.appendChild(makeSwatch(hex, 'Personalizado')));
+
+    const addSw = document.createElement('div');
+    addSw.className = 'swatch swatch-add';
+    addSw.title = 'Elegir color de la paleta';
+    addSw.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+    addSw.addEventListener('click', ()=>{
+      colorPickerInput.value = active;
+      colorPickerInput.dataset.usesMark = usesMark ? '1' : '';
+      colorPickerInput.click();
     });
+    swatchesEl.appendChild(addSw);
   }
+
+  colorPickerInput.addEventListener('input', ()=>{
+    const hex = colorPickerInput.value;
+    const usesMark = !!colorPickerInput.dataset.usesMark;
+    if(usesMark) markColor = hex; else inkColor = hex;
+    renderSwatches();
+  });
+  colorPickerInput.addEventListener('change', async ()=>{
+    const hex = colorPickerInput.value;
+    const usesMark = !!colorPickerInput.dataset.usesMark;
+    const presets = usesMark ? MARK_COLORS : INK_COLORS;
+    const list = usesMark ? customMarkColors : customInkColors;
+    const already = presets.some(c=>c.hex.toLowerCase()===hex.toLowerCase()) || list.some(h=>h.toLowerCase()===hex.toLowerCase());
+    if(!already){
+      list.push(hex);
+      if(list.length > 12) list.shift();
+      await storageSet(usesMark ? 'custom-mark-colors' : 'custom-ink-colors', list);
+    }
+    renderSwatches();
+  });
 
   function setTool(t){
     tool = t;
@@ -1230,7 +1298,7 @@
         img.src = thumb;
         thumbEl.appendChild(img);
       } else {
-        thumbEl.innerHTML = '<svg class="folderIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>';
+        thumbEl.innerHTML = '<div class="folderThumbLines"><div></div><div></div><div></div></div>';
       }
 
       const info = document.createElement('div');
@@ -1342,6 +1410,10 @@
   backHomeBtn.addEventListener('click', backHome);
 
   async function boot(){
+    const savedCustomInk = await storageGet('custom-ink-colors');
+    const savedCustomMark = await storageGet('custom-mark-colors');
+    if(Array.isArray(savedCustomInk)) customInkColors = savedCustomInk;
+    if(Array.isArray(savedCustomMark)) customMarkColors = savedCustomMark;
     // Migración: versiones previas guardaban un único cuaderno bajo 'pages-index'.
     const oldPages = await storageGet('pages-index');
     const savedFolders = await storageGet('folders-index');
