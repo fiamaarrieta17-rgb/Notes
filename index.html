@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
 <meta name="color-scheme" content="dark">
-<title>Cuaderno</title>
+<title>Mis Notas</title>
 
 <!-- PWA -->
 <link rel="manifest" href="manifest.json">
@@ -22,7 +22,7 @@
 <!-- iOS standalone support -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Cuaderno">
+<meta name="apple-mobile-web-app-title" content="Mis Notas">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -679,6 +679,15 @@
     pctx.setTransform(scale, 0, 0, scale, 0, 0);
     drawPaperBackground(pctx, paperType, BASE_W, BASE_H);
 
+    // Capa de tinta separada del papel: así la goma (destination-out) borra
+    // solo la tinta y nunca perfora el fondo. Si borrara directo sobre el
+    // papel ya pintado, quedaría un agujero transparente que, al exportar
+    // a JPEG (sin canal alfa), el navegador rellena de negro.
+    const inkCanvas = document.createElement('canvas');
+    inkCanvas.width = W; inkCanvas.height = H;
+    const ictx = inkCanvas.getContext('2d');
+    ictx.setTransform(scale, 0, 0, scale, 0, 0);
+
     const tmp = document.createElement('canvas');
     tmp.width = W; tmp.height = H;
     const tctx = tmp.getContext('2d');
@@ -691,18 +700,21 @@
         if(s.tool === 'underline') lineSegmentTo(tctx, s, SILHOUETTE_STYLE);
         else if(s.points.length < 2) dotTo(tctx, s, SILHOUETTE_STYLE);
         else for(let i=1;i<s.points.length;i++) segmentTo(tctx, s, i-1, i, SILHOUETTE_STYLE);
-        pctx.setTransform(1,0,0,1,0,0);
-        pctx.globalAlpha = styleFor(s.tool).alpha;
-        pctx.globalCompositeOperation = styleFor(s.tool).composite;
-        pctx.drawImage(tmp, 0, 0);
-        pctx.globalAlpha = 1; pctx.globalCompositeOperation = 'source-over';
-        pctx.setTransform(scale,0,0,scale,0,0);
+        ictx.setTransform(1,0,0,1,0,0);
+        ictx.globalAlpha = styleFor(s.tool).alpha;
+        ictx.globalCompositeOperation = styleFor(s.tool).composite;
+        ictx.drawImage(tmp, 0, 0);
+        ictx.globalAlpha = 1; ictx.globalCompositeOperation = 'source-over';
+        ictx.setTransform(scale,0,0,scale,0,0);
       } else {
         const st = styleFor(s.tool);
-        if(s.points.length < 2) dotTo(pctx, s, st);
-        else for(let i=1;i<s.points.length;i++) segmentTo(pctx, s, i-1, i, st);
+        if(s.points.length < 2) dotTo(ictx, s, st);
+        else for(let i=1;i<s.points.length;i++) segmentTo(ictx, s, i-1, i, st);
       }
     }
+
+    pctx.setTransform(1,0,0,1,0,0);
+    pctx.drawImage(inkCanvas, 0, 0);
     return pageCanvas;
   }
 
