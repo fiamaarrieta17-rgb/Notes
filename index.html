@@ -62,6 +62,83 @@
     background:var(--panel);
   }
 
+  /* ---------- Pantalla de inicio (carpetas) ---------- */
+  #homeView{
+    display:flex;flex-direction:column;flex:1;min-height:0;
+    overflow-y:auto;-webkit-overflow-scrolling:touch;
+  }
+  #homeHeader{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:16px 16px 4px;flex-shrink:0;
+  }
+  #homeHeader h1{
+    font-family:'Space Grotesk',sans-serif;font-size:19px;font-weight:700;
+    color:var(--cream);margin:0;
+  }
+  #addFolderBtn{
+    background:var(--pine);border:none;color:#fff;font-family:'Inter',sans-serif;
+    font-weight:600;font-size:13px;padding:8px 13px;border-radius:8px;cursor:pointer;
+    display:flex;align-items:center;gap:6px;
+  }
+  #addFolderBtn:hover{opacity:.9;}
+  #folderGrid{
+    display:grid;grid-template-columns:repeat(auto-fill, minmax(140px,1fr));
+    gap:14px;padding:14px 16px 24px;flex:1;align-content:start;
+  }
+  #folderEmpty{
+    display:none;flex-direction:column;align-items:center;justify-content:center;
+    text-align:center;gap:10px;padding:40px 24px;color:var(--cream-dim);flex:1;
+  }
+  #folderEmpty.show{display:flex;}
+  #folderEmpty svg{width:40px;height:40px;opacity:.5;}
+  #folderEmpty p{margin:0;font-size:13px;max-width:220px;line-height:1.5;}
+  .folderCard{
+    background:var(--panel-2);border:1px solid var(--panel-edge);border-radius:12px;
+    overflow:hidden;cursor:pointer;display:flex;flex-direction:column;
+    transition:border-color .15s ease,transform .1s ease;
+  }
+  .folderCard:active{transform:scale(.97);}
+  .folderCard:hover{border-color:var(--pine);}
+  .folderThumb{
+    aspect-ratio:1240/1754;background:var(--paper);position:relative;
+    display:flex;align-items:center;justify-content:center;overflow:hidden;
+  }
+  .folderThumb img{width:100%;height:100%;object-fit:cover;object-position:top;display:block;}
+  .folderThumb .folderIcon{width:34%;height:34%;color:var(--dot);opacity:.6;}
+  .folderInfo{padding:9px 10px;display:flex;align-items:flex-start;gap:6px;}
+  .folderTextWrap{flex:1;min-width:0;}
+  .folderName{
+    font-size:13px;font-weight:600;color:var(--cream);white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis;
+  }
+  .folderName[contenteditable="true"]{
+    outline:none;background:rgba(255,255,255,.08);border-radius:3px;
+    white-space:normal;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;
+  }
+  .folderMeta{font-size:11px;color:var(--cream-dim);margin-top:2px;}
+  .folderDel{
+    flex-shrink:0;width:20px;height:20px;border-radius:50%;display:flex;
+    align-items:center;justify-content:center;color:var(--cream-dim);font-size:13px;
+    opacity:.6;transition:opacity .15s,background .15s,color .15s;
+  }
+  .folderDel:hover{opacity:1;background:rgba(181,80,46,.35);color:#fff;}
+
+  #backHomeBtn{
+    flex-shrink:0;background:transparent;border:none;color:var(--cream-dim);
+    width:26px;height:26px;border-radius:6px;cursor:pointer;display:flex;
+    align-items:center;justify-content:center;margin-right:2px;
+  }
+  #backHomeBtn:hover{color:var(--cream);background:var(--panel-2);}
+  #backHomeBtn svg{width:17px;height:17px;}
+
+  @media (max-width:600px){
+    #folderGrid{grid-template-columns:repeat(auto-fill, minmax(120px,1fr));gap:10px;padding:10px 12px 20px;}
+    #homeHeader{padding:14px 12px 2px;}
+    #homeHeader h1{font-size:17px;}
+  }
+
+  #notebookView{display:none;flex-direction:column;flex:1;min-height:0;}
+
   /* ---------- Franja de páginas (horizontal, arriba) ---------- */
   #pagesBar{
     display:flex;align-items:center;gap:6px;background:var(--panel);
@@ -274,7 +351,26 @@
 </head>
 <body>
 <div id="app">
+  <div id="homeView">
+    <div id="homeHeader">
+      <h1>Mis carpetas</h1>
+      <button id="addFolderBtn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Carpeta
+      </button>
+    </div>
+    <div id="folderEmpty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
+      <p>Todavía no tenés carpetas. Creá una para organizar tus apuntes por tema.</p>
+    </div>
+    <div id="folderGrid"></div>
+  </div>
+
+  <div id="notebookView">
   <div id="pagesBar">
+    <button id="backHomeBtn" title="Volver a carpetas">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+    </button>
     <div id="tabs"></div>
     <button id="addPage">+ Página</button>
   </div>
@@ -370,6 +466,7 @@
       </div>
     </div>
   </div>
+  </div>
 </div>
 
 <script>
@@ -435,6 +532,7 @@
     highlighter:{min:10,max:40,def:20}, underline:{min:2,max:12,def:5},
   };
 
+  let folders = [], currentFolderId = null;
   let pages = [], currentPageId = null, strokes = [], redoStack = [];
   let tool = 'pen';
   let inkColor = INK_COLORS[0].hex, markColor = MARK_COLORS[0].hex;
@@ -444,6 +542,13 @@
   let drawing = false, currentStroke = null, saveTimer = null;
   let zoom = 1, panX = 0, panY = 0;
   let activePointers = new Map(), pinch = null, panDrag = null, hasInteracted = false;
+
+  const homeView = document.getElementById('homeView');
+  const notebookView = document.getElementById('notebookView');
+  const folderGrid = document.getElementById('folderGrid');
+  const folderEmpty = document.getElementById('folderEmpty');
+  const addFolderBtn = document.getElementById('addFolderBtn');
+  const backHomeBtn = document.getElementById('backHomeBtn');
 
   const tabsEl = document.getElementById('tabs');
   const addPageBtn = document.getElementById('addPage');
@@ -1017,6 +1122,7 @@
     saveTimer = setTimeout(async ()=>{
       const ok = await savePageStrokes();
       showStatus(ok ? 'Guardado' : 'Sin conexión (solo en esta sesión)');
+      updateFolderThumbnail(currentFolderId);
     }, 250);
   }
   function showStatus(text){
@@ -1024,9 +1130,22 @@
     clearTimeout(showStatus._t);
     showStatus._t = setTimeout(()=>{ statusEl.textContent = 'Guardado'; }, 2500);
   }
-  async function savePagesIndex(){ return await storageSet('pages-index', pages); }
+  function pagesKey(folderId){ return 'pages-index:' + folderId; }
+  async function savePagesIndex(){ if(!currentFolderId) return true; return await storageSet(pagesKey(currentFolderId), pages); }
   async function savePageStrokes(){ if(!currentPageId) return true; return await storageSet('page:' + currentPageId, strokes); }
   async function loadPageStrokes(id){ const d = await storageGet('page:' + id); return Array.isArray(d) ? d : []; }
+
+  // ---------- Miniatura de carpeta ----------
+  async function updateFolderThumbnail(folderId){
+    if(!folderId || !currentPageId) return;
+    try{
+      const page = pages.find(p=>p.id===currentPageId);
+      if(!page) return;
+      const thumbCanvas = renderPageToCanvas(page.paperType, strokes, 0.15);
+      const dataUrl = thumbCanvas.toDataURL('image/jpeg', 0.72);
+      await storageSet('folder-thumb:' + folderId, dataUrl);
+    }catch(e){ /* silencioso: la miniatura es cosmética */ }
+  }
 
   function renderTabs(){
     tabsEl.innerHTML = '';
@@ -1088,8 +1207,104 @@
     } else renderTabs();
   }
 
-  async function boot(){
-    const savedIndex = await storageGet('pages-index');
+  // ---------- Carpetas (pantalla de inicio) ----------
+  function folderUid(){ return 'f_' + uid(); }
+
+  async function saveFoldersIndex(){ return await storageSet('folders-index', folders); }
+
+  async function renderHome(){
+    folderGrid.innerHTML = '';
+    folderEmpty.classList.toggle('show', folders.length === 0);
+    for(const f of folders){
+      const pageList = await storageGet(pagesKey(f.id));
+      const count = Array.isArray(pageList) ? pageList.length : 0;
+      const thumb = await storageGet('folder-thumb:' + f.id);
+
+      const card = document.createElement('div');
+      card.className = 'folderCard';
+
+      const thumbEl = document.createElement('div');
+      thumbEl.className = 'folderThumb';
+      if(thumb){
+        const img = document.createElement('img');
+        img.src = thumb;
+        thumbEl.appendChild(img);
+      } else {
+        thumbEl.innerHTML = '<svg class="folderIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>';
+      }
+
+      const info = document.createElement('div');
+      info.className = 'folderInfo';
+      const textWrap = document.createElement('div');
+      textWrap.className = 'folderTextWrap';
+      const nameEl = document.createElement('div');
+      nameEl.className = 'folderName';
+      nameEl.textContent = f.name;
+      const metaEl = document.createElement('div');
+      metaEl.className = 'folderMeta';
+      metaEl.textContent = count + (count===1 ? ' página' : ' páginas');
+      textWrap.appendChild(nameEl); textWrap.appendChild(metaEl);
+      const del = document.createElement('div');
+      del.className = 'folderDel'; del.textContent = '×'; del.title = 'Eliminar carpeta';
+
+      info.appendChild(textWrap); info.appendChild(del);
+      card.appendChild(thumbEl); card.appendChild(info);
+      folderGrid.appendChild(card);
+
+      card.addEventListener('click', (ev)=>{
+        if(nameEl.contentEditable === 'true') return;
+        if(ev.target === del) return;
+        openFolder(f.id);
+      });
+      del.addEventListener('click', (ev)=>{ ev.stopPropagation(); deleteFolder(f.id); });
+      nameEl.addEventListener('dblclick', (ev)=>{
+        ev.stopPropagation(); nameEl.contentEditable = 'true'; nameEl.focus();
+        document.execCommand('selectAll', false, null);
+      });
+      nameEl.addEventListener('click', (ev)=>{ if(nameEl.contentEditable==='true') ev.stopPropagation(); });
+      nameEl.addEventListener('blur', async ()=>{
+        nameEl.contentEditable = 'false';
+        const newName = nameEl.textContent.trim() || 'Sin título';
+        f.name = newName; nameEl.textContent = newName;
+        await saveFoldersIndex();
+      });
+      nameEl.addEventListener('keydown', (ev)=>{ if(ev.key==='Enter'){ ev.preventDefault(); nameEl.blur(); } });
+    }
+  }
+
+  async function addFolder(){
+    const n = folders.length + 1;
+    const folder = { id: folderUid(), name: 'Carpeta ' + n, createdAt: Date.now() };
+    folders.push(folder);
+    await saveFoldersIndex();
+    const defaultPages = [{ id: uid(), name: 'Página 1', paperType: 'rayado' }];
+    await storageSet(pagesKey(folder.id), defaultPages);
+    await renderHome();
+    const card = [...folderGrid.children][folders.length-1];
+    const nameEl = card && card.querySelector('.folderName');
+    if(nameEl){
+      nameEl.contentEditable = 'true'; nameEl.focus();
+      document.execCommand('selectAll', false, null);
+    }
+  }
+  addFolderBtn.addEventListener('click', addFolder);
+
+  async function deleteFolder(id){
+    if(!confirm('¿Eliminar esta carpeta y todas sus páginas? Esta acción no se puede deshacer.')) return;
+    const pageList = await storageGet(pagesKey(id));
+    if(Array.isArray(pageList)){
+      for(const p of pageList) await storageDelete('page:' + p.id);
+    }
+    await storageDelete(pagesKey(id));
+    await storageDelete('folder-thumb:' + id);
+    folders = folders.filter(f=>f.id!==id);
+    await saveFoldersIndex();
+    await renderHome();
+  }
+
+  async function openFolder(id){
+    currentFolderId = id;
+    let savedIndex = await storageGet(pagesKey(id));
     if(savedIndex && Array.isArray(savedIndex) && savedIndex.length){
       pages = savedIndex;
     } else {
@@ -1099,11 +1314,51 @@
     currentPageId = pages[0].id;
     applyPaperClass(pages[0].paperType);
     strokes = await loadPageStrokes(currentPageId);
+    redoStack = [];
     renderTabs();
-    fitToViewport();
+
+    homeView.style.display = 'none';
+    notebookView.style.display = 'flex';
     hasInteracted = false;
-    redrawAll();
-    setTool('pen');
+    requestAnimationFrame(()=>{
+      fitToViewport();
+      redrawAll();
+      setTool('pen');
+    });
+  }
+
+  async function backHome(){
+    if(currentFolderId){
+      await savePageStrokes();
+      await savePagesIndex();
+      await updateFolderThumbnail(currentFolderId);
+    }
+    currentFolderId = null; currentPageId = null;
+    closePopover();
+    notebookView.style.display = 'none';
+    homeView.style.display = 'flex';
+    await renderHome();
+  }
+  backHomeBtn.addEventListener('click', backHome);
+
+  async function boot(){
+    // Migración: versiones previas guardaban un único cuaderno bajo 'pages-index'.
+    const oldPages = await storageGet('pages-index');
+    const savedFolders = await storageGet('folders-index');
+    if(savedFolders && Array.isArray(savedFolders) && savedFolders.length){
+      folders = savedFolders;
+    } else if(oldPages && Array.isArray(oldPages) && oldPages.length){
+      const folder = { id: folderUid(), name: 'Mis notas', createdAt: Date.now() };
+      folders = [folder];
+      await storageSet(pagesKey(folder.id), oldPages);
+      await storageDelete('pages-index');
+      await saveFoldersIndex();
+    } else {
+      folders = [];
+    }
+    homeView.style.display = 'flex';
+    notebookView.style.display = 'none';
+    await renderHome();
   }
 
   boot();
