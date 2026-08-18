@@ -559,6 +559,22 @@
   #ocrTidyBtn[disabled]{opacity:.6;cursor:default;}
   .textEditorHint{font-size:11px;color:var(--cream-dim);margin:-6px 0 12px;line-height:1.4;}
 
+  /* ---------- Toast "Deshacer emprolijado" ---------- */
+  #tidyUndoToast{
+    position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));
+    transform:translate(-50%,16px);
+    background:var(--panel-2);border:1px solid var(--panel-edge);color:var(--cream);
+    border-radius:12px;padding:10px 10px 10px 16px;display:flex;align-items:center;gap:12px;
+    font-family:'Inter',sans-serif;font-size:13px;box-shadow:0 10px 30px rgba(0,0,0,.45);
+    z-index:70;opacity:0;pointer-events:none;transition:opacity .18s ease,transform .18s ease;
+  }
+  #tidyUndoToast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto;}
+  #tidyUndoBtn{
+    background:var(--pine);border:none;color:#fff;font-family:'Inter',sans-serif;font-weight:600;
+    font-size:13px;padding:8px 14px;border-radius:8px;cursor:pointer;flex-shrink:0;
+  }
+  #tidyUndoBtn:hover{opacity:.9;}
+
   /* ---------- Versión tablet (≤900px): controles más grandes para el dedo ---------- */
   @media (max-width:900px){
     #pagesBar{height:44px;padding:6px 10px;gap:8px;}
@@ -710,7 +726,11 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10h10a5 5 0 0 1 0 10h-2"/><polyline points="7 5 3 10 7 15"/></svg>
     </button>
     <div class="divider"></div>
-    <button class="tidyBtn" id="ocrTidyBtn" title="Convertir mi letra en texto prolijo">
+    <button class="tidyBtn" id="ocrTidyBtn" title="Detectar lo que escribiste y convertirlo en texto">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
+      <span class="tidyLabel">Transcribir</span>
+    </button>
+    <button class="tidyBtn" id="tidyShapeBtn" title="Prolijar tu letra manteniendo tu caligrafía">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4V2m0 20v-2M8 9l-4-4m14 14-4-4M4 15l-4 4m20-14-4 4M22 15h2M0 9h2m11.6 2.6a4 4 0 1 0-5.66-5.66l-8.83 8.83a2 2 0 0 0 0 2.83l2.83 2.83a2 2 0 0 0 2.83 0z"/></svg>
       <span class="tidyLabel">Emprolijar letra</span>
     </button>
@@ -875,6 +895,10 @@
       <button class="action primary" id="textInsertBtn">Insertar</button>
     </div>
   </div>
+  </div>
+  <div id="tidyUndoToast">
+    <span>Letra emprolijada</span>
+    <button type="button" id="tidyUndoBtn">Deshacer</button>
   </div>
 </div>
 
@@ -1155,7 +1179,10 @@
   const textCancelBtn = document.getElementById('textCancelBtn');
   const textInsertBtn = document.getElementById('textInsertBtn');
   const ocrTidyBtn = document.getElementById('ocrTidyBtn');
+  const tidyShapeBtn = document.getElementById('tidyShapeBtn');
   const ocrHintRow = document.getElementById('ocrHintRow');
+  const tidyUndoToast = document.getElementById('tidyUndoToast');
+  const tidyUndoBtn = document.getElementById('tidyUndoBtn');
   const undoBtn = document.getElementById('undoBtn');
   const clearBtn = document.getElementById('clearBtn');
   const statusEl = document.getElementById('status');
@@ -2020,6 +2047,7 @@
     }
 
     drawing = true; redoStack = [];
+    hideTidyUndoToast();
     const pt = pageCoordsFromClient(e.clientX, e.clientY);
     pt.p = e.pressure && e.pressure > 0 ? e.pressure : 0.5;
     growPageIfNeeded(pt);
@@ -2645,6 +2673,7 @@
   }
 
   async function backHome(){
+    hideTidyUndoToast();
     if(currentFolderId){
       await savePageStrokes();
       await savePagesIndex();
@@ -2921,6 +2950,99 @@
     }
   }
   ocrTidyBtn.addEventListener('click', tidyHandwriting);
+
+  // ---------- "Emprolijar letra": suaviza el trazo y empareja el renglón ----------
+  //
+  // A diferencia de "Transcribir", acá NO se usa OCR ni se cambia la letra por
+  // una tipografía: se mantiene la caligrafía del usuario tal cual, pero se
+  // corrigen dos cosas que hacen que la letra a mano se vea desprolija:
+  //   1) El temblor del trazo (mano insegura, pantalla táctil): se suaviza el
+  //      camino de cada trazo con un promedio móvil, sin tocar los extremos
+  //      (para no desconectar una letra de la siguiente).
+  //   2) El renglón torcido: dentro de cada línea detectada, se calcula una
+  //      línea de base común y se corrige a cada trazo la mitad de la
+  //      diferencia respecto a esa base (corrección parcial, no total, para
+  //      no perder el vaivén natural de la letra).
+  function smoothStrokePoints(points){
+    if(!points || points.length < 5) return points;
+    const out = points.map(p=>({x:p.x, y:p.y, p:p.p}));
+    const src = out.map(p=>({x:p.x, y:p.y}));
+    for(let i=2;i<out.length-2;i++){
+      out[i].x = (src[i-2].x + 2*src[i-1].x + 4*src[i].x + 2*src[i+1].x + src[i+2].x) / 10;
+      out[i].y = (src[i-2].y + 2*src[i-1].y + 4*src[i].y + 2*src[i+1].y + src[i+2].y) / 10;
+    }
+    return out;
+  }
+
+  let lastTidyBackup = null;
+  let tidyUndoTimer = null;
+
+  function hideTidyUndoToast(){
+    tidyUndoToast.classList.remove('show');
+    clearTimeout(tidyUndoTimer);
+    lastTidyBackup = null;
+  }
+  function showTidyUndoToast(){
+    tidyUndoToast.classList.add('show');
+    clearTimeout(tidyUndoTimer);
+    tidyUndoTimer = setTimeout(hideTidyUndoToast, 6000);
+  }
+  tidyUndoBtn.addEventListener('click', ()=>{
+    if(!lastTidyBackup) return;
+    const { original, tidied } = lastTidyBackup;
+    const tidiedSet = new Set(tidied);
+    strokes = strokes.filter(s=>!tidiedSet.has(s)).concat(original);
+    redoStack = [];
+    redrawAll();
+    scheduleSave();
+    hideTidyUndoToast();
+    showStatus('Emprolijado deshecho');
+  });
+
+  function tidyStrokeShape(){
+    closePopover();
+    const penStrokes = strokes.filter(s=>s.tool==='pen' && s.points && s.points.length>1);
+    if(!penStrokes.length){
+      alert('No hay nada escrito a mano en esta página para emprolijar.');
+      return;
+    }
+
+    tidyShapeBtn.disabled = true;
+    tidyShapeBtn.classList.add('loading');
+    showStatus('Prolijando tu letra…');
+
+    try{
+      const boxes = strokeBBoxes(penStrokes);
+      const heights = boxes.map(b=>b.h).filter(h=>h>1).sort((a,b)=>a-b);
+      const medianH = heights.length ? heights[Math.floor(heights.length/2)] : 30;
+      const lines = groupIntoLines(boxes, medianH);
+
+      const toRemove = new Set(penStrokes);
+      const tidied = [];
+      lines.forEach(line=>{
+        const bottoms = line.boxes.map(b=>b.maxY).sort((a,b)=>a-b);
+        const baseline = bottoms[Math.floor(bottoms.length/2)];
+        line.boxes.forEach(b=>{
+          const s = b.stroke;
+          const dy = (baseline - b.maxY) * 0.5;
+          const newPts = smoothStrokePoints(s.points).map(p=>({x:p.x, y:p.y+dy, p:p.p}));
+          tidied.push(Object.assign({}, s, { points: newPts }));
+        });
+      });
+
+      strokes = strokes.filter(s=>!toRemove.has(s)).concat(tidied);
+      redoStack = [];
+      redrawAll();
+      scheduleSave();
+
+      lastTidyBackup = { original: penStrokes, tidied };
+      showTidyUndoToast();
+    } finally{
+      tidyShapeBtn.disabled = false;
+      tidyShapeBtn.classList.remove('loading');
+    }
+  }
+  tidyShapeBtn.addEventListener('click', tidyStrokeShape);
 
   if(document.fonts && document.fonts.ready){
     document.fonts.ready.then(()=>{ if(currentPageId) redrawAll(); }).catch(()=>{});
