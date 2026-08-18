@@ -428,10 +428,15 @@
     display:flex;align-items:center;gap:6px;padding:7px 8px;
     border-bottom:1px solid var(--panel-edge);flex-shrink:0;
   }
-  #pdfSelect{
+  #pdfLibraryBtn{
     flex:1;min-width:0;background:var(--panel-2);color:var(--cream);border:1px solid var(--panel-edge);
-    border-radius:6px;padding:6px 7px;font-size:12px;font-family:'Inter',sans-serif;
+    border-radius:6px;padding:6px 8px;font-size:12px;font-family:'Inter',sans-serif;font-weight:600;
+    cursor:pointer;display:flex;align-items:center;gap:6px;text-align:left;
   }
+  #pdfLibraryBtn:hover{border-color:var(--pine);}
+  #pdfLibraryBtn svg{width:14px;height:14px;flex-shrink:0;color:var(--cream-dim);}
+  #pdfLibraryBtn svg.chev{margin-left:auto;width:12px;height:12px;}
+  #pdfLibraryBtnLabel{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   #pdfCanvasWrap{
     flex:1;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;
     background:var(--desk);padding:12px;position:relative;
@@ -521,6 +526,68 @@
   button.action.primary{background:var(--pine);border-color:var(--pine);color:#fff;}
   button.action.primary:hover{border-color:var(--pine);opacity:.9;}
   button.action:disabled{opacity:.5;cursor:default;}
+
+  /* ---------- Modal: carpeta de PDFs ---------- */
+  #pdfLibraryModal{
+    display:none;position:fixed;inset:0;z-index:31;
+    background:rgba(0,0,0,.55);align-items:center;justify-content:center;padding:20px;
+  }
+  #pdfLibraryModal.open{display:flex;}
+  #pdfLibraryPanel{
+    background:var(--panel-2);border:1px solid var(--panel-edge);border-radius:14px;
+    padding:20px;width:100%;max-width:380px;max-height:82vh;display:flex;flex-direction:column;
+    box-shadow:0 24px 60px rgba(0,0,0,.6);
+  }
+  #pdfLibraryPanelHeader{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px;}
+  #pdfLibraryPanelHeader h3{margin:0;font-family:'Inter',sans-serif;font-size:16px;font-weight:600;color:var(--cream);}
+  #pdfLibraryAddBtn{
+    flex-shrink:0;background:var(--pine);border:none;color:#fff;font-family:'Inter',sans-serif;
+    font-weight:600;font-size:12px;padding:7px 10px;border-radius:8px;cursor:pointer;
+    display:flex;align-items:center;gap:5px;
+  }
+  #pdfLibraryAddBtn:hover{opacity:.9;}
+  #pdfLibraryAddBtn svg{width:13px;height:13px;flex-shrink:0;}
+  .pdfLibraryHint{margin:0 0 10px;font-size:12px;color:var(--cream-dim);line-height:1.4;}
+  #pdfLibraryList{
+    overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;min-height:0;max-height:46vh;
+    border-top:1px solid var(--panel-edge);border-bottom:1px solid var(--panel-edge);
+    padding:4px 0;margin-bottom:12px;
+  }
+  #pdfLibraryList:empty{display:none;}
+  .pdfLibItem{
+    display:flex;align-items:center;gap:10px;padding:9px 4px;cursor:pointer;
+    border-bottom:1px solid var(--panel-edge);
+  }
+  .pdfLibItem:last-child{border-bottom:none;}
+  .pdfLibItem:hover{background:rgba(255,255,255,.04);}
+  .pdfLibItem.active{background:rgba(52,72,197,.18);}
+  .pdfLibIcon{
+    flex-shrink:0;width:30px;height:36px;border-radius:3px;background:var(--paper);
+    display:flex;align-items:center;justify-content:center;color:var(--ink-soft);
+    box-shadow:0 2px 6px rgba(0,0,0,.3);
+  }
+  .pdfLibIcon svg{width:16px;height:16px;}
+  .pdfLibInfo{flex:1;min-width:0;}
+  .pdfLibName{
+    font-size:13px;color:var(--cream);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    font-weight:500;
+  }
+  .pdfLibItem.active .pdfLibName{color:#fff;font-weight:600;}
+  .pdfLibMeta{font-size:11px;color:var(--cream-dim);margin-top:2px;}
+  .pdfLibDel{
+    flex-shrink:0;width:28px;height:28px;border-radius:7px;display:flex;
+    align-items:center;justify-content:center;color:var(--cream-dim);
+    opacity:.7;transition:opacity .15s,background .15s,color .15s;
+  }
+  .pdfLibDel svg{width:14px;height:14px;}
+  .pdfLibDel:hover{opacity:1;background:rgba(178,58,72,.4);color:#fff;}
+  #pdfLibraryEmpty{
+    display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+    text-align:center;padding:30px 14px;color:var(--cream-dim);
+  }
+  #pdfLibraryEmpty.show{display:flex;}
+  #pdfLibraryEmpty svg{width:32px;height:32px;opacity:.5;}
+  #pdfLibraryEmpty p{margin:0;font-size:12.5px;max-width:220px;line-height:1.5;}
 
   /* ---------- Editor de texto (herramienta Texto) ---------- */
   #textEditorBackdrop{
@@ -822,15 +889,37 @@
     </div>
   </div>
 
+  <div id="pdfLibraryModal">
+    <div id="pdfLibraryPanel">
+      <div id="pdfLibraryPanelHeader">
+        <h3>Carpeta de PDFs</h3>
+        <button type="button" id="pdfLibraryAddBtn" title="Subir PDF">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Subir PDF
+        </button>
+      </div>
+      <p class="pdfLibraryHint">Todos los PDF que subís acá quedan guardados en esta carpeta de notas. Elegí cuál ver al lado de la hoja.</p>
+      <div id="pdfLibraryList"></div>
+      <div id="pdfLibraryEmpty">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <p>Todavía no subiste ningún PDF acá.</p>
+      </div>
+      <div class="exportFooter">
+        <button class="action" id="pdfLibraryCloseBtn">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
   <div id="workArea">
     <div id="pdfPanel">
       <div id="pdfPanelHeader">
-        <select id="pdfSelect"></select>
+        <button type="button" id="pdfLibraryBtn" title="Carpeta de PDFs">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
+          <span id="pdfLibraryBtnLabel">Elegí un PDF</span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
         <button class="icon" id="pdfAddBtn" title="Subir PDF">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        </button>
-        <button class="icon" id="pdfDeleteBtn" title="Eliminar este PDF">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
         </button>
         <button class="icon" id="pdfCloseBtn" title="Cerrar panel">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -1213,9 +1302,14 @@
   const pdfToggleBtn = document.getElementById('pdfToggleBtn');
   const pdfPanelEl = document.getElementById('pdfPanel');
   const pdfResizeHandleEl = document.getElementById('pdfResizeHandle');
-  const pdfSelectEl = document.getElementById('pdfSelect');
+  const pdfLibraryBtn = document.getElementById('pdfLibraryBtn');
+  const pdfLibraryBtnLabel = document.getElementById('pdfLibraryBtnLabel');
+  const pdfLibraryModal = document.getElementById('pdfLibraryModal');
+  const pdfLibraryList = document.getElementById('pdfLibraryList');
+  const pdfLibraryEmptyEl = document.getElementById('pdfLibraryEmpty');
+  const pdfLibraryAddBtn = document.getElementById('pdfLibraryAddBtn');
+  const pdfLibraryCloseBtn = document.getElementById('pdfLibraryCloseBtn');
   const pdfAddBtn = document.getElementById('pdfAddBtn');
-  const pdfDeleteBtn = document.getElementById('pdfDeleteBtn');
   const pdfCloseBtn = document.getElementById('pdfCloseBtn');
   const pdfCanvasWrapEl = document.getElementById('pdfCanvasWrap');
   const pdfCanvasEl = document.getElementById('pdfCanvas');
@@ -1245,25 +1339,73 @@
   }
   showPdfEmpty();
 
-  async function refreshPdfSelect(){
+  const PDF_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+  const PDF_TRASH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>';
+
+  function pdfDateLabel(ts){
+    if(!ts) return '';
+    try{
+      return new Date(ts).toLocaleDateString('es-AR', { day:'2-digit', month:'short' });
+    }catch(e){ return ''; }
+  }
+
+  // Carga (y ordena) la carpeta de PDFs de la carpeta de notas actual, y
+  // actualiza el botón que muestra el PDF elegido en el header del panel.
+  async function refreshPdfLibrary(){
     const list = currentFolderId ? await pdfMetaGetByFolder(currentFolderId) : [];
     list.sort((a,b)=> a.addedAt - b.addedAt);
-    pdfSelectEl.innerHTML = '';
-    if(!list.length){
-      const opt = document.createElement('option');
-      opt.textContent = 'Sin PDFs todavía'; opt.value = '';
-      pdfSelectEl.appendChild(opt);
-      pdfSelectEl.disabled = true;
-    } else {
-      pdfSelectEl.disabled = false;
-      list.forEach(m=>{
-        const opt = document.createElement('option');
-        opt.value = m.id; opt.textContent = m.name;
-        pdfSelectEl.appendChild(opt);
-      });
-    }
+    pdfLibraryBtnLabel.textContent = currentPdfMeta ? currentPdfMeta.name : (list.length ? 'Elegí un PDF' : 'Sin PDFs todavía');
+    renderPdfLibraryList(list);
     return list;
   }
+
+  function renderPdfLibraryList(list){
+    pdfLibraryList.innerHTML = '';
+    pdfLibraryEmptyEl.classList.toggle('show', !list.length);
+    list.forEach(m=>{
+      const row = document.createElement('div');
+      row.className = 'pdfLibItem' + (currentPdfMeta && currentPdfMeta.id === m.id ? ' active' : '');
+      row.dataset.id = m.id;
+      row.innerHTML =
+        '<div class="pdfLibIcon">'+PDF_ICON_SVG+'</div>'+
+        '<div class="pdfLibInfo">'+
+          '<div class="pdfLibName"></div>'+
+          '<div class="pdfLibMeta">'+pdfDateLabel(m.addedAt)+'</div>'+
+        '</div>'+
+        '<button type="button" class="pdfLibDel" title="Eliminar este PDF">'+PDF_TRASH_SVG+'</button>';
+      row.querySelector('.pdfLibName').textContent = m.name;
+      row.addEventListener('click', async (e)=>{
+        if(e.target.closest('.pdfLibDel')) return;
+        openPdfPanel();
+        await loadPdfById(m.id);
+        await refreshPdfLibrary();
+        closePdfLibraryModal();
+      });
+      row.querySelector('.pdfLibDel').addEventListener('click', async (e)=>{
+        e.stopPropagation();
+        if(!confirm('¿Eliminar "' + m.name + '"? Esta acción no se puede deshacer.')) return;
+        await pdfBlobDelete(m.id);
+        await pdfMetaDelete(m.id);
+        if(currentPdfMeta && currentPdfMeta.id === m.id){
+          const list2 = await refreshPdfLibrary();
+          if(list2.length) await loadPdfById(list2[0].id); else showPdfEmpty();
+        }
+        await refreshPdfLibrary();
+      });
+      pdfLibraryList.appendChild(row);
+    });
+  }
+
+  function openPdfLibraryModal(){
+    refreshPdfLibrary();
+    pdfLibraryModal.classList.add('open');
+  }
+  function closePdfLibraryModal(){
+    pdfLibraryModal.classList.remove('open');
+  }
+  pdfLibraryModal.addEventListener('click', (e)=>{ if(e.target === pdfLibraryModal) closePdfLibraryModal(); });
+  pdfLibraryCloseBtn.addEventListener('click', closePdfLibraryModal);
+  pdfLibraryBtn.addEventListener('click', openPdfLibraryModal);
 
   async function renderCurrentPdfPage(){
     if(!currentPdfDoc) return;
@@ -1332,8 +1474,10 @@
   }
   function resetPdfPanelForFolder(){
     closePdfPanel();
+    closePdfLibraryModal();
     currentPdfDoc = null; currentPdfMeta = null;
-    pdfSelectEl.innerHTML = '';
+    pdfLibraryList.innerHTML = '';
+    pdfLibraryBtnLabel.textContent = 'Elegí un PDF';
     showPdfEmpty();
   }
 
@@ -1341,13 +1485,14 @@
     const willOpen = !pdfPanelEl.classList.contains('open');
     if(willOpen){
       openPdfPanel();
-      const list = await refreshPdfSelect();
+      const list = await refreshPdfLibrary();
       if(list.length){
         const id = currentPdfMeta ? currentPdfMeta.id : list[0].id;
-        pdfSelectEl.value = id;
         await loadPdfById(id);
+        await refreshPdfLibrary();
       } else {
         showPdfEmpty();
+        openPdfLibraryModal();
       }
     } else {
       closePdfPanel();
@@ -1355,14 +1500,10 @@
   });
   pdfCloseBtn.addEventListener('click', closePdfPanel);
 
-  pdfSelectEl.addEventListener('change', ()=>{
-    const id = pdfSelectEl.value;
-    if(id) loadPdfById(id); else showPdfEmpty();
-  });
-
   function pickPdfFile(){ pdfFileInputEl.click(); }
   pdfAddBtn.addEventListener('click', pickPdfFile);
   pdfEmptyUploadBtn.addEventListener('click', pickPdfFile);
+  pdfLibraryAddBtn.addEventListener('click', pickPdfFile);
 
   pdfFileInputEl.addEventListener('change', async ()=>{
     const file = pdfFileInputEl.files && pdfFileInputEl.files[0];
@@ -1377,26 +1518,11 @@
       await pdfBlobPut(id, file);
       await pdfMetaPut(meta);
       openPdfPanel();
-      await refreshPdfSelect();
-      pdfSelectEl.value = id;
       await loadPdfById(id);
+      await refreshPdfLibrary();
+      closePdfLibraryModal();
     }catch(e){
       alert('No se pudo guardar el PDF. Puede que sea demasiado pesado para el espacio disponible en este dispositivo.');
-    }
-  });
-
-  pdfDeleteBtn.addEventListener('click', async ()=>{
-    if(!currentPdfMeta){ alert('No hay ningún PDF seleccionado.'); return; }
-    if(!confirm('¿Eliminar "' + currentPdfMeta.name + '"? Esta acción no se puede deshacer.')) return;
-    const id = currentPdfMeta.id;
-    await pdfBlobDelete(id);
-    await pdfMetaDelete(id);
-    const list = await refreshPdfSelect();
-    if(list.length){
-      pdfSelectEl.value = list[0].id;
-      await loadPdfById(list[0].id);
-    } else {
-      showPdfEmpty();
     }
   });
 
