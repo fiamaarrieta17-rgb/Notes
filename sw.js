@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cuaderno-v3';
+const CACHE_NAME = 'cuaderno-v4';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -9,7 +9,17 @@ const CORE_ASSETS = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS))
+    caches.open(CACHE_NAME).then((cache) => {
+      // Cacheamos cada archivo por separado: si uno falla (404),
+      // los demás igual se guardan y la instalación no se rompe entera.
+      return Promise.all(
+        CORE_ASSETS.map((url) =>
+          cache.add(url).catch((err) => {
+            console.warn('No se pudo cachear', url, err);
+          })
+        )
+      );
+    })
   );
   self.skipWaiting();
 });
@@ -31,7 +41,6 @@ self.addEventListener('fetch', (event) => {
     caches.match(req).then((cached) => {
       const fetchPromise = fetch(req)
         .then((networkRes) => {
-          // Only cache same-origin, successful responses
           if (networkRes && networkRes.ok && new URL(req.url).origin === self.location.origin) {
             const clone = networkRes.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put(req, clone));
