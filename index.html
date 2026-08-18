@@ -434,12 +434,13 @@
   }
   #pdfCanvasWrap{
     flex:1;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;
-    background:var(--desk);display:flex;padding:12px;
+    background:var(--desk);padding:12px;position:relative;
   }
-  #pdfCanvasWrap canvas{margin:auto;box-shadow:0 6px 20px rgba(0,0,0,.4);background:#fff;flex-shrink:0;}
+  #pdfCanvasWrap canvas{display:block;margin:0 auto;box-shadow:0 6px 20px rgba(0,0,0,.4);background:#fff;}
   #pdfEmptyState{
     display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;
-    text-align:center;padding:30px 20px;color:var(--cream-dim);margin:auto;
+    text-align:center;padding:30px 20px;color:var(--cream-dim);
+    position:absolute;inset:0;
   }
   #pdfEmptyState.show{display:flex;}
   #pdfEmptyState svg{width:34px;height:34px;opacity:.5;}
