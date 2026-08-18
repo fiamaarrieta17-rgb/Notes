@@ -574,6 +574,11 @@
     font-size:13px;padding:8px 14px;border-radius:8px;cursor:pointer;flex-shrink:0;
   }
   #tidyUndoBtn:hover{opacity:.9;}
+  #tidyUndoDismissBtn{
+    background:transparent;border:none;color:var(--cream-dim);font-size:15px;line-height:1;
+    padding:6px;cursor:pointer;flex-shrink:0;
+  }
+  #tidyUndoDismissBtn:hover{color:var(--cream);}
 
   /* ---------- Versión tablet (≤900px): controles más grandes para el dedo ---------- */
   @media (max-width:900px){
@@ -899,6 +904,7 @@
   <div id="tidyUndoToast">
     <span>Letra emprolijada</span>
     <button type="button" id="tidyUndoBtn">Deshacer</button>
+    <button type="button" id="tidyUndoDismissBtn" title="Descartar">✕</button>
   </div>
 </div>
 
@@ -1183,6 +1189,7 @@
   const ocrHintRow = document.getElementById('ocrHintRow');
   const tidyUndoToast = document.getElementById('tidyUndoToast');
   const tidyUndoBtn = document.getElementById('tidyUndoBtn');
+  const tidyUndoDismissBtn = document.getElementById('tidyUndoDismissBtn');
   const undoBtn = document.getElementById('undoBtn');
   const clearBtn = document.getElementById('clearBtn');
   const statusEl = document.getElementById('status');
@@ -2975,18 +2982,15 @@
   }
 
   let lastTidyBackup = null;
-  let tidyUndoTimer = null;
 
   function hideTidyUndoToast(){
     tidyUndoToast.classList.remove('show');
-    clearTimeout(tidyUndoTimer);
     lastTidyBackup = null;
   }
   function showTidyUndoToast(){
     tidyUndoToast.classList.add('show');
-    clearTimeout(tidyUndoTimer);
-    tidyUndoTimer = setTimeout(hideTidyUndoToast, 6000);
   }
+  tidyUndoDismissBtn.addEventListener('click', hideTidyUndoToast);
   tidyUndoBtn.addEventListener('click', ()=>{
     if(!lastTidyBackup) return;
     const { original, tidied } = lastTidyBackup;
