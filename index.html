@@ -441,7 +441,47 @@
     flex:1;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;
     background:var(--desk);padding:12px;position:relative;
   }
-  #pdfCanvasWrap canvas{display:block;margin:0 auto;box-shadow:0 6px 20px rgba(0,0,0,.4);background:#fff;}
+  #pdfPageStack{position:relative;display:inline-block;margin:0 auto;}
+  #pdfCanvasWrap canvas{display:block;box-shadow:0 6px 20px rgba(0,0,0,.4);background:#fff;}
+
+  /* ---------- Capa de texto (selección/copiado nativo del PDF) ---------- */
+  .textLayer{
+    position:absolute;inset:0;overflow:hidden;line-height:1;opacity:1;
+    text-align:initial;transform-origin:0 0;
+  }
+  .textLayer span, .textLayer br{
+    color:transparent;position:absolute;white-space:pre;cursor:text;
+    transform-origin:0% 0%;
+  }
+  .textLayer ::selection{ background:rgba(52,72,197,.35); }
+
+  /* ---------- Capa de subrayado/resaltado persistente ---------- */
+  #pdfMarksLayer{position:absolute;inset:0;pointer-events:none;}
+  .pdfMark{position:absolute;pointer-events:auto;cursor:pointer;border-radius:2px;}
+  .pdfMark.highlight{mix-blend-mode:multiply;}
+  .pdfMark.underline{border-radius:0;}
+
+  /* ---------- Barra flotante al seleccionar texto del PDF ---------- */
+  #pdfSelToolbar{
+    position:fixed;display:none;align-items:center;gap:6px;
+    background:var(--panel);border:1px solid var(--panel-edge);border-radius:9px;
+    padding:6px 7px;box-shadow:0 8px 24px rgba(0,0,0,.45);z-index:500;
+  }
+  #pdfSelToolbar.show{display:flex;}
+  #pdfSelToolbar button{
+    background:var(--panel-2);border:1px solid var(--panel-edge);color:var(--cream);
+    font-family:'Inter',sans-serif;font-weight:600;font-size:11.5px;
+    padding:6px 9px;border-radius:6px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:5px;
+  }
+  #pdfSelToolbar button:hover{border-color:var(--pine);}
+  #pdfSelToolbar .pdfSelDot{width:14px;height:14px;border-radius:50%;border:1px solid rgba(255,255,255,.3);cursor:pointer;flex-shrink:0;}
+  #pdfSelToolbar .pdfSelDot.active{outline:2px solid var(--cream);outline-offset:1px;}
+  #pdfSelToolbar .pdfSelDivider{width:1px;align-self:stretch;background:var(--panel-edge);margin:0 1px;}
+  #pdfSelCopiedHint{
+    position:fixed;display:none;background:var(--pine);color:#fff;font-family:'Inter',sans-serif;
+    font-weight:600;font-size:11.5px;padding:5px 10px;border-radius:6px;z-index:500;pointer-events:none;
+  }
+  #pdfSelCopiedHint.show{display:block;}
   #pdfEmptyState{
     display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;
     text-align:center;padding:30px 20px;color:var(--cream-dim);
@@ -588,6 +628,71 @@
   #pdfLibraryEmpty.show{display:flex;}
   #pdfLibraryEmpty svg{width:32px;height:32px;opacity:.5;}
   #pdfLibraryEmpty p{margin:0;font-size:12.5px;max-width:220px;line-height:1.5;}
+
+  /* ---------- Categorías de la carpeta de PDFs (por materia) ---------- */
+  .pdfLibCatHeader{
+    display:flex;align-items:center;gap:7px;padding:9px 4px 5px;cursor:pointer;
+    user-select:none;-webkit-user-select:none;
+  }
+  .pdfLibCatHeader:not(:first-child){margin-top:2px;border-top:1px solid var(--panel-edge);padding-top:12px;}
+  .pdfLibCatHeader svg.chev{width:11px;height:11px;color:var(--cream-dim);flex-shrink:0;transition:transform .15s ease;}
+  .pdfLibCatHeader.collapsed svg.chev{transform:rotate(-90deg);}
+  .pdfLibCatName{
+    font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+    color:var(--cream-dim);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .pdfLibCatCount{font-size:11px;color:var(--cream-dim);opacity:.7;flex-shrink:0;}
+  .pdfLibCatItems.collapsed{display:none;}
+  .pdfLibTag{
+    flex-shrink:0;width:28px;height:28px;border-radius:7px;display:flex;
+    align-items:center;justify-content:center;color:var(--cream-dim);
+    opacity:.7;transition:opacity .15s,background .15s,color .15s;
+  }
+  .pdfLibTag svg{width:14px;height:14px;}
+  .pdfLibTag:hover{opacity:1;background:var(--panel-2);color:var(--cream);}
+
+  #pdfCatBackdrop{
+    position:fixed;inset:0;background:rgba(0,0,0,0);pointer-events:none;
+    transition:background .15s ease;z-index:70;
+  }
+  #pdfCatBackdrop.open{background:rgba(0,0,0,.55);pointer-events:auto;}
+  #pdfCatModal{
+    position:fixed;left:50%;bottom:0;transform:translate(-50%,100%);
+    width:min(420px, 100vw);max-height:80vh;overflow-y:auto;-webkit-overflow-scrolling:touch;
+    background:var(--panel-2);border:1px solid var(--panel-edge);border-bottom:none;
+    border-radius:16px 16px 0 0;padding:18px 18px calc(18px + env(safe-area-inset-bottom));
+    z-index:71;transition:transform .2s ease;box-shadow:0 -10px 30px rgba(0,0,0,.45);
+  }
+  #pdfCatModal.open{transform:translate(-50%,0);}
+  #pdfCatModal h3{
+    margin:0 0 4px;font-family:'Source Serif 4',Georgia,serif;font-size:17px;
+    font-weight:600;color:var(--cream);
+  }
+  #pdfCatModal .pdfLibraryHint{margin-bottom:14px;}
+  #pdfCatList{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;}
+  .pdfCatChip{
+    background:var(--panel);border:1.5px solid var(--panel-edge);color:var(--cream);
+    font-family:'Inter',sans-serif;font-size:12.5px;font-weight:500;padding:8px 13px;
+    border-radius:20px;cursor:pointer;
+  }
+  .pdfCatChip.active{border-color:var(--pine);background:rgba(52,72,197,.18);color:#fff;font-weight:600;}
+  #pdfCatModal .field-label{
+    display:block;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--cream-dim);margin-bottom:7px;font-weight:600;
+  }
+  #pdfCatModal input[type=text]{
+    width:100%;background:var(--panel);border:1px solid var(--panel-edge);color:var(--cream);
+    border-radius:8px;padding:10px 11px;font-family:'Inter',sans-serif;font-size:14px;
+    -webkit-user-select:text;user-select:text;margin-bottom:16px;
+  }
+  #pdfCatFooter{display:flex;gap:10px;}
+  #pdfCatCancelBtn, #pdfCatSaveBtn{
+    flex:1;padding:12px;border-radius:9px;border:none;font-family:'Inter',sans-serif;
+    font-weight:600;font-size:13.5px;cursor:pointer;
+  }
+  #pdfCatCancelBtn{background:var(--panel);color:var(--cream-dim);}
+  #pdfCatSaveBtn{background:var(--pine);color:#fff;}
+
 
   /* ---------- Editor de texto (herramienta Texto) ---------- */
   #textEditorBackdrop{
@@ -910,6 +1015,20 @@
     </div>
   </div>
 
+  <div id="pdfCatBackdrop"></div>
+  <div id="pdfCatModal">
+    <h3>Categoría del PDF</h3>
+    <p class="pdfLibraryHint">Organizá tus PDFs por materia. Elegí una categoría existente o creá una nueva.</p>
+    <div id="pdfCatList"></div>
+    <label class="field-label">Nueva categoría</label>
+    <input type="text" id="pdfCatNewInput" placeholder="Ej: Matemática" maxlength="40">
+    <div id="pdfCatFooter">
+      <button type="button" id="pdfCatCancelBtn">Cancelar</button>
+      <button type="button" id="pdfCatSaveBtn">Guardar</button>
+    </div>
+  </div>
+
+
   <div id="workArea">
     <div id="pdfPanel">
       <div id="pdfPanelHeader">
@@ -926,7 +1045,11 @@
         </button>
       </div>
       <div id="pdfCanvasWrap">
-        <canvas id="pdfCanvas"></canvas>
+        <div id="pdfPageStack">
+          <canvas id="pdfCanvas"></canvas>
+          <div id="pdfTextLayer" class="textLayer"></div>
+          <div id="pdfMarksLayer"></div>
+        </div>
         <div id="pdfEmptyState">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           <p>Subí un PDF para verlo acá al lado de tu hoja.</p>
@@ -949,6 +1072,24 @@
       </div>
       <input type="file" id="pdfFileInput" accept="application/pdf" style="display:none;">
     </div>
+    <div id="pdfSelToolbar">
+      <button type="button" id="pdfSelHighlightBtn" title="Resaltar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;"><path d="M9 11l6-6 4 4-6 6-4-4z"/><path d="M2 22l4-4"/><path d="M14 9l4 4"/></svg>
+        Resaltar
+      </button>
+      <button type="button" id="pdfSelUnderlineBtn" title="Subrayar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;"><path d="M6 4v6a6 6 0 0012 0V4"/><line x1="4" y1="20" x2="20" y2="20"/></svg>
+        Subrayar
+      </button>
+      <div class="pdfSelDivider"></div>
+      <div id="pdfSelDots"></div>
+      <div class="pdfSelDivider"></div>
+      <button type="button" id="pdfSelCopyBtn" title="Copiar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        Copiar
+      </button>
+    </div>
+    <div id="pdfSelCopiedHint">Copiado</div>
     <div id="pdfResizeHandle"></div>
     <div id="viewport">
       <div id="stage">
@@ -1029,6 +1170,11 @@
   const GROW_MARGIN = 320; // distancia al borde inferior que dispara el crecimiento
   let PAGE_W = BASE_W, PAGE_H = BASE_H; // tamaño actual de la hoja abierta (varía en hojas infinitas)
   const MIN_ZOOM = 0.2, MAX_ZOOM = 5;
+  // La resolución física del canvas se recalcula al acercar el zoom (ver
+  // updateCanvasResolutionIfNeeded), para que la tinta y la hoja se vean
+  // nítidas y no pixeladas. La tapamos en este valor para no disparar el
+  // consumo de memoria a resoluciones absurdas en zooms muy grandes.
+  const ZOOM_RENDER_CAP = 3;
 
   // ---- Estilos de lápiz: cada uno define cómo varía el grosor con la presión y su opacidad ----
   const PEN_STYLES = {
@@ -1094,8 +1240,8 @@
 
   // ---------- Almacenamiento de PDFs (IndexedDB: los PDF pueden pesar mucho
   // más que lo que localStorage permite) ----------
-  const PDF_DB_NAME = 'notas-pdf-db', PDF_DB_VERSION = 1;
-  const PDF_META_STORE = 'pdfMeta', PDF_BLOB_STORE = 'pdfBlobs';
+  const PDF_DB_NAME = 'notas-pdf-db', PDF_DB_VERSION = 2;
+  const PDF_META_STORE = 'pdfMeta', PDF_BLOB_STORE = 'pdfBlobs', PDF_MARKS_STORE = 'pdfMarks';
   let pdfDbPromise = null;
   function openPdfDb(){
     if(pdfDbPromise) return pdfDbPromise;
@@ -1110,6 +1256,10 @@
         }
         if(!db.objectStoreNames.contains(PDF_BLOB_STORE)){
           db.createObjectStore(PDF_BLOB_STORE, { keyPath:'id' });
+        }
+        if(!db.objectStoreNames.contains(PDF_MARKS_STORE)){
+          const store = db.createObjectStore(PDF_MARKS_STORE, { keyPath:'id' });
+          store.createIndex('pdfId', 'pdfId', { unique:false });
         }
       };
       req.onsuccess = ()=> resolve(req.result);
@@ -1155,6 +1305,23 @@
       req.onsuccess = ()=> resolve(req.result ? req.result.blob : null);
       req.onerror = ()=> reject(req.error);
     });
+  }
+
+  // ---------- Marcas (subrayado/resaltado) sobre el texto de un PDF ----------
+  async function pdfMarkPut(mark){ return idbReq(PDF_MARKS_STORE, 'readwrite', s=>s.put(mark)); }
+  async function pdfMarkDelete(id){ return idbReq(PDF_MARKS_STORE, 'readwrite', s=>s.delete(id)); }
+  async function pdfMarksGetByPdf(pdfId){
+    const db = await openPdfDb();
+    return new Promise((resolve, reject)=>{
+      const tx = db.transaction(PDF_MARKS_STORE, 'readonly');
+      const req = tx.objectStore(PDF_MARKS_STORE).index('pdfId').getAll(pdfId);
+      req.onsuccess = ()=> resolve(req.result || []);
+      req.onerror = ()=> reject(req.error);
+    });
+  }
+  async function pdfMarksDeleteByPdf(pdfId){
+    const list = await pdfMarksGetByPdf(pdfId);
+    for(const m of list) await pdfMarkDelete(m.id);
   }
 
   if(window.pdfjsLib){
@@ -1309,6 +1476,12 @@
   const pdfLibraryEmptyEl = document.getElementById('pdfLibraryEmpty');
   const pdfLibraryAddBtn = document.getElementById('pdfLibraryAddBtn');
   const pdfLibraryCloseBtn = document.getElementById('pdfLibraryCloseBtn');
+  const pdfCatBackdrop = document.getElementById('pdfCatBackdrop');
+  const pdfCatModal = document.getElementById('pdfCatModal');
+  const pdfCatList = document.getElementById('pdfCatList');
+  const pdfCatNewInput = document.getElementById('pdfCatNewInput');
+  const pdfCatCancelBtn = document.getElementById('pdfCatCancelBtn');
+  const pdfCatSaveBtn = document.getElementById('pdfCatSaveBtn');
   const pdfAddBtn = document.getElementById('pdfAddBtn');
   const pdfCloseBtn = document.getElementById('pdfCloseBtn');
   const pdfCanvasWrapEl = document.getElementById('pdfCanvasWrap');
@@ -1323,8 +1496,18 @@
   const pdfZoomInBtn = document.getElementById('pdfZoomInBtn');
   const pdfZoomLabelEl = document.getElementById('pdfZoomLabel');
   const pdfFileInputEl = document.getElementById('pdfFileInput');
+  const pdfPageStackEl = document.getElementById('pdfPageStack');
+  const pdfTextLayerEl = document.getElementById('pdfTextLayer');
+  const pdfMarksLayerEl = document.getElementById('pdfMarksLayer');
+  const pdfSelToolbarEl = document.getElementById('pdfSelToolbar');
+  const pdfSelHighlightBtn = document.getElementById('pdfSelHighlightBtn');
+  const pdfSelUnderlineBtn = document.getElementById('pdfSelUnderlineBtn');
+  const pdfSelCopyBtn = document.getElementById('pdfSelCopyBtn');
+  const pdfSelDotsEl = document.getElementById('pdfSelDots');
+  const pdfSelCopiedHintEl = document.getElementById('pdfSelCopiedHint');
 
   let currentPdfDoc = null, currentPdfMeta = null, currentPdfPageNum = 1, pdfZoom = 1, pdfRenderTask = null;
+  let pdfTextLayerTask = null, currentPdfMarks = [], pdfMarkColor = MARK_COLORS[0].hex;
 
   pageEl.style.width = BASE_W + 'px';
   pageEl.style.height = BASE_H + 'px';
@@ -1336,6 +1519,10 @@
     pdfEmptyStateEl.classList.add('show');
     pdfPageLabelEl.textContent = '–';
     pdfZoomLabelEl.textContent = '100%';
+    if(pdfTextLayerEl) pdfTextLayerEl.innerHTML = '';
+    if(pdfMarksLayerEl) pdfMarksLayerEl.innerHTML = '';
+    currentPdfMarks = [];
+    hidePdfSelToolbar();
   }
   showPdfEmpty();
 
@@ -1351,50 +1538,160 @@
 
   // Carga (y ordena) la carpeta de PDFs de la carpeta de notas actual, y
   // actualiza el botón que muestra el PDF elegido en el header del panel.
+  let currentPdfLibraryList = [];
   async function refreshPdfLibrary(){
     const list = currentFolderId ? await pdfMetaGetByFolder(currentFolderId) : [];
     list.sort((a,b)=> a.addedAt - b.addedAt);
+    currentPdfLibraryList = list;
     pdfLibraryBtnLabel.textContent = currentPdfMeta ? currentPdfMeta.name : (list.length ? 'Elegí un PDF' : 'Sin PDFs todavía');
     renderPdfLibraryList(list);
     return list;
   }
 
+  const PDF_TAG_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41L11 3.83A2 2 0 009.59 3.24L4 3a1 1 0 00-1 1l.24 5.59a2 2 0 00.58 1.41l9.58 9.58a2 2 0 002.83 0l4.36-4.36a2 2 0 000-2.83z"/><circle cx="7.5" cy="7.5" r="1.2" fill="currentColor" stroke="none"/></svg>';
+  const NO_CATEGORY = 'Sin categoría';
+  const collapsedCats = new Set();
+
+  function pdfCategoryLabel(m){ return (m.category && m.category.trim()) || NO_CATEGORY; }
+
   function renderPdfLibraryList(list){
     pdfLibraryList.innerHTML = '';
     pdfLibraryEmptyEl.classList.toggle('show', !list.length);
+
+    // Agrupamos por categoría (materia): cada categoría con al menos un PDF
+    // aparece como su propia sección, ordenadas alfabéticamente; los PDF sin
+    // categoría quedan en un grupo aparte al final.
+    const groups = new Map();
     list.forEach(m=>{
-      const row = document.createElement('div');
-      row.className = 'pdfLibItem' + (currentPdfMeta && currentPdfMeta.id === m.id ? ' active' : '');
-      row.dataset.id = m.id;
-      row.innerHTML =
-        '<div class="pdfLibIcon">'+PDF_ICON_SVG+'</div>'+
-        '<div class="pdfLibInfo">'+
-          '<div class="pdfLibName"></div>'+
-          '<div class="pdfLibMeta">'+pdfDateLabel(m.addedAt)+'</div>'+
-        '</div>'+
-        '<button type="button" class="pdfLibDel" title="Eliminar este PDF">'+PDF_TRASH_SVG+'</button>';
-      row.querySelector('.pdfLibName').textContent = m.name;
-      row.addEventListener('click', async (e)=>{
-        if(e.target.closest('.pdfLibDel')) return;
-        openPdfPanel();
-        await loadPdfById(m.id);
-        await refreshPdfLibrary();
-        closePdfLibraryModal();
+      const cat = pdfCategoryLabel(m);
+      if(!groups.has(cat)) groups.set(cat, []);
+      groups.get(cat).push(m);
+    });
+    const catNames = [...groups.keys()].sort((a,b)=>{
+      if(a === NO_CATEGORY) return 1;
+      if(b === NO_CATEGORY) return -1;
+      return a.localeCompare(b, 'es');
+    });
+
+    catNames.forEach(cat=>{
+      const items = groups.get(cat);
+      const header = document.createElement('div');
+      header.className = 'pdfLibCatHeader' + (collapsedCats.has(cat) ? ' collapsed' : '');
+      header.innerHTML =
+        '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>'+
+        '<span class="pdfLibCatName"></span><span class="pdfLibCatCount">'+items.length+'</span>';
+      header.querySelector('.pdfLibCatName').textContent = cat;
+      const itemsWrap = document.createElement('div');
+      itemsWrap.className = 'pdfLibCatItems' + (collapsedCats.has(cat) ? ' collapsed' : '');
+      header.addEventListener('click', ()=>{
+        if(collapsedCats.has(cat)) collapsedCats.delete(cat); else collapsedCats.add(cat);
+        header.classList.toggle('collapsed');
+        itemsWrap.classList.toggle('collapsed');
       });
-      row.querySelector('.pdfLibDel').addEventListener('click', async (e)=>{
-        e.stopPropagation();
-        if(!confirm('¿Eliminar "' + m.name + '"? Esta acción no se puede deshacer.')) return;
-        await pdfBlobDelete(m.id);
-        await pdfMetaDelete(m.id);
-        if(currentPdfMeta && currentPdfMeta.id === m.id){
-          const list2 = await refreshPdfLibrary();
-          if(list2.length) await loadPdfById(list2[0].id); else showPdfEmpty();
-        }
-        await refreshPdfLibrary();
+      pdfLibraryList.appendChild(header);
+      pdfLibraryList.appendChild(itemsWrap);
+
+      items.forEach(m=>{
+        const row = document.createElement('div');
+        row.className = 'pdfLibItem' + (currentPdfMeta && currentPdfMeta.id === m.id ? ' active' : '');
+        row.dataset.id = m.id;
+        row.innerHTML =
+          '<div class="pdfLibIcon">'+PDF_ICON_SVG+'</div>'+
+          '<div class="pdfLibInfo">'+
+            '<div class="pdfLibName"></div>'+
+            '<div class="pdfLibMeta">'+pdfDateLabel(m.addedAt)+'</div>'+
+          '</div>'+
+          '<button type="button" class="pdfLibTag" title="Cambiar categoría">'+PDF_TAG_SVG+'</button>'+
+          '<button type="button" class="pdfLibDel" title="Eliminar este PDF">'+PDF_TRASH_SVG+'</button>';
+        row.querySelector('.pdfLibName').textContent = m.name;
+        row.addEventListener('click', async (e)=>{
+          if(e.target.closest('.pdfLibDel') || e.target.closest('.pdfLibTag')) return;
+          openPdfPanel();
+          await loadPdfById(m.id);
+          await refreshPdfLibrary();
+          closePdfLibraryModal();
+        });
+        row.querySelector('.pdfLibTag').addEventListener('click', (e)=>{
+          e.stopPropagation();
+          openPdfCategoryModal(m.id);
+        });
+        row.querySelector('.pdfLibDel').addEventListener('click', async (e)=>{
+          e.stopPropagation();
+          if(!confirm('¿Eliminar "' + m.name + '"? Esta acción no se puede deshacer.')) return;
+          await pdfBlobDelete(m.id);
+          await pdfMetaDelete(m.id);
+          await pdfMarksDeleteByPdf(m.id).catch(()=>{});
+          if(currentPdfMeta && currentPdfMeta.id === m.id){
+            const list2 = await refreshPdfLibrary();
+            if(list2.length) await loadPdfById(list2[0].id); else showPdfEmpty();
+          }
+          await refreshPdfLibrary();
+        });
+        itemsWrap.appendChild(row);
       });
-      pdfLibraryList.appendChild(row);
     });
   }
+
+  // ---------- Modal: asignar categoría (materia) a un PDF ----------
+  let pdfCatEditingId = null;
+  let pdfCatSelected = '';
+  function openPdfCategoryModal(pdfId){
+    const meta = currentPdfLibraryList.find(m=>m.id === pdfId);
+    if(!meta) return;
+    pdfCatEditingId = pdfId;
+    pdfCatSelected = meta.category && meta.category.trim() ? meta.category.trim() : '';
+    pdfCatNewInput.value = '';
+    const existingCats = [...new Set(currentPdfLibraryList
+      .map(m=>m.category && m.category.trim())
+      .filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
+    pdfCatList.innerHTML = '';
+    const noCatChip = document.createElement('button');
+    noCatChip.type = 'button';
+    noCatChip.className = 'pdfCatChip' + (pdfCatSelected === '' ? ' active' : '');
+    noCatChip.textContent = NO_CATEGORY;
+    noCatChip.addEventListener('click', ()=> selectPdfCatChip(''));
+    pdfCatList.appendChild(noCatChip);
+    existingCats.forEach(cat=>{
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'pdfCatChip' + (pdfCatSelected === cat ? ' active' : '');
+      chip.textContent = cat;
+      chip.addEventListener('click', ()=> selectPdfCatChip(cat));
+      pdfCatList.appendChild(chip);
+    });
+    pdfCatBackdrop.classList.add('open');
+    pdfCatModal.classList.add('open');
+  }
+  function selectPdfCatChip(cat){
+    pdfCatSelected = cat;
+    pdfCatNewInput.value = '';
+    pdfCatList.querySelectorAll('.pdfCatChip').forEach(c=>{
+      c.classList.toggle('active', c.textContent === (cat || NO_CATEGORY));
+    });
+  }
+  function closePdfCategoryModal(){
+    pdfCatBackdrop.classList.remove('open');
+    pdfCatModal.classList.remove('open');
+    pdfCatEditingId = null;
+  }
+  pdfCatBackdrop.addEventListener('click', closePdfCategoryModal);
+  pdfCatCancelBtn.addEventListener('click', closePdfCategoryModal);
+  // Escribir una categoría nueva anula la selección de los chips existentes.
+  pdfCatNewInput.addEventListener('input', ()=>{
+    if(pdfCatNewInput.value.trim()){
+      pdfCatList.querySelectorAll('.pdfCatChip').forEach(c=>c.classList.remove('active'));
+    }
+  });
+  pdfCatSaveBtn.addEventListener('click', async ()=>{
+    if(!pdfCatEditingId) return;
+    const meta = currentPdfLibraryList.find(m=>m.id === pdfCatEditingId);
+    if(!meta) return;
+    const typed = pdfCatNewInput.value.trim();
+    meta.category = typed || pdfCatSelected || '';
+    await pdfMetaPut(meta);
+    closePdfCategoryModal();
+    await refreshPdfLibrary();
+  });
 
   function openPdfLibraryModal(){
     refreshPdfLibrary();
@@ -1437,7 +1734,183 @@
       currentPdfMeta.zoom = pdfZoom;
       pdfMetaPut(currentPdfMeta).catch(()=>{});
     }
+
+    // Capa de texto invisible (selección y copiado nativo del PDF).
+    hidePdfSelToolbar();
+    if(pdfTextLayerTask){ try{ pdfTextLayerTask.cancel(); }catch(e){} }
+    pdfTextLayerEl.innerHTML = '';
+    pdfTextLayerEl.style.setProperty('--scale-factor', baseViewport.scale);
+    try{
+      const textContent = await page.getTextContent();
+      const tlTask = pdfjsLib.renderTextLayer({
+        textContentSource: textContent,
+        container: pdfTextLayerEl,
+        viewport: baseViewport,
+      });
+      pdfTextLayerTask = tlTask;
+      await tlTask.promise;
+    }catch(e){
+      if(!(e && e.name === 'RenderingCancelledException')) console.error(e);
+    }
+    if(pdfTextLayerTask) pdfTextLayerTask = null;
+
+    renderPdfMarksLayer();
   }
+
+  // ---------- Subrayado/resaltado sobre el texto del PDF ----------
+  function renderPdfMarksLayer(){
+    pdfMarksLayerEl.innerHTML = '';
+    if(!currentPdfMeta) return;
+    const w = pdfCanvasEl.clientWidth, h = pdfCanvasEl.clientHeight;
+    if(!w || !h) return;
+    currentPdfMarks
+      .filter(m=> m.page === currentPdfPageNum)
+      .forEach(m=>{
+        (m.rects||[]).forEach(r=>{
+          const div = document.createElement('div');
+          div.className = 'pdfMark ' + m.type;
+          div.dataset.markId = m.id;
+          div.title = 'Tocá para borrar esta marca';
+          if(m.type === 'highlight'){
+            div.style.left = (r.xFrac*w) + 'px';
+            div.style.top = (r.yFrac*h) + 'px';
+            div.style.width = (r.wFrac*w) + 'px';
+            div.style.height = (r.hFrac*h) + 'px';
+            div.style.background = m.color;
+            div.style.opacity = '0.42';
+          } else {
+            const lineH = Math.max(1.5, r.hFrac*h*0.08);
+            div.style.left = (r.xFrac*w) + 'px';
+            div.style.top = (r.yFrac*h + r.hFrac*h - lineH) + 'px';
+            div.style.width = (r.wFrac*w) + 'px';
+            div.style.height = lineH + 'px';
+            div.style.background = m.color;
+          }
+          div.addEventListener('click', async (e)=>{
+            e.stopPropagation();
+            if(!confirm('¿Borrar esta marca?')) return;
+            await pdfMarkDelete(m.id).catch(()=>{});
+            currentPdfMarks = currentPdfMarks.filter(x=> x.id !== m.id);
+            renderPdfMarksLayer();
+          });
+          pdfMarksLayerEl.appendChild(div);
+        });
+      });
+  }
+
+  function hidePdfSelToolbar(){ pdfSelToolbarEl.classList.remove('show'); }
+
+  function renderPdfSelDots(){
+    pdfSelDotsEl.innerHTML = '';
+    MARK_COLORS.slice(0,6).forEach(c=>{
+      const dot = document.createElement('div');
+      dot.className = 'pdfSelDot' + (c.hex.toLowerCase()===pdfMarkColor.toLowerCase() ? ' active' : '');
+      dot.style.background = c.hex;
+      dot.title = c.name;
+      dot.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        pdfMarkColor = c.hex;
+        pdfSelDotsEl.querySelectorAll('.pdfSelDot').forEach(d=> d.classList.remove('active'));
+        dot.classList.add('active');
+      });
+      pdfSelDotsEl.appendChild(dot);
+    });
+  }
+  renderPdfSelDots();
+
+  // Devuelve, para la selección actual del usuario, los rectángulos (como
+  // fracción del tamaño visible del PDF) que hay que marcar — o null si la
+  // selección no pertenece a la capa de texto del PDF.
+  function getPdfSelectionRects(){
+    const sel = window.getSelection();
+    if(!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+    const range = sel.getRangeAt(0);
+    if(!pdfTextLayerEl.contains(range.commonAncestorContainer)) return null;
+    const w = pdfCanvasEl.clientWidth, h = pdfCanvasEl.clientHeight;
+    if(!w || !h) return null;
+    const stackRect = pdfPageStackEl.getBoundingClientRect();
+    const rects = Array.from(range.getClientRects())
+      .filter(r=> r.width > 0.5 && r.height > 0.5)
+      .map(r=> ({
+        xFrac: (r.left - stackRect.left) / w,
+        yFrac: (r.top - stackRect.top) / h,
+        wFrac: r.width / w,
+        hFrac: r.height / h,
+      }));
+    return rects.length ? { rects, text: sel.toString() } : null;
+  }
+
+  async function addPdfMark(type){
+    const info = getPdfSelectionRects();
+    if(!info) return;
+    const mark = {
+      id: 'mark_' + uid(),
+      pdfId: currentPdfMeta.id,
+      page: currentPdfPageNum,
+      type,
+      color: pdfMarkColor,
+      rects: info.rects,
+      createdAt: Date.now(),
+    };
+    currentPdfMarks.push(mark);
+    renderPdfMarksLayer();
+    window.getSelection().removeAllRanges();
+    hidePdfSelToolbar();
+    await pdfMarkPut(mark).catch(()=>{ alert('No se pudo guardar la marca.'); });
+  }
+
+  pdfSelHighlightBtn.addEventListener('click', ()=> addPdfMark('highlight'));
+  pdfSelUnderlineBtn.addEventListener('click', ()=> addPdfMark('underline'));
+  pdfSelCopyBtn.addEventListener('click', async ()=>{
+    const sel = window.getSelection();
+    const txt = sel ? sel.toString() : '';
+    if(!txt) return;
+    try{
+      await navigator.clipboard.writeText(txt);
+    }catch(e){
+      try{ document.execCommand('copy'); }catch(e2){}
+    }
+    const btnRect = pdfSelCopyBtn.getBoundingClientRect();
+    pdfSelCopiedHintEl.style.left = btnRect.left + 'px';
+    pdfSelCopiedHintEl.style.top = (btnRect.bottom + 6) + 'px';
+    pdfSelCopiedHintEl.classList.add('show');
+    setTimeout(()=> pdfSelCopiedHintEl.classList.remove('show'), 1000);
+  });
+
+  function positionPdfSelToolbar(){
+    const sel = window.getSelection();
+    if(!sel || sel.rangeCount === 0 || sel.isCollapsed){ hidePdfSelToolbar(); return; }
+    const range = sel.getRangeAt(0);
+    if(!pdfTextLayerEl.contains(range.commonAncestorContainer)){ hidePdfSelToolbar(); return; }
+    const rect = range.getBoundingClientRect();
+    if(!rect || (!rect.width && !rect.height)){ hidePdfSelToolbar(); return; }
+    pdfSelToolbarEl.classList.add('show');
+    const tbRect = pdfSelToolbarEl.getBoundingClientRect();
+    let left = rect.left + rect.width/2 - tbRect.width/2;
+    left = Math.max(6, Math.min(left, window.innerWidth - tbRect.width - 6));
+    let top = rect.top - tbRect.height - 8;
+    if(top < 6) top = rect.bottom + 8;
+    pdfSelToolbarEl.style.left = left + 'px';
+    pdfSelToolbarEl.style.top = top + 'px';
+  }
+
+  document.addEventListener('selectionchange', ()=>{
+    // Solo nos interesa cuando la selección vive dentro de la capa de texto del PDF.
+    const sel = window.getSelection();
+    if(sel && sel.rangeCount && !sel.isCollapsed && pdfTextLayerEl.contains(sel.getRangeAt(0).commonAncestorContainer)){
+      positionPdfSelToolbar();
+    } else {
+      hidePdfSelToolbar();
+    }
+  });
+  pdfCanvasWrapEl.addEventListener('scroll', ()=>{
+    if(pdfSelToolbarEl.classList.contains('show')) positionPdfSelToolbar();
+  });
+  document.addEventListener('pointerdown', (e)=>{
+    if(pdfSelToolbarEl.classList.contains('show') && !pdfSelToolbarEl.contains(e.target) && !pdfTextLayerEl.contains(e.target)){
+      hidePdfSelToolbar();
+    }
+  });
 
   async function loadPdfById(id){
     if(!id){ showPdfEmpty(); return; }
@@ -1453,6 +1926,7 @@
       currentPdfMeta = meta;
       currentPdfPageNum = Math.min(Math.max(1, meta.lastPage || 1), currentPdfDoc.numPages);
       pdfZoom = meta.zoom || 1;
+      currentPdfMarks = await pdfMarksGetByPdf(id).catch(()=>[]);
       await renderCurrentPdfPage();
     }catch(e){
       alert('No se pudo abrir ese PDF.');
@@ -1513,7 +1987,7 @@
     const looksLikePdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
     if(!looksLikePdf){ alert('Elegí un archivo PDF.'); return; }
     const id = 'pdf_' + uid();
-    const meta = { id, folderId: currentFolderId, name: file.name.replace(/\.pdf$/i,''), addedAt: Date.now(), lastPage: 1, zoom: 1 };
+    const meta = { id, folderId: currentFolderId, name: file.name.replace(/\.pdf$/i,''), category: '', addedAt: Date.now(), lastPage: 1, zoom: 1 };
     try{
       await pdfBlobPut(id, file);
       await pdfMetaPut(meta);
@@ -1521,6 +1995,7 @@
       await loadPdfById(id);
       await refreshPdfLibrary();
       closePdfLibraryModal();
+      openPdfCategoryModal(id);
     }catch(e){
       alert('No se pudo guardar el PDF. Puede que sea demasiado pesado para el espacio disponible en este dispositivo.');
     }
@@ -1748,6 +2223,34 @@
     }
     stage.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
     zoomLabel.textContent = Math.round(zoom*100) + '%';
+    scheduleCanvasResolutionUpdate();
+  }
+  // ---------- Resolución del canvas según el zoom ----------
+  // El canvas tiene una resolución física fija (ancho/alto en píxeles reales).
+  // Si solo escalamos su tamaño en pantalla con CSS (transform: scale) al
+  // hacer zoom, esos píxeles físicos se estiran y todo se ve borroso/pixelado
+  // (tanto la tinta como el renglonado de la hoja). Para evitar eso, cuando
+  // el usuario se acerca (zoom > 100%) volvemos a dibujar el canvas a mayor
+  // resolución real, usando los trazos (que son vectoriales) — así la tinta
+  // sigue nítida sin importar cuánto zoom se aplique (hasta el tope de
+  // ZOOM_RENDER_CAP, para no gastar memoria de más).
+  let canvasRenderZoom = 1; // factor de zoom ya "horneado" en la resolución física actual
+  let resolutionUpdateTimer = null;
+  function scheduleCanvasResolutionUpdate(){
+    clearTimeout(resolutionUpdateTimer);
+    // Debounce: mientras el usuario está pellizcando para hacer zoom no
+    // recalculamos en cada frame (sería carísimo); esperamos a que se
+    // asiente el gesto.
+    resolutionUpdateTimer = setTimeout(updateCanvasResolutionIfNeeded, 120);
+  }
+  function updateCanvasResolutionIfNeeded(){
+    const desired = clamp(zoom, 1, ZOOM_RENDER_CAP);
+    // Solo si el cambio es significativo: evita re-renderizar por variaciones
+    // mínimas de zoom.
+    if(Math.abs(desired - canvasRenderZoom) < 0.15) return;
+    canvasRenderZoom = desired;
+    applyCanvasResolution();
+    redrawAll();
   }
   function clamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
   // Margen proporcional: más aire en pantallas grandes, más aprovechamiento en celular.
@@ -2007,15 +2510,20 @@
     paperSelect.value = type;
   }
 
-  function setupCanvasResolution(){
+  function applyCanvasResolution(){
     const dpr = Math.max(1, window.devicePixelRatio || 1);
-    canvas.width = baseCanvas.width = bufferCanvas.width = Math.round(PAGE_W * dpr);
-    canvas.height = baseCanvas.height = bufferCanvas.height = Math.round(PAGE_H * dpr);
-    ctx.setTransform(dpr,0,0,dpr,0,0);
-    baseCtx.setTransform(dpr,0,0,dpr,0,0);
-    bufferCtx.setTransform(dpr,0,0,dpr,0,0);
+    const scale = dpr * canvasRenderZoom;
+    canvas.width = baseCanvas.width = bufferCanvas.width = Math.round(PAGE_W * scale);
+    canvas.height = baseCanvas.height = bufferCanvas.height = Math.round(PAGE_H * scale);
+    ctx.setTransform(scale,0,0,scale,0,0);
+    baseCtx.setTransform(scale,0,0,scale,0,0);
+    bufferCtx.setTransform(scale,0,0,scale,0,0);
     pageEl.style.width = PAGE_W + 'px';
     pageEl.style.height = PAGE_H + 'px';
+  }
+  function setupCanvasResolution(){
+    canvasRenderZoom = 1;
+    applyCanvasResolution();
   }
   setupCanvasResolution();
 
@@ -2027,16 +2535,17 @@
     newH = Math.max(1, Math.round(newH));
     if(newW === PAGE_W && newH === PAGE_H) return;
     const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const scale = dpr * canvasRenderZoom;
     [canvas, baseCanvas, bufferCanvas].forEach(c=>{
       const tmp = document.createElement('canvas');
       tmp.width = c.width; tmp.height = c.height;
       tmp.getContext('2d').drawImage(c, 0, 0);
-      c.width = Math.round(newW * dpr);
-      c.height = Math.round(newH * dpr);
+      c.width = Math.round(newW * scale);
+      c.height = Math.round(newH * scale);
       const cctx = c.getContext('2d');
       cctx.setTransform(1,0,0,1,0,0);
       cctx.drawImage(tmp, 0, 0);
-      cctx.setTransform(dpr,0,0,dpr,0,0);
+      cctx.setTransform(scale,0,0,scale,0,0);
     });
     PAGE_W = newW; PAGE_H = newH;
     pageEl.style.width = PAGE_W + 'px';
@@ -2760,7 +3269,7 @@
     await storageDelete('folder-thumb:' + id);
     try{
       const pdfList = await pdfMetaGetByFolder(id);
-      for(const m of pdfList){ await pdfBlobDelete(m.id); await pdfMetaDelete(m.id); }
+      for(const m of pdfList){ await pdfBlobDelete(m.id); await pdfMetaDelete(m.id); await pdfMarksDeleteByPdf(m.id).catch(()=>{}); }
     }catch(e){ /* IndexedDB no disponible: no hay nada que limpiar */ }
     folders = folders.filter(f=>f.id!==id);
     await saveFoldersIndex();
@@ -3119,9 +3628,12 @@
   tidyUndoDismissBtn.addEventListener('click', hideTidyUndoToast);
   tidyUndoBtn.addEventListener('click', ()=>{
     if(!lastTidyBackup) return;
-    const { original, tidied } = lastTidyBackup;
-    const tidiedSet = new Set(tidied);
-    strokes = strokes.filter(s=>!tidiedSet.has(s)).concat(original);
+    const { pairs } = lastTidyBackup;
+    // Igual que al emprolijar: reemplazamos cada trazo en su misma posición
+    // (en vez de sacarlo y volver a agregarlo al final) para no alterar el
+    // orden relativo con los trazos de goma y hacer reaparecer algo borrado.
+    const reverseMap = new Map(pairs.map(([orig, tidy]) => [tidy, orig]));
+    strokes = strokes.map(s => reverseMap.has(s) ? reverseMap.get(s) : s);
     redoStack = [];
     redrawAll();
     scheduleSave();
@@ -3147,8 +3659,8 @@
       const medianH = heights.length ? heights[Math.floor(heights.length/2)] : 30;
       const lines = groupIntoLines(boxes, medianH);
 
-      const toRemove = new Set(penStrokes);
-      const tidied = [];
+      const tidiedMap = new Map();
+      const pairs = [];
       lines.forEach(line=>{
         const bottoms = line.boxes.map(b=>b.maxY).sort((a,b)=>a-b);
         const baseline = bottoms[Math.floor(bottoms.length/2)];
@@ -3156,16 +3668,24 @@
           const s = b.stroke;
           const dy = (baseline - b.maxY) * 0.5;
           const newPts = smoothStrokePoints(s.points).map(p=>({x:p.x, y:p.y+dy, p:p.p}));
-          tidied.push(Object.assign({}, s, { points: newPts }));
+          const newStroke = Object.assign({}, s, { points: newPts });
+          tidiedMap.set(s, newStroke);
+          pairs.push([s, newStroke]);
         });
       });
 
-      strokes = strokes.filter(s=>!toRemove.has(s)).concat(tidied);
+      // Reemplazamos cada trazo en su misma posición dentro del array, en vez
+      // de moverlos al final: el orden de los trazos determina qué borra a
+      // qué (la goma usa 'destination-out' y solo tapa lo que está antes en
+      // la lista), así que mover un trazo emprolijado al final haría que
+      // quedara por encima de una goma que antes lo tapaba, y reapareciera
+      // algo que el usuario ya había borrado.
+      strokes = strokes.map(s => tidiedMap.has(s) ? tidiedMap.get(s) : s);
       redoStack = [];
       redrawAll();
       scheduleSave();
 
-      lastTidyBackup = { original: penStrokes, tidied };
+      lastTidyBackup = { pairs };
       showTidyUndoToast();
     } finally{
       tidyShapeBtn.disabled = false;
