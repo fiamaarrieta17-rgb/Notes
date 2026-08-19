@@ -731,6 +731,28 @@
   #ocrTidyBtn[disabled]{opacity:.6;cursor:default;}
   .textEditorHint{font-size:11px;color:var(--cream-dim);margin:-6px 0 12px;line-height:1.4;}
 
+  /* ---------- Dictado por voz ---------- */
+  #micRow{display:flex;align-items:center;gap:10px;}
+  #micToggleBtn{
+    flex-shrink:0;width:38px;height:38px;border-radius:50%;border:1.5px solid var(--panel-edge);
+    background:var(--panel);color:var(--cream-dim);display:flex;align-items:center;justify-content:center;
+    cursor:pointer;transition:background .15s,border-color .15s,color .15s;
+  }
+  #micToggleBtn svg{width:17px;height:17px;}
+  #micToggleBtn.listening{background:var(--danger);border-color:var(--danger);color:#fff;animation:micPulse 1.4s ease-in-out infinite;}
+  @keyframes micPulse{
+    0%,100%{box-shadow:0 0 0 0 rgba(178,58,72,.45);}
+    50%{box-shadow:0 0 0 8px rgba(178,58,72,0);}
+  }
+  #micStatus{font-size:12px;color:var(--cream-dim);flex:1;}
+  #micToggleBtn.listening + #micStatus{color:var(--cream);}
+  #micUnsupportedHint{font-size:11px;color:var(--cream-dim);margin-top:6px;line-height:1.4;}
+
+  /* ---------- Herramienta Formas (cuadros conceptuales) ---------- */
+  #shapeTypeGrp{display:none;}
+  .shapeType svg{width:19px;height:19px;}
+
+
   /* ---------- Toast "Deshacer emprolijado" ---------- */
   #tidyUndoToast{
     position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));
@@ -891,11 +913,34 @@
       <button class="tool" id="toolUnderline" title="Subrayador">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v7a6 6 0 0012 0V4"/><line x1="4" y1="20" x2="20" y2="20"/></svg>
       </button>
+      <button class="tool" id="toolShape" title="Formas (para cuadros conceptuales)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1"/><circle cx="17" cy="17" r="4"/><line x1="11" y1="7" x2="17" y2="13"/></svg>
+      </button>
+      <button class="tool" id="toolMic" title="Dictar por voz">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 00-3 3v6a3 3 0 006 0V5a3 3 0 00-3-3z"/><path d="M19 10v1a7 7 0 01-14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg>
+      </button>
       <button class="tool" id="toolEraser" title="Goma">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13l-6.5 6.5a2 2 0 0 1-2.83 0l-4.17-4.17a2 2 0 0 1 0-2.83L11 6l7 7z"/><path d="M8 21h11"/></svg>
       </button>
       <button class="tool" id="toolPan" title="Mover">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg>
+      </button>
+    </div>
+    <div class="grp" id="shapeTypeGrp">
+      <button type="button" class="tool shapeType active" data-shape="line" title="Línea">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="20" x2="20" y2="4"/></svg>
+      </button>
+      <button type="button" class="tool shapeType" data-shape="arrow" title="Flecha">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="20" x2="20" y2="4"/><polyline points="10 4 20 4 20 14"/></svg>
+      </button>
+      <button type="button" class="tool shapeType" data-shape="rect" title="Rectángulo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="6" width="16" height="12" rx="1.5"/></svg>
+      </button>
+      <button type="button" class="tool shapeType" data-shape="oval" title="Óvalo / círculo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="12" rx="9" ry="6.5"/></svg>
+      </button>
+      <button type="button" class="tool shapeType" data-shape="cloud" title="Nube">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17a4 4 0 01-.5-7.97A5 5 0 0116 8a4 4 0 011 7.87"/><path d="M7 17h10"/></svg>
       </button>
     </div>
     <div class="divider"></div>
@@ -1114,6 +1159,12 @@
     <div class="row" id="ocrHintRow" style="display:none;">
       <p class="textEditorHint">Reconocimos tu letra ✏️ — revisá y corregí si hace falta antes de confirmar.</p>
     </div>
+    <div class="row" id="micRow">
+      <button type="button" id="micToggleBtn" title="Dictar por voz">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 00-3 3v6a3 3 0 006 0V5a3 3 0 00-3-3z"/><path d="M19 10v1a7 7 0 01-14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg>
+      </button>
+      <span id="micStatus">Tocá el micrófono para dictar</span>
+    </div>
     <div class="row">
       <textarea id="textInputArea" rows="3" placeholder="Escribí acá…"></textarea>
     </div>
@@ -1175,6 +1226,10 @@
   // nítidas y no pixeladas. La tapamos en este valor para no disparar el
   // consumo de memoria a resoluciones absurdas en zooms muy grandes.
   const ZOOM_RENDER_CAP = 3;
+  // Cuánta resolución EXTRA (relativa al dpr del dispositivo) le dejamos ganar
+  // al canvas al acercar el zoom. 1.6 = hasta un 60% más nítido, sin disparar
+  // la memoria/CPU en dispositivos con dpr ya alto (celulares).
+  const MAX_SCALE_MULTIPLIER = 1.6;
 
   // ---- Estilos de lápiz: cada uno define cómo varía el grosor con la presión y su opacidad ----
   const PEN_STYLES = {
@@ -1221,6 +1276,80 @@
     targetCtx.textBaseline = 'alphabetic';
     const lines = txt.split('\n');
     lines.forEach((line,i)=> targetCtx.fillText(line, s.x, s.y + i*s.size*1.25));
+    targetCtx.restore();
+  }
+
+  // ---------- Formas (línea, flecha, rectángulo, óvalo, nube) para cuadros conceptuales ----------
+  function drawCloudPath(targetCtx, x0, y0, x1, y1){
+    const cx = (x0+x1)/2, cy = (y0+y1)/2;
+    const rx = Math.max(Math.abs(x1-x0)/2, 10), ry = Math.max(Math.abs(y1-y0)/2, 10);
+    const bumps = Math.max(8, Math.round((rx+ry)/16));
+    targetCtx.beginPath();
+    for(let i=0;i<bumps;i++){
+      const a0 = (i/bumps)*Math.PI*2;
+      const a1 = ((i+1)/bumps)*Math.PI*2;
+      if(i===0){
+        targetCtx.moveTo(cx+Math.cos(a0)*rx, cy+Math.sin(a0)*ry);
+      }
+      const aMid = (a0+a1)/2;
+      const mx = cx + Math.cos(aMid)*rx*1.15, my = cy + Math.sin(aMid)*ry*1.15;
+      const ex = cx + Math.cos(a1)*rx, ey = cy + Math.sin(a1)*ry;
+      targetCtx.quadraticCurveTo(mx, my, ex, ey);
+    }
+    targetCtx.closePath();
+  }
+  function drawShapeStroke(targetCtx, s){
+    const x0=s.x0, y0=s.y0, x1=s.x1, y1=s.y1;
+    targetCtx.save();
+    targetCtx.globalAlpha = 1;
+    targetCtx.globalCompositeOperation = 'source-over';
+    targetCtx.strokeStyle = s.color;
+    targetCtx.fillStyle = s.color;
+    targetCtx.lineWidth = s.width || 3;
+    targetCtx.lineJoin = 'round';
+    targetCtx.lineCap = 'round';
+    switch(s.shapeType){
+      case 'arrow': {
+        targetCtx.beginPath();
+        targetCtx.moveTo(x0, y0);
+        targetCtx.lineTo(x1, y1);
+        targetCtx.stroke();
+        const angle = Math.atan2(y1-y0, x1-x0);
+        const headLen = Math.max(11, (s.width||3)*4.5);
+        const spread = Math.PI/7.5;
+        targetCtx.beginPath();
+        targetCtx.moveTo(x1, y1);
+        targetCtx.lineTo(x1 - headLen*Math.cos(angle-spread), y1 - headLen*Math.sin(angle-spread));
+        targetCtx.lineTo(x1 - headLen*Math.cos(angle+spread), y1 - headLen*Math.sin(angle+spread));
+        targetCtx.closePath();
+        targetCtx.fill();
+        break;
+      }
+      case 'rect': {
+        const rx = Math.min(x0,x1), ry = Math.min(y0,y1), rw = Math.abs(x1-x0), rh = Math.abs(y1-y0);
+        targetCtx.strokeRect(rx, ry, rw, rh);
+        break;
+      }
+      case 'oval': {
+        const cx = (x0+x1)/2, cy = (y0+y1)/2;
+        const rx = Math.max(Math.abs(x1-x0)/2, 0.5), ry = Math.max(Math.abs(y1-y0)/2, 0.5);
+        targetCtx.beginPath();
+        targetCtx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI*2);
+        targetCtx.stroke();
+        break;
+      }
+      case 'cloud': {
+        drawCloudPath(targetCtx, x0, y0, x1, y1);
+        targetCtx.stroke();
+        break;
+      }
+      default: { // 'line'
+        targetCtx.beginPath();
+        targetCtx.moveTo(x0, y0);
+        targetCtx.lineTo(x1, y1);
+        targetCtx.stroke();
+      }
+    }
     targetCtx.restore();
   }
 
@@ -1362,6 +1491,7 @@
     pen:{min:1,max:14,def:3}, eraser:{min:6,max:50,def:18},
     highlighter:{min:10,max:40,def:20}, underline:{min:2,max:12,def:5},
     text:{min:TEXT_SIZE_MIN,max:TEXT_SIZE_MAX,def:34},
+    shape:{min:1,max:14,def:3},
   };
 
   let folders = [], currentFolderId = null;
@@ -1369,9 +1499,10 @@
   let pages = [], currentPageId = null, strokes = [], redoStack = [];
   let tool = 'pen';
   let inkColor = INK_COLORS[0].hex, markColor = MARK_COLORS[0].hex;
-  let widths = {pen:TOOL_RANGE.pen.def, eraser:TOOL_RANGE.eraser.def, highlighter:TOOL_RANGE.highlighter.def, underline:TOOL_RANGE.underline.def, text:TOOL_RANGE.text.def};
+  let widths = {pen:TOOL_RANGE.pen.def, eraser:TOOL_RANGE.eraser.def, highlighter:TOOL_RANGE.highlighter.def, underline:TOOL_RANGE.underline.def, text:TOOL_RANGE.text.def, shape:TOOL_RANGE.shape.def};
   let penOnly = false;
   let currentPenStyle = 'estandar';
+  let currentShapeType = 'line';
   let tidyMode = true;
   let textInsertPt = null, textStyle = 'cursiva';
   let pendingTidy = null; // strokes a mano que se reemplazan al confirmar el texto reconocido por OCR
@@ -1421,8 +1552,14 @@
   const toolTextBtn = document.getElementById('toolText');
   const toolHighlighterBtn = document.getElementById('toolHighlighter');
   const toolUnderlineBtn = document.getElementById('toolUnderline');
+  const toolShapeBtn = document.getElementById('toolShape');
+  const toolMicBtn = document.getElementById('toolMic');
   const toolEraserBtn = document.getElementById('toolEraser');
   const toolPanBtn = document.getElementById('toolPan');
+  const shapeTypeGrp = document.getElementById('shapeTypeGrp');
+  const shapeTypeBtns = [...document.querySelectorAll('.shapeType')];
+  const micToggleBtn = document.getElementById('micToggleBtn');
+  const micStatus = document.getElementById('micStatus');
   const swatchesEl = document.getElementById('swatches');
   const colorPickerInput = document.getElementById('colorPicker');
   const widthRange = document.getElementById('widthRange');
@@ -2124,20 +2261,30 @@
 
   function setTool(t){
     tool = t;
-    [toolPenBtn,toolTextBtn,toolHighlighterBtn,toolUnderlineBtn,toolEraserBtn,toolPanBtn].forEach(b=>b.classList.remove('active'));
-    ({pen:toolPenBtn, text:toolTextBtn, highlighter:toolHighlighterBtn, underline:toolUnderlineBtn, eraser:toolEraserBtn, pan:toolPanBtn})[t].classList.add('active');
+    [toolPenBtn,toolTextBtn,toolHighlighterBtn,toolUnderlineBtn,toolShapeBtn,toolMicBtn,toolEraserBtn,toolPanBtn].forEach(b=>b.classList.remove('active'));
+    ({pen:toolPenBtn, text:toolTextBtn, highlighter:toolHighlighterBtn, underline:toolUnderlineBtn, shape:toolShapeBtn, mic:toolMicBtn, eraser:toolEraserBtn, pan:toolPanBtn})[t].classList.add('active');
     viewport.style.cursor = t==='pan' ? 'grab' : 'crosshair';
     const r = TOOL_RANGE[t];
     if(r){ widthRange.min=r.min; widthRange.max=r.max; widthRange.value=widths[t]; widthRange.style.visibility='visible'; }
     else { widthRange.style.visibility='hidden'; }
+    shapeTypeGrp.style.display = t==='shape' ? 'flex' : 'none';
     renderSwatches();
   }
   toolPenBtn.addEventListener('click', ()=>setTool('pen'));
   toolTextBtn.addEventListener('click', ()=>setTool('text'));
   toolHighlighterBtn.addEventListener('click', ()=>setTool('highlighter'));
   toolUnderlineBtn.addEventListener('click', ()=>setTool('underline'));
+  toolShapeBtn.addEventListener('click', ()=>setTool('shape'));
+  toolMicBtn.addEventListener('click', ()=>setTool('mic'));
   toolEraserBtn.addEventListener('click', ()=>setTool('eraser'));
   toolPanBtn.addEventListener('click', ()=>setTool('pan'));
+
+  shapeTypeBtns.forEach(b=>{
+    b.addEventListener('click', ()=>{
+      currentShapeType = b.dataset.shape;
+      shapeTypeBtns.forEach(x=>x.classList.toggle('active', x===b));
+    });
+  });
 
   widthRange.addEventListener('input', ()=>{
     const v = parseInt(widthRange.value,10);
@@ -2165,6 +2312,7 @@
     if(newType === 'a4'){
       const hasContentOutside = strokes.some(s=>{
         if(s.tool==='text') return s.y > BASE_H - 10 || s.x > BASE_W - 10;
+        if(s.tool==='shape') return [s.x0,s.x1].some(x=>x > BASE_W - 10) || [s.y0,s.y1].some(y=>y > BASE_H - 10);
         return (s.points||[]).some(pt=>pt.y > BASE_H - 10 || pt.x > BASE_W - 10);
       });
       if(hasContentOutside && !confirm('Ya escribiste más allá del tamaño de una hoja A4. Si cambiás a A4, esa parte va a quedar oculta (no se borra). ¿Continuar?')) {
@@ -2426,6 +2574,8 @@
         ictx.setTransform(scale,0,0,scale,0,0);
       } else if(s.tool === 'text'){
         drawTextStroke(ictx, s);
+      } else if(s.tool === 'shape'){
+        drawShapeStroke(ictx, s);
       } else {
         const st = styleFor(s.tool);
         if(s.points.length < 2) dotTo(ictx, s, st);
@@ -2510,9 +2660,14 @@
     paperSelect.value = type;
   }
 
-  function applyCanvasResolution(){
+  // Escala física real que usa el canvas: dpr del dispositivo, con el margen
+  // extra de nitidez del zoom acotado por MAX_SCALE_MULTIPLIER (ver applyCanvasResolution).
+  function currentCanvasScale(){
     const dpr = Math.max(1, window.devicePixelRatio || 1);
-    const scale = dpr * canvasRenderZoom;
+    return Math.min(dpr * canvasRenderZoom, dpr * MAX_SCALE_MULTIPLIER);
+  }
+  function applyCanvasResolution(){
+    const scale = currentCanvasScale();
     canvas.width = baseCanvas.width = bufferCanvas.width = Math.round(PAGE_W * scale);
     canvas.height = baseCanvas.height = bufferCanvas.height = Math.round(PAGE_H * scale);
     ctx.setTransform(scale,0,0,scale,0,0);
@@ -2534,8 +2689,7 @@
     newW = Math.max(1, Math.round(newW));
     newH = Math.max(1, Math.round(newH));
     if(newW === PAGE_W && newH === PAGE_H) return;
-    const dpr = Math.max(1, window.devicePixelRatio || 1);
-    const scale = dpr * canvasRenderZoom;
+    const scale = currentCanvasScale();
     [canvas, baseCanvas, bufferCanvas].forEach(c=>{
       const tmp = document.createElement('canvas');
       tmp.width = c.width; tmp.height = c.height;
@@ -2687,6 +2841,12 @@
       openTextEditor();
       return;
     }
+    if(tool === 'mic'){
+      textInsertPt = pageCoordsFromClient(e.clientX, e.clientY);
+      openTextEditor();
+      startDictation();
+      return;
+    }
 
     drawing = true; redoStack = [];
     hideTidyUndoToast();
@@ -2700,6 +2860,14 @@
       lineSegmentTo(bufferCtx, currentStroke, SILHOUETTE_STYLE);
       restoreFromBase();
       overlayBuffer('underline');
+      return;
+    }
+
+    if(tool === 'shape'){
+      currentStroke = { tool:'shape', shapeType: currentShapeType, x0:pt.x, y0:pt.y, x1:pt.x, y1:pt.y, color: currentColor(), width: widths.shape };
+      strokes.push(currentStroke);
+      restoreFromBase();
+      drawShapeStroke(ctx, currentStroke);
       return;
     }
 
@@ -2772,6 +2940,14 @@
       return;
     }
 
+    if(currentStroke && currentStroke.tool === 'shape'){
+      currentStroke.x1 = pt.x;
+      currentStroke.y1 = pt.y;
+      restoreFromBase();
+      drawShapeStroke(ctx, currentStroke);
+      return;
+    }
+
     const pts = currentStroke.points;
     const last = pts[pts.length-1];
     if(Math.hypot(pt.x-last.x, pt.y-last.y) < 0.6/zoom) return;
@@ -2789,6 +2965,20 @@
 
   function finishStroke(){
     const t = currentStroke && currentStroke.tool;
+    if(t === 'shape'){
+      // Un toque sin arrastre no cuenta como forma: la descartamos para no
+      // dejar puntitos accidentales en la hoja.
+      const tooSmall = Math.hypot(currentStroke.x1-currentStroke.x0, currentStroke.y1-currentStroke.y0) < 4/zoom;
+      if(tooSmall){
+        strokes = strokes.filter(s=>s!==currentStroke);
+        restoreFromBase();
+      } else {
+        rawCopy(canvas, baseCtx);
+      }
+      drawing = false; currentStroke = null;
+      scheduleSave();
+      return;
+    }
     if(BUFFERED_TOOLS.has(t)){
       if(t === 'underline') strokes.push(currentStroke);
       // Se confirma el trazo (silueta ya construida) sobre la base UNA sola vez:
@@ -2835,6 +3025,8 @@
         rawCopy(bufferCanvas, baseCtx, {clear:false, alpha:styleFor(s.tool).alpha, composite:styleFor(s.tool).composite});
       } else if(s.tool === 'text'){
         drawTextStroke(baseCtx, s);
+      } else if(s.tool === 'shape'){
+        drawShapeStroke(baseCtx, s);
       } else {
         const st = styleFor(s.tool);
         if(s.points.length < 2) dotTo(baseCtx, s, st);
@@ -3354,10 +3546,76 @@
     setTimeout(()=> textInputArea.focus(), 30);
   }
   function closeTextEditor(){
+    stopDictation();
     textEditorBackdrop.classList.remove('open');
     textEditorPanel.classList.remove('open');
     pendingTidy = null;
   }
+
+  // ---------- Dictado por voz: convierte lo que decís al micrófono en texto ----------
+  const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognizer = null;
+  let recognizing = false;
+  let dictationBaseText = '';
+  if(!SpeechRecognitionCtor){
+    micToggleBtn.disabled = true;
+    micStatus.textContent = 'Tu navegador no soporta dictado por voz (probá con Chrome)';
+  }
+  function startDictation(){
+    if(!SpeechRecognitionCtor || recognizing) return;
+    recognizer = new SpeechRecognitionCtor();
+    recognizer.lang = (navigator.language && navigator.language.startsWith('es')) ? navigator.language : 'es-AR';
+    recognizer.continuous = true;
+    recognizer.interimResults = true;
+    // Guardamos lo que ya había en el cuadro de texto para no pisarlo: lo
+    // dictado se agrega a continuación, no lo reemplaza.
+    dictationBaseText = textInputArea.value ? textInputArea.value.replace(/\s+$/,'') + ' ' : '';
+    let finalTranscript = '';
+    recognizer.onresult = (e)=>{
+      let interim = '';
+      for(let i = e.resultIndex; i < e.results.length; i++){
+        const transcript = e.results[i][0].transcript;
+        if(e.results[i].isFinal) finalTranscript += transcript + ' ';
+        else interim += transcript;
+      }
+      textInputArea.value = dictationBaseText + finalTranscript + interim;
+    };
+    recognizer.onerror = (e)=>{
+      if(e.error === 'no-speech' || e.error === 'aborted') return;
+      micStatus.textContent = 'No se pudo escuchar el micrófono';
+      stopDictation();
+    };
+    recognizer.onend = ()=>{
+      // El navegador puede cortar el reconocimiento solo (por silencio largo,
+      // por ejemplo); si todavía queríamos estar escuchando, lo reiniciamos.
+      if(recognizing){
+        dictationBaseText = textInputArea.value ? textInputArea.value.replace(/\s+$/,'') + ' ' : '';
+        finalTranscript = '';
+        try{ recognizer.start(); }catch(err){ recognizing = false; updateMicUI(); }
+      }
+    };
+    try{
+      recognizer.start();
+      recognizing = true;
+      updateMicUI();
+    }catch(err){
+      recognizing = false;
+      updateMicUI();
+    }
+  }
+  function stopDictation(){
+    recognizing = false;
+    if(recognizer){ try{ recognizer.stop(); }catch(err){} }
+    updateMicUI();
+  }
+  function updateMicUI(){
+    micToggleBtn.classList.toggle('listening', recognizing);
+    micStatus.textContent = recognizing ? 'Escuchando… tocá para detener' : 'Tocá el micrófono para dictar';
+  }
+  micToggleBtn.addEventListener('click', ()=>{
+    if(recognizing) stopDictation(); else startDictation();
+  });
+
   async function confirmTextInsert(){
     const txt = textInputArea.value.replace(/\s+$/,'');
     const pt = textInsertPt;
@@ -3376,6 +3634,7 @@
     redoStack = [];
     redrawAll();
     scheduleSave();
+    learnVocabularyFromText(txt);
   }
   textInsertBtn.addEventListener('click', confirmTextInsert);
   textCancelBtn.addEventListener('click', closeTextEditor);
@@ -3502,6 +3761,84 @@
     return off;
   }
 
+  // ---------- Diccionario personal: el reconocimiento de letra "se acostumbra"
+  // a las palabras que cada usuario más escribe (nombres, materias, jerga propia),
+  // guardado en localStorage de este dispositivo. No reentrena el modelo de OCR
+  // (Tesseract corre offline en el navegador y no se puede reentrenar así),
+  // pero corrige el resultado hacia la palabra MÁS PARECIDA que el usuario ya
+  // escribió antes, cuando la diferencia es chica (probable error de OCR) y no
+  // la toca cuando no hay ninguna coincidencia cercana.
+  const OCR_DICT_KEY = 'ocr-personal-dict';
+  const OCR_DICT_MIN_ENTRIES = 15; // no corregimos hasta tener vocabulario suficiente
+  const OCR_DICT_MAX_ENTRIES = 900;
+  let personalDictCache = null;
+  async function loadPersonalDict(){
+    if(!personalDictCache) personalDictCache = (await storageGet(OCR_DICT_KEY)) || {};
+    return personalDictCache;
+  }
+  function levenshtein(a, b){
+    const m = a.length, n = b.length;
+    if(m === 0) return n;
+    if(n === 0) return m;
+    const dp = new Array(n+1);
+    for(let j=0;j<=n;j++) dp[j] = j;
+    for(let i=1;i<=m;i++){
+      let prev = dp[0]; dp[0] = i;
+      for(let j=1;j<=n;j++){
+        const tmp = dp[j];
+        dp[j] = a[i-1]===b[j-1] ? prev : 1 + Math.min(prev, dp[j], dp[j-1]);
+        prev = tmp;
+      }
+    }
+    return dp[n];
+  }
+  // Busca, dentro del vocabulario ya aprendido, la palabra más parecida a la
+  // que reconoció el OCR. Solo la usa como corrección si está lo bastante
+  // cerca (umbral chico) — si no hay nada parecido, deja el resultado tal cual.
+  function correctWordWithDictionary(dict, word){
+    if(!word) return word;
+    const lower = word.toLowerCase();
+    if(dict[lower]) return word; // ya es una palabra conocida, no la tocamos
+    let best = null, bestDist = Infinity, bestCount = 0;
+    for(const dw in dict){
+      if(Math.abs(dw.length - lower.length) > 2) continue;
+      const dist = levenshtein(lower, dw);
+      const threshold = lower.length <= 4 ? 1 : (lower.length <= 7 ? 2 : 3);
+      if(dist === 0 || dist > threshold) continue;
+      const count = dict[dw].count || 1;
+      if(dist < bestDist || (dist === bestDist && count > bestCount)){
+        best = dw; bestDist = dist; bestCount = count;
+      }
+    }
+    if(!best) return word;
+    return /^[A-ZÁÉÍÓÚÑ]/.test(word) ? best.charAt(0).toUpperCase() + best.slice(1) : best;
+  }
+  function correctTextBlock(dict, text){
+    return text.split('\n').map(line=>
+      line.split(' ').map(w => w ? correctWordWithDictionary(dict, w) : w).join(' ')
+    ).join('\n');
+  }
+  // Cada vez que el usuario confirma un texto (a mano, dictado u OCR ya
+  // corregido), aprendemos esas palabras para reconocer mejor la próxima vez.
+  async function learnVocabularyFromText(text){
+    try{
+      const dict = await loadPersonalDict();
+      const words = text.match(/[A-Za-zÀ-ÿ]{2,}/g) || [];
+      words.forEach(w=>{
+        const lower = w.toLowerCase();
+        dict[lower] = { count: (dict[lower] && dict[lower].count || 0) + 1 };
+      });
+      let entries = Object.entries(dict);
+      if(entries.length > OCR_DICT_MAX_ENTRIES){
+        entries.sort((a,b)=> (b[1].count||0) - (a[1].count||0));
+        personalDictCache = Object.fromEntries(entries.slice(0, 700));
+      } else {
+        personalDictCache = dict;
+      }
+      await storageSet(OCR_DICT_KEY, personalDictCache);
+    }catch(err){ /* aprender vocabulario es una mejora, nunca debe romper el guardado normal */ }
+  }
+
   async function tidyHandwriting(){
     closePopover();
     const penStrokes = strokes.filter(s=>s.tool==='pen' && s.points && s.points.length);
@@ -3520,6 +3857,8 @@
     try{
       await ensureTesseractLoaded();
       const worker = await getOcrWorker();
+      const personalDict = await loadPersonalDict();
+      const dictReady = Object.keys(personalDict).length >= OCR_DICT_MIN_ENTRIES;
 
       const boxes = strokeBBoxes(penStrokes);
       const heights = boxes.map(b=>b.h).filter(h=>h>1).sort((a,b)=>a-b);
@@ -3547,6 +3886,7 @@
             const { data } = await worker.recognize(img);
             text = ((data && data.text) || '').replace(/\s+/g, '').trim();
           }catch(err){ text = ''; }
+          if(dictReady && text) text = correctWordWithDictionary(personalDict, text);
           if(text) outWords.push(text);
         }
         if(outWords.length) outLines.push(outWords.join(' '));
@@ -3567,6 +3907,7 @@
         const { data } = await worker.recognize(img);
         recognized = ((data && data.text) || '')
           .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+        if(dictReady && recognized) recognized = correctTextBlock(personalDict, recognized);
       }
 
       if(!recognized){
