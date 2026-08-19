@@ -86,6 +86,16 @@
     display:flex;align-items:center;gap:7px;flex-shrink:0;
   }
   #addFolderBtn:hover{opacity:.9;}
+  #folderBreadcrumb{
+    display:none;align-items:center;flex-wrap:wrap;gap:5px;
+    padding:0 16px 6px;font-size:12.5px;color:var(--cream-dim);
+  }
+  #folderBreadcrumb.show{display:flex;}
+  #folderBreadcrumb .crumb{cursor:pointer;white-space:nowrap;}
+  #folderBreadcrumb .crumb:hover{color:var(--cream);text-decoration:underline;}
+  #folderBreadcrumb .crumb.current{color:var(--cream);font-weight:600;cursor:default;}
+  #folderBreadcrumb .crumb.current:hover{text-decoration:none;}
+  #folderBreadcrumb .crumbSep{opacity:.5;}
   #folderGrid{
     display:grid;grid-template-columns:repeat(auto-fill, minmax(140px,1fr));
     gap:14px;padding:14px 16px 24px;flex:1;align-content:start;
@@ -100,9 +110,20 @@
   .folderCard{
     background:transparent;border:none;border-radius:0;
     overflow:visible;cursor:pointer;display:flex;flex-direction:column;gap:8px;
-    transition:transform .1s ease;
+    transition:transform .1s ease;position:relative;
   }
   .folderCard:active{transform:scale(.97);}
+  .folderSubBtn{
+    position:absolute;top:6px;right:6px;width:26px;height:26px;border-radius:7px;
+    background:rgba(20,22,20,.55);backdrop-filter:blur(2px);border:1px solid rgba(255,255,255,.15);
+    color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;
+  }
+  .folderSubBtn svg{width:14px;height:14px;}
+  .folderSubBtn:hover{background:var(--pine);border-color:var(--pine);}
+  .folderSubCount{
+    position:absolute;bottom:-5px;right:-5px;background:var(--pine);color:#fff;
+    font-size:9px;font-weight:700;line-height:1;border-radius:8px;padding:2px 4px;min-width:12px;text-align:center;
+  }
   .folderThumb{
     aspect-ratio:3/4;background:var(--paper);position:relative;overflow:hidden;
     display:flex;align-items:center;justify-content:center;border-radius:8px;
@@ -189,6 +210,10 @@
     width:100%;background:var(--panel);border:1px solid var(--panel-edge);color:var(--cream);
     border-radius:8px;padding:10px 11px;font-family:'Inter',sans-serif;font-size:14px;
     -webkit-user-select:text;user-select:text;
+  }
+  #feParentSelect{
+    width:100%;background:var(--panel);border:1px solid var(--panel-edge);color:var(--cream);
+    border-radius:8px;padding:10px 11px;font-family:'Inter',sans-serif;font-size:14px;
   }
   #feNamePreviewWrap{display:flex;gap:14px;align-items:flex-start;margin-bottom:16px;}
   #fePreviewThumb{width:64px;flex-shrink:0;box-shadow:0 4px 12px rgba(0,0,0,.35);}
@@ -661,6 +686,13 @@
   }
   .pdfLibTag svg{width:14px;height:14px;}
   .pdfLibTag:hover{opacity:1;background:var(--panel-2);color:var(--cream);}
+  .pdfLibMove{
+    flex-shrink:0;width:28px;height:28px;border-radius:7px;display:flex;
+    align-items:center;justify-content:center;color:var(--cream-dim);
+    opacity:.7;transition:opacity .15s,background .15s,color .15s;
+  }
+  .pdfLibMove svg{width:14px;height:14px;}
+  .pdfLibMove:hover{opacity:1;background:var(--panel-2);color:var(--cream);}
 
   #pdfCatBackdrop{
     position:fixed;inset:0;background:rgba(0,0,0,0);pointer-events:none;
@@ -703,6 +735,41 @@
   }
   #pdfCatCancelBtn{background:var(--panel);color:var(--cream-dim);}
   #pdfCatSaveBtn{background:var(--pine);color:#fff;}
+
+  /* ---------- Modal: mover un PDF a otra carpeta de notas ---------- */
+  #pdfMoveBackdrop{
+    position:fixed;inset:0;background:rgba(0,0,0,0);pointer-events:none;
+    transition:background .15s ease;z-index:70;
+  }
+  #pdfMoveBackdrop.open{background:rgba(0,0,0,.55);pointer-events:auto;}
+  #pdfMoveModal{
+    position:fixed;left:50%;bottom:0;transform:translate(-50%,100%);
+    width:min(420px, 100vw);max-height:80vh;overflow-y:auto;-webkit-overflow-scrolling:touch;
+    background:var(--panel-2);border:1px solid var(--panel-edge);border-bottom:none;
+    border-radius:16px 16px 0 0;padding:18px 18px calc(18px + env(safe-area-inset-bottom));
+    z-index:71;transition:transform .2s ease;box-shadow:0 -10px 30px rgba(0,0,0,.45);
+  }
+  #pdfMoveModal.open{transform:translate(-50%,0);}
+  #pdfMoveModal h3{
+    margin:0 0 4px;font-family:'Source Serif 4',Georgia,serif;font-size:17px;
+    font-weight:600;color:var(--cream);
+  }
+  #pdfMoveModal .pdfLibraryHint{margin-bottom:14px;}
+  #pdfMoveList{display:flex;flex-direction:column;gap:6px;margin-bottom:16px;}
+  .pdfMoveItem{
+    display:flex;align-items:center;gap:10px;background:var(--panel);
+    border:1.5px solid var(--panel-edge);color:var(--cream);border-radius:10px;
+    padding:10px 12px;cursor:pointer;font-family:'Inter',sans-serif;font-size:13.5px;
+    font-weight:500;text-align:left;width:100%;
+  }
+  .pdfMoveItem.current{border-color:var(--pine);background:rgba(52,72,197,.18);color:#fff;font-weight:600;cursor:default;}
+  .pdfMoveItem .swatch{width:12px;height:12px;border-radius:50%;flex-shrink:0;}
+  #pdfMoveEmpty{font-size:12.5px;color:var(--cream-dim);padding:6px 2px 14px;}
+  #pdfMoveFooter{display:flex;gap:10px;}
+  #pdfMoveCancelBtn{
+    flex:1;padding:12px;border-radius:9px;border:none;font-family:'Inter',sans-serif;
+    font-weight:600;font-size:13.5px;cursor:pointer;background:var(--panel);color:var(--cream-dim);
+  }
 
 
   /* ---------- Editor de texto (herramienta Texto) ---------- */
@@ -885,6 +952,7 @@
         Carpeta
       </button>
     </div>
+    <div id="folderBreadcrumb"></div>
     <div id="folderEmpty">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
       <p>Todavía no tenés carpetas. Creá una para organizar tus apuntes por tema.</p>
@@ -906,6 +974,11 @@
     <div class="fe-row">
       <label class="field-label">Color</label>
       <div class="fe-swatchGrid" id="feColorSwatches"></div>
+    </div>
+
+    <div class="fe-row">
+      <label class="field-label">Ubicación</label>
+      <select id="feParentSelect"></select>
     </div>
 
     <div class="fe-row">
@@ -1133,6 +1206,16 @@
     <div id="pdfCatFooter">
       <button type="button" id="pdfCatCancelBtn">Cancelar</button>
       <button type="button" id="pdfCatSaveBtn">Guardar</button>
+    </div>
+  </div>
+
+  <div id="pdfMoveBackdrop"></div>
+  <div id="pdfMoveModal">
+    <h3>Mover PDF a otra carpeta</h3>
+    <p class="pdfLibraryHint">Elegí a qué carpeta de notas se pasa este PDF.</p>
+    <div id="pdfMoveList"></div>
+    <div id="pdfMoveFooter">
+      <button type="button" id="pdfMoveCancelBtn">Cancelar</button>
     </div>
   </div>
 
@@ -1626,6 +1709,12 @@
   };
 
   let folders = [], currentFolderId = null;
+  // currentGroupParentId: en qué nivel de la jerarquía de carpetas estamos
+  // parados en la pantalla de inicio. null = raíz. Es independiente de
+  // currentFolderId (que es el cuaderno que está abierto en el editor), así
+  // que al volver de un cuaderno con "atrás" se conserva el nivel donde
+  // estaba navegando (no salta siempre a la raíz).
+  let currentGroupParentId = null;
   let customInkColors = [], customMarkColors = [];
   let pages = [], currentPageId = null, strokes = [], redoStack = [];
   let tool = 'pen';
@@ -1655,6 +1744,7 @@
   const homeView = document.getElementById('homeView');
   const notebookView = document.getElementById('notebookView');
   const folderGrid = document.getElementById('folderGrid');
+  const folderBreadcrumbEl = document.getElementById('folderBreadcrumb');
   const folderEmpty = document.getElementById('folderEmpty');
   const addFolderBtn = document.getElementById('addFolderBtn');
   const backHomeBtn = document.getElementById('backHomeBtn');
@@ -1664,6 +1754,7 @@
   const fePreviewThumb = document.getElementById('fePreviewThumb');
   const feNameInput = document.getElementById('feNameInput');
   const feColorSwatches = document.getElementById('feColorSwatches');
+  const feParentSelect = document.getElementById('feParentSelect');
   const feSegmented = document.getElementById('feSegmented');
   const fePatternRow = document.getElementById('fePatternRow');
   const feStyleGrid = document.getElementById('feStyleGrid');
@@ -1829,6 +1920,7 @@
 
   const PDF_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
   const PDF_TRASH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>';
+  const PDF_MOVE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/><path d="M12 11v5"/><path d="M9.5 13.5L12 11l2.5 2.5"/></svg>';
 
   function pdfDateLabel(ts){
     if(!ts) return '';
@@ -1903,10 +1995,11 @@
             '<div class="pdfLibMeta">'+pdfDateLabel(m.addedAt)+'</div>'+
           '</div>'+
           '<button type="button" class="pdfLibTag" title="Cambiar categoría">'+PDF_TAG_SVG+'</button>'+
+          '<button type="button" class="pdfLibMove" title="Mover a otra carpeta">'+PDF_MOVE_SVG+'</button>'+
           '<button type="button" class="pdfLibDel" title="Eliminar este PDF">'+PDF_TRASH_SVG+'</button>';
         row.querySelector('.pdfLibName').textContent = m.name;
         row.addEventListener('click', async (e)=>{
-          if(e.target.closest('.pdfLibDel') || e.target.closest('.pdfLibTag')) return;
+          if(e.target.closest('.pdfLibDel') || e.target.closest('.pdfLibTag') || e.target.closest('.pdfLibMove')) return;
           openPdfPanel();
           await loadPdfById(m.id);
           await refreshPdfLibrary();
@@ -1915,6 +2008,10 @@
         row.querySelector('.pdfLibTag').addEventListener('click', (e)=>{
           e.stopPropagation();
           openPdfCategoryModal(m.id);
+        });
+        row.querySelector('.pdfLibMove').addEventListener('click', (e)=>{
+          e.stopPropagation();
+          openPdfMoveModal(m.id);
         });
         row.querySelector('.pdfLibDel').addEventListener('click', async (e)=>{
           e.stopPropagation();
@@ -2818,6 +2915,14 @@
     applyCanvasResolution();
     redrawAll();
   }
+  // Igual que updateCanvasResolutionIfNeeded, pero sin esperar el debounce:
+  // se usa en gestos DISCRETOS (soltar el pellizco, tocar +/-, doble tap)
+  // donde no hay más eventos en camino, así que no tiene sentido esperar
+  // 180ms + un frame para que la hoja se vea nítida — se hornea al toque.
+  function bakeCanvasResolutionNow(){
+    clearTimeout(resolutionUpdateTimer);
+    updateCanvasResolutionIfNeeded();
+  }
   function clamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
   // Margen proporcional: más aire en pantallas grandes, más aprovechamiento en celular.
   // En hojas infinitas no hay margen: la hoja debe ocupar TODO el visor,
@@ -2890,8 +2995,8 @@
     applyTransform();
     scheduleCanvasResolutionUpdate();
   }
-  zoomInBtn.addEventListener('click', ()=>{ const r=viewport.getBoundingClientRect(); zoomAround(r.left+r.width/2, r.top+r.height/2, zoom*1.25); });
-  zoomOutBtn.addEventListener('click', ()=>{ const r=viewport.getBoundingClientRect(); zoomAround(r.left+r.width/2, r.top+r.height/2, zoom*0.8); });
+  zoomInBtn.addEventListener('click', ()=>{ const r=viewport.getBoundingClientRect(); zoomAround(r.left+r.width/2, r.top+r.height/2, zoom*1.25); bakeCanvasResolutionNow(); });
+  zoomOutBtn.addEventListener('click', ()=>{ const r=viewport.getBoundingClientRect(); zoomAround(r.left+r.width/2, r.top+r.height/2, zoom*0.8); bakeCanvasResolutionNow(); });
   zoomFitBtn.addEventListener('click', ()=>{ fitToViewport(); closePopover(); });
 
   // ---------- Exportar a PDF ----------
@@ -3572,7 +3677,12 @@
 
   function endPointer(e){
     activePointers.delete(e.pointerId);
+    const wasPinching = !!pinch;
     if(activePointers.size < 2) pinch = null;
+    // Al soltar el segundo dedo del pellizco no quedan más eventos de zoom
+    // en camino: horneamos la resolución de una vez en vez de esperar el
+    // debounce, para que la hoja se vea nítida apenas se sueltan los dedos.
+    if(wasPinching && !pinch) bakeCanvasResolutionNow();
     if(activePointers.size === 0){
       if(drawing) finishStroke();
       if(panDrag){ panDrag = null; viewport.style.cursor = tool==='pan' ? 'grab' : 'crosshair'; }
@@ -3732,7 +3842,27 @@
     if(!f.coverStyle) f.coverStyle = 'lines';
     if(!f.coverIcon) f.coverIcon = FOLDER_ICONS[0];
     if(!f.coverImage) f.coverImage = null;
+    if(f.parentId === undefined) f.parentId = null; // null = carpeta en la raíz
     return f;
+  }
+  function folderChildren(parentId){
+    return folders.filter(f=> (f.parentId||null) === (parentId||null));
+  }
+  // Devuelve la cadena de carpetas ancestras desde la raíz hasta `id` (sin
+  // incluir `id`), para pintar las migas de pan.
+  function folderAncestors(id){
+    const chain = [];
+    let cur = id ? folders.find(f=>f.id===id) : null;
+    // ojo: arrancamos DESDE el padre de `id`, porque `id` mismo se pinta
+    // aparte (como última miga, no clickeable)
+    let guard = 0;
+    while(cur && cur.parentId && guard++ < 50){
+      const parent = folders.find(f=>f.id===cur.parentId);
+      if(!parent) break;
+      chain.unshift(parent);
+      cur = parent;
+    }
+    return chain;
   }
 
   // Pinta el aspecto (color de lomo + patrón/foto/miniatura) de una .folderThumb
@@ -3773,12 +3903,15 @@
   }
 
   async function renderHome(){
+    renderFolderBreadcrumb();
     folderGrid.innerHTML = '';
-    folderEmpty.classList.toggle('show', folders.length === 0);
-    for(const f of folders){
+    const list = folderChildren(currentGroupParentId);
+    folderEmpty.classList.toggle('show', list.length === 0);
+    for(const f of list){
       normalizeFolder(f);
       const pageList = await storageGet(pagesKey(f.id));
       const count = Array.isArray(pageList) ? pageList.length : 0;
+      const subCount = folderChildren(f.id).length;
       const thumb = await storageGet('folder-thumb:' + f.id);
 
       const card = document.createElement('div');
@@ -3806,13 +3939,27 @@
 
       info.appendChild(textWrap); info.appendChild(editBtn); info.appendChild(del);
       card.appendChild(thumbEl); card.appendChild(info);
+
+      // Botón para entrar a las subcarpetas de esta carpeta (no confundir con
+      // abrir el cuaderno: tocar el cuerpo de la tarjeta sigue abriendo las
+      // páginas/PDFs de esta carpeta como siempre). Siempre visible para que
+      // se pueda crear la primera subcarpeta desde cualquier carpeta.
+      const subBtn = document.createElement('button');
+      subBtn.type = 'button';
+      subBtn.className = 'folderSubBtn';
+      subBtn.title = 'Ver subcarpetas';
+      subBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>' +
+        (subCount ? '<span class="folderSubCount">'+subCount+'</span>' : '');
+      card.appendChild(subBtn);
+
       folderGrid.appendChild(card);
 
       card.addEventListener('click', (ev)=>{
         if(nameEl.contentEditable === 'true') return;
-        if(del.contains(ev.target) || editBtn.contains(ev.target)) return;
+        if(del.contains(ev.target) || editBtn.contains(ev.target) || subBtn.contains(ev.target)) return;
         openFolder(f.id);
       });
+      subBtn.addEventListener('click', (ev)=>{ ev.stopPropagation(); navigateToGroup(f.id); });
       del.addEventListener('click', (ev)=>{ ev.stopPropagation(); deleteFolder(f.id); });
       editBtn.addEventListener('click', (ev)=>{ ev.stopPropagation(); openFolderEditModal(f); });
       nameEl.addEventListener('dblclick', (ev)=>{
@@ -3830,15 +3977,51 @@
     }
   }
 
+  // ---------- Migas de pan de la jerarquía de carpetas ----------
+  function navigateToGroup(id){
+    currentGroupParentId = id;
+    renderHome();
+  }
+  function renderFolderBreadcrumb(){
+    if(!folderBreadcrumbEl) return;
+    folderBreadcrumbEl.innerHTML = '';
+    const chain = [...folderAncestors(currentGroupParentId)];
+    if(currentGroupParentId){
+      const cur = folders.find(f=>f.id===currentGroupParentId);
+      if(cur) chain.push(cur);
+    }
+    // Siempre mostramos "Inicio" como primera miga (raíz), clickeable salvo
+    // que ya estemos en la raíz.
+    const rootCrumb = document.createElement('span');
+    rootCrumb.className = 'crumb' + (chain.length ? '' : ' current');
+    rootCrumb.textContent = 'Inicio';
+    if(chain.length) rootCrumb.addEventListener('click', ()=> navigateToGroup(null));
+    folderBreadcrumbEl.appendChild(rootCrumb);
+    chain.forEach((f, i)=>{
+      const sep = document.createElement('span');
+      sep.className = 'crumbSep'; sep.textContent = '›';
+      folderBreadcrumbEl.appendChild(sep);
+      const crumb = document.createElement('span');
+      const isLast = i === chain.length - 1;
+      crumb.className = 'crumb' + (isLast ? ' current' : '');
+      crumb.textContent = f.name;
+      if(!isLast) crumb.addEventListener('click', ()=> navigateToGroup(f.id));
+      folderBreadcrumbEl.appendChild(crumb);
+    });
+    folderBreadcrumbEl.classList.toggle('show', chain.length > 0);
+  }
+
   async function addFolder(){
-    const n = folders.length + 1;
-    const folder = normalizeFolder({ id: folderUid(), name: 'Carpeta ' + n, createdAt: Date.now() });
+    const siblings = folderChildren(currentGroupParentId);
+    const n = siblings.length + 1;
+    const folder = normalizeFolder({ id: folderUid(), name: 'Carpeta ' + n, createdAt: Date.now(), parentId: currentGroupParentId });
     folders.push(folder);
     await saveFoldersIndex();
     const defaultPages = [{ id: uid(), name: 'Página 1', paperType: 'rayado' }];
     await storageSet(pagesKey(folder.id), defaultPages);
     await renderHome();
-    const card = [...folderGrid.children][folders.length-1];
+    const idx = folderChildren(currentGroupParentId).findIndex(f=>f.id===folder.id);
+    const card = idx >= 0 ? [...folderGrid.children][idx] : null;
     const nameEl = card && card.querySelector('.folderName');
     if(nameEl){
       nameEl.contentEditable = 'true'; nameEl.focus();
@@ -3961,6 +4144,7 @@
     feNameInput.value = feDraft.name;
     feRenderPreview();
     feRenderColorSwatches();
+    feRenderParentSelect();
     feRenderSegmented();
     feRenderStyleGrid();
     feRenderEmojiGrid();
@@ -3969,6 +4153,53 @@
     folderEditBackdrop.classList.add('open');
     folderEditModal.classList.add('open');
   }
+
+  // Todas las carpetas descendientes de `id` (para no poder "moverla adentro
+  // de sí misma" ni de una de sus propias subcarpetas, lo que crearía un
+  // ciclo imposible de navegar).
+  function folderDescendantIds(id){
+    const out = new Set();
+    const stack = [id];
+    while(stack.length){
+      const cur = stack.pop();
+      for(const f of folders){
+        if((f.parentId||null) === cur && !out.has(f.id)){
+          out.add(f.id);
+          stack.push(f.id);
+        }
+      }
+    }
+    return out;
+  }
+  function folderDepthLabel(f){
+    let depth = 0, cur = f, guard = 0;
+    while(cur && cur.parentId && guard++ < 50){
+      cur = folders.find(x=>x.id===cur.parentId);
+      depth++;
+    }
+    return '　'.repeat(depth) + f.name; // espacios anchos para indentar
+  }
+  function feRenderParentSelect(){
+    const excluded = folderDescendantIds(feFolder.id);
+    excluded.add(feFolder.id);
+    feParentSelect.innerHTML = '';
+    const rootOpt = document.createElement('option');
+    rootOpt.value = ''; rootOpt.textContent = 'Inicio (raíz)';
+    feParentSelect.appendChild(rootOpt);
+    folders
+      .filter(f=> !excluded.has(f.id))
+      .sort((a,b)=> a.name.localeCompare(b.name, 'es'))
+      .forEach(f=>{
+        const opt = document.createElement('option');
+        opt.value = f.id;
+        opt.textContent = folderDepthLabel(f);
+        feParentSelect.appendChild(opt);
+      });
+    feParentSelect.value = feDraft.parentId || '';
+  }
+  feParentSelect.addEventListener('change', ()=>{
+    feDraft.parentId = feParentSelect.value || null;
+  });
 
   function closeFolderEditModal(){
     folderEditBackdrop.classList.remove('open');
@@ -4014,6 +4245,7 @@
     const newName = (feDraft.name || '').trim() || 'Sin título';
     feFolder.name = newName;
     feFolder.color = feDraft.color;
+    feFolder.parentId = feDraft.parentId || null;
     feFolder.coverMode = feDraft.coverMode;
     feFolder.coverStyle = feDraft.coverStyle;
     feFolder.coverIcon = feDraft.coverIcon;
@@ -4024,6 +4256,10 @@
   });
 
   async function deleteFolder(id){
+    if(folderChildren(id).length){
+      alert('Esta carpeta tiene subcarpetas adentro. Borrá o movés esas subcarpetas primero.');
+      return;
+    }
     if(!confirm('¿Eliminar esta carpeta y todas sus páginas? Esta acción no se puede deshacer.')) return;
     const pageList = await storageGet(pagesKey(id));
     if(Array.isArray(pageList)){
