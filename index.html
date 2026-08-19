@@ -810,6 +810,37 @@
     button.action{padding:10px;font-size:14px;}
     .zoomrow button.zoombtn{width:32px;height:32px;font-size:16px;}
   }
+
+  /* ---------- Reconocimiento de escritura estilo Nebo ---------- */
+  /* Barra fija arriba del área de escritura (no flota pegada a la palabra):
+     igual que en Nebo, siempre aparece en el mismo lugar mientras escribís,
+     así no hay que buscarla con la vista cada vez. */
+  #liveRecognition{
+    position:absolute;top:calc(10px + env(safe-area-inset-top));left:50%;
+    transform:translateX(-50%);
+    z-index:18;display:none;align-items:center;gap:8px;
+    max-width:min(92vw,420px);padding:7px 9px;
+    background:rgba(255,255,255,.98);color:#1b1d24;
+    border:1px solid rgba(52,72,197,.28);border-radius:11px;
+    box-shadow:0 8px 28px rgba(0,0,0,.24);pointer-events:auto;
+    user-select:none;-webkit-user-select:none;backdrop-filter:blur(8px);
+  }
+  #liveRecognition.show{display:flex;animation:liveRecIn .13s ease-out}
+  @keyframes liveRecIn{from{opacity:0;transform:translateX(-50%) translateY(-6px) scale(.97)}to{opacity:1;transform:translateX(-50%) none}}
+  #liveRecognition .liveRecWord{font-family:'Inter',sans-serif;font-size:18px;font-weight:600;line-height:1;min-width:22px;color:#232529;white-space:nowrap;cursor:pointer}
+  #liveRecognition .liveRecWord.f-cursiva{font-family:'Caveat',cursive;font-size:27px;font-weight:600}
+  #liveRecognition .liveRecWord.f-impMin{font-family:'Patrick Hand',sans-serif;font-size:22px}
+  #liveRecognition .liveRecWord.f-impMay{font-family:'Shadows Into Light',cursive;font-size:22px;text-transform:uppercase}
+  #liveRecognition .liveRecWord.f-impLow{font-family:'Patrick Hand',sans-serif;font-size:22px;text-transform:lowercase}
+  #liveRecognition .liveRecMeta{font-size:10px;color:#777b87;white-space:nowrap}
+  #liveRecognition .liveRecActions{display:flex;align-items:center;gap:5px;margin-left:auto}
+  #liveRecognition button{border:0;border-radius:7px;padding:7px 9px;font-family:'Inter',sans-serif;font-size:11px;font-weight:700;cursor:pointer}
+  #liveRecConvert{background:var(--pine);color:#fff}
+  #liveRecDismiss{background:#eef0f5;color:#555a66;font-size:15px;padding:5px 8px}
+  #liveRecognition .liveRecDot{width:7px;height:7px;border-radius:50%;background:var(--pine);flex-shrink:0;animation:liveRecPulse 1.1s ease-in-out infinite}
+  @keyframes liveRecPulse{0%,100%{opacity:1}50%{opacity:.35}}
+  @media(max-width:600px){#liveRecognition{max-width:calc(100vw - 24px);padding:8px 9px}}
+
 </style>
 </head>
 <body>
@@ -987,8 +1018,9 @@
           <label class="field-label">Estilo de lápiz</label>
           <select id="penStyleSelect">
             <option value="estandar">Estándar</option>
+            <option value="boligrafo">Bolígrafo</option>
             <option value="fina">Fina</option>
-            <option value="estilografica">Estilográfica</option>
+            <option value="estilografica">Estilográfica (lapicera)</option>
             <option value="marcador">Marcador seco</option>
             <option value="grafito">Lápiz grafito</option>
             <option value="pincel">Pincel</option>
@@ -1137,6 +1169,15 @@
     <div id="pdfSelCopiedHint">Copiado</div>
     <div id="pdfResizeHandle"></div>
     <div id="viewport">
+      <div id="liveRecognition" aria-live="polite">
+        <span class="liveRecDot"></span>
+        <span id="liveRecWord" class="liveRecWord f-impMin">—</span>
+        <span id="liveRecMeta" class="liveRecMeta">Reconocido</span>
+        <div class="liveRecActions">
+          <button type="button" id="liveRecConvert">Convertir</button>
+          <button type="button" id="liveRecDismiss" title="Cerrar">×</button>
+        </div>
+      </div>
       <div id="stage">
         <div id="pageEl" class="paper-rayado">
           <canvas id="board"></canvas>
@@ -1220,22 +1261,39 @@
   const GROW_CHUNK = 900; // px que se agregan a una hoja infinita cuando se acerca al borde
   const GROW_MARGIN = 320; // distancia al borde inferior que dispara el crecimiento
   let PAGE_W = BASE_W, PAGE_H = BASE_H; // tamaño actual de la hoja abierta (varía en hojas infinitas)
-  const MIN_ZOOM = 0.2, MAX_ZOOM = 5;
+  const MIN_ZOOM = 0.1, MAX_ZOOM = 8;
   // La resolución física del canvas se recalcula al acercar el zoom (ver
   // updateCanvasResolutionIfNeeded), para que la tinta y la hoja se vean
   // nítidas y no pixeladas. La tapamos en este valor para no disparar el
   // consumo de memoria a resoluciones absurdas en zooms muy grandes.
-  const ZOOM_RENDER_CAP = 3;
+  // Igualado a MAX_ZOOM (8): toda la escala de zoom gana resolución real,
+  // incluso en el tramo más alto. Pide más memoria de video que dejarlo en
+  // 6, así que si en algún dispositivo de gama baja notás que se pone
+  // lento o el canvas se vacía al acercar mucho el zoom, es el primer
+  // valor para bajar.
+  const ZOOM_RENDER_CAP = 8;
+  // Límite de seguridad para el tamaño físico (en píxeles) de los canvas.
+  // No es una preferencia estética: superarlo puede hacer que Safari/iOS
+  // directamente vacíe el canvas (crash silencioso) en vez de mostrarlo borroso.
+  // 8192px de lado: nitidez casi total en pantallas de alta densidad,
+  // incluso con bastante zoom. Es un valor alto: en una hoja A4 completa
+  // esto puede significar ~550-600px de memoria de video entre los 3
+  // canvas (visible + base + buffer). Anda bien en celulares de gama media
+  // para arriba; si en algún dispositivo viejo/gama baja ves que la app
+  // se pone lenta al hacer zoom o el canvas se "vacía" de golpe (típico
+  // síntoma de quedarse sin memoria de video), bajá este número.
+  const MAX_CANVAS_DIMENSION = 8192;
   // Cuánta resolución EXTRA (relativa al dpr del dispositivo) le dejamos ganar
   // al canvas al acercar el zoom. 1.6 = hasta un 60% más nítido, sin disparar
   // la memoria/CPU en dispositivos con dpr ya alto (celulares).
-  const MAX_SCALE_MULTIPLIER = 1.6;
+
 
   // ---- Estilos de lápiz: cada uno define cómo varía el grosor con la presión y su opacidad ----
   const PEN_STYLES = {
     estandar:      { name:'Estándar',        widthFn:(w,p)=> w*(0.4+p),          alpha:1 },
+    boligrafo:     { name:'Bolígrafo',        widthFn:(w,p)=> w*(0.62+p*0.3),     alpha:1 },
     fina:          { name:'Fina',            widthFn:(w,p)=> w*0.55*(0.5+p*0.6), alpha:1 },
-    estilografica: { name:'Estilográfica',   widthFn:(w,p)=> w*(0.3+p*1.1),      alpha:1 },
+    estilografica: { name:'Estilográfica (lapicera)', widthFn:(w,p)=> w*(0.3+p*1.1), alpha:1 },
     marcador:      { name:'Marcador seco',   widthFn:(w,p)=> w*1.9*(0.78+p*0.22),alpha:0.82 },
     grafito:       { name:'Lápiz grafito',   widthFn:(w,p)=> w*(0.5+p*0.55),     alpha:0.92, grain:true },
     pincel:        { name:'Pincel',          widthFn:(w,p)=> w*(0.25+p*1.4),     alpha:0.95 },
@@ -1507,6 +1565,10 @@
   let textInsertPt = null, textStyle = 'cursiva';
   let pendingTidy = null; // strokes a mano que se reemplazan al confirmar el texto reconocido por OCR
 
+  // Reconocimiento en vivo de la última palabra escrita.
+  let liveRecTimer = null, liveRecSeq = 0, liveRecCandidate = null;
+  let liveRecStyle = 'impMin';
+
   let drawing = false, currentStroke = null, saveTimer = null;
   let zoom = 1, panX = 0, panY = 0;
   let activePointers = new Map(), pinch = null, panDrag = null, hasInteracted = false;
@@ -1583,6 +1645,11 @@
   const tidyUndoToast = document.getElementById('tidyUndoToast');
   const tidyUndoBtn = document.getElementById('tidyUndoBtn');
   const tidyUndoDismissBtn = document.getElementById('tidyUndoDismissBtn');
+  const liveRecognition = document.getElementById('liveRecognition');
+  const liveRecWord = document.getElementById('liveRecWord');
+  const liveRecMeta = document.getElementById('liveRecMeta');
+  const liveRecConvert = document.getElementById('liveRecConvert');
+  const liveRecDismiss = document.getElementById('liveRecDismiss');
   const undoBtn = document.getElementById('undoBtn');
   const clearBtn = document.getElementById('clearBtn');
   const statusEl = document.getElementById('status');
@@ -2470,6 +2537,7 @@
     panX = cx-rect.left - pagePt.x*zoom;
     panY = cy-rect.top - pagePt.y*zoom;
     applyTransform();
+    scheduleCanvasResolutionUpdate();
   }
   zoomInBtn.addEventListener('click', ()=>{ const r=viewport.getBoundingClientRect(); zoomAround(r.left+r.width/2, r.top+r.height/2, zoom*1.25); });
   zoomOutBtn.addEventListener('click', ()=>{ const r=viewport.getBoundingClientRect(); zoomAround(r.left+r.width/2, r.top+r.height/2, zoom*0.8); });
@@ -2661,10 +2729,17 @@
   }
 
   // Escala física real que usa el canvas: dpr del dispositivo, con el margen
-  // extra de nitidez del zoom acotado por MAX_SCALE_MULTIPLIER (ver applyCanvasResolution).
+  // extra de nitidez del zoom acotado por MAX_CANVAS_DIMENSION (ver applyCanvasResolution).
   function currentCanvasScale(){
     const dpr = Math.max(1, window.devicePixelRatio || 1);
-    return Math.min(dpr * canvasRenderZoom, dpr * MAX_SCALE_MULTIPLIER);
+    const desiredScale = dpr * canvasRenderZoom;
+    // No dejamos que el canvas crezca más allá de lo que el tamaño real de la
+    // hoja permite dentro de MAX_CANVAS_DIMENSION. Así, en vez de un tope fijo
+    // que recorta la nitidez del mismo modo en cualquier hoja, el tope se
+    // adapta: hojas chicas pueden llegar a más resolución real antes de topar
+    // el límite de seguridad del canvas.
+    const maxSafeScale = Math.max(1, Math.min(MAX_CANVAS_DIMENSION / PAGE_W, MAX_CANVAS_DIMENSION / PAGE_H));
+    return Math.min(desiredScale, maxSafeScale);
   }
   function applyCanvasResolution(){
     const scale = currentCanvasScale();
@@ -2815,6 +2890,7 @@
   }
 
   viewport.addEventListener('pointerdown', (e)=>{
+    if(e.target.closest('#liveRecognition')) return;
     hasInteracted = true;
     activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
     try{ viewport.setPointerCapture(e.pointerId); }catch(err){}
@@ -2849,6 +2925,7 @@
     }
 
     drawing = true; redoStack = [];
+    hideLiveRecognition();
     hideTidyUndoToast();
     const pt = pageCoordsFromClient(e.clientX, e.clientY);
     pt.p = e.pressure && e.pressure > 0 ? e.pressure : 0.5;
@@ -2900,6 +2977,7 @@
       panY = newMid.y - rect.top - pagePt.y*newZoom;
       zoom = newZoom;
       applyTransform();
+      scheduleCanvasResolutionUpdate();
       pinch = { lastMid:newMid, lastDist:newDist };
       return;
     }
@@ -2915,17 +2993,35 @@
     const pt = pageCoordsFromClient(e.clientX, e.clientY);
     pt.p = e.pressure && e.pressure > 0 ? e.pressure : 0.5;
 
-    // "Emprolijar letra": filtra el temblor de la mano suavizando cada punto nuevo
-    // hacia el anterior, y alinea suavemente con el renglón en hojas rayadas.
-    if(tool === 'pen' && tidyMode && currentStroke && currentStroke.points.length){
-      const last = currentStroke.points[currentStroke.points.length-1];
-      pt.x = last.x*0.35 + pt.x*0.65;
-      pt.y = last.y*0.35 + pt.y*0.65;
-      const page = pages.find(p=>p.id===currentPageId);
-      if(page && page.paperType === 'rayado'){
-        const lineSpacing = 35, lineOffset = 34;
-        const nearestLine = Math.round((pt.y-lineOffset)/lineSpacing)*lineSpacing + lineOffset;
-        if(Math.abs(pt.y-nearestLine) < 9) pt.y = pt.y*0.75 + nearestLine*0.25;
+    // Firmeza del pulso: suaviza el punto nuevo contra los últimos puntos del
+    // trazo (promedio móvil), en vez de dibujar la posición cruda del dedo/lápiz.
+    // El peso del suavizado depende del GROSOR elegido:
+    //  - Lapicera fina: el temblor de la mano se nota mucho más a bajo grosor,
+    //    así que se suaviza más fuerte para que el trazo quede firme y parejo.
+    //  - Lapicera gruesa: el temblor se nota menos, pero igual se suma firmeza
+    //    (menos que en fina) para que las curvas no salgan onduladas.
+    // Con "Suavizar el trazo" (tidyMode) activo se aplica un suavizado extra
+    // y, en hojas rayadas, se alinea además al renglón más cercano.
+    if(tool === 'pen' && currentStroke && currentStroke.points.length){
+      const pts = currentStroke.points;
+      const last = pts[pts.length-1];
+      const prev = pts.length > 1 ? pts[pts.length-2] : last;
+      const w = currentStroke.width || widths.pen;
+      const t = clamp((w - 1) / 13, 0, 1); // 0 = muy fina, 1 = muy gruesa
+      // Peso del punto nuevo: más bajo = más suavizado/firme.
+      const baseNewWeight = tidyMode ? 0.42 : 0.58;
+      const newWeight = clamp(baseNewWeight - (1 - t) * 0.16, 0.24, 0.7);
+      const midWeight = (1 - newWeight) * 0.35;
+      const oldWeight = 1 - newWeight - midWeight;
+      pt.x = last.x*oldWeight + prev.x*midWeight + pt.x*newWeight;
+      pt.y = last.y*oldWeight + prev.y*midWeight + pt.y*newWeight;
+      if(tidyMode){
+        const page = pages.find(p=>p.id===currentPageId);
+        if(page && page.paperType === 'rayado'){
+          const lineSpacing = 35, lineOffset = 34;
+          const nearestLine = Math.round((pt.y-lineOffset)/lineSpacing)*lineSpacing + lineOffset;
+          if(Math.abs(pt.y-nearestLine) < 9) pt.y = pt.y*0.75 + nearestLine*0.25;
+        }
       }
     }
     growPageIfNeeded(pt);
@@ -2990,8 +3086,12 @@
     } else if(t) {
       rawCopy(canvas, baseCtx);
     }
+    const finishedStroke = currentStroke;
     drawing = false; currentStroke = null;
     scheduleSave();
+    if(t === 'pen' && finishedStroke && finishedStroke.points && finishedStroke.points.length){
+      scheduleLiveRecognition(finishedStroke);
+    }
   }
 
   function endPointer(e){
@@ -3546,6 +3646,7 @@
     setTimeout(()=> textInputArea.focus(), 30);
   }
   function closeTextEditor(){
+    hideLiveRecognition();
     stopDictation();
     textEditorBackdrop.classList.remove('open');
     textEditorPanel.classList.remove('open');
@@ -3838,6 +3939,84 @@
       await storageSet(OCR_DICT_KEY, personalDictCache);
     }catch(err){ /* aprender vocabulario es una mejora, nunca debe romper el guardado normal */ }
   }
+
+
+  // ---------- Escritura a texto en vivo ----------
+  function hideLiveRecognition(){
+    clearTimeout(liveRecTimer);
+    liveRecTimer=null; liveRecCandidate=null;
+    liveRecognition.classList.remove('show');
+  }
+  function liveCandidateWord(finishedStroke){
+    const penStrokes=strokes.filter(s=>s.tool==='pen'&&s.points&&s.points.length);
+    if(!penStrokes.length) return null;
+    const boxes=strokeBBoxes(penStrokes);
+    if(!boxes.some(b=>b.stroke===finishedStroke)) return null;
+    const heights=boxes.map(b=>b.h).filter(h=>h>1).sort((a,b)=>a-b);
+    const medianH=heights.length?heights[Math.floor(heights.length/2)]:30;
+    const lines=groupIntoLines(boxes,medianH);
+    const line=lines.find(l=>l.boxes.some(b=>b.stroke===finishedStroke));
+    if(!line) return null;
+    const words=groupLineIntoWords(line,medianH).sort((a,b)=>a.minX-b.minX);
+    const word=words.find(w=>w.boxes.some(b=>b.stroke===finishedStroke));
+    if(!word||word!==words[words.length-1]) return null;
+    return {word,medianH,strokeRefs:word.boxes.map(b=>b.stroke)};
+  }
+  // La barra vive fija arriba del área de escritura (ver CSS #liveRecognition),
+  // así que acá solo hace falta mostrarla; no se calcula posición según la
+  // palabra, para que no "salte" por la pantalla mientras escribís.
+  function positionLiveRecognition(candidate){
+    if(!candidate) return;
+    liveRecognition.classList.add('show');
+  }
+  async function recognizeLiveCandidate(finishedStroke,seq){
+    const candidate=liveCandidateWord(finishedStroke);
+    if(!candidate||seq!==liveRecSeq)return;
+    try{
+      await ensureTesseractLoaded();
+      if(seq!==liveRecSeq)return;
+      const worker=await getOcrWorker();
+      if(seq!==liveRecSeq)return;
+      const pad=Math.max(8,candidate.medianH*.35);
+      const minX=Math.max(0,candidate.word.minX-pad),minY=Math.max(0,candidate.word.minY-pad);
+      const maxX=Math.min(PAGE_W,candidate.word.maxX+pad),maxY=Math.min(PAGE_H,candidate.word.maxY+pad);
+      const img=renderStrokesToImage(candidate.word.boxes,minX,minY,Math.max(1,Math.ceil(maxX-minX)),Math.max(1,Math.ceil(maxY-minY)),3.2);
+      await worker.setParameters({tessedit_pageseg_mode:OCR_PSM_SINGLE_WORD});
+      const {data}=await worker.recognize(img);
+      let recognized=((data&&data.text)||'').replace(/\s+/g,'').trim();
+      if(!recognized||seq!==liveRecSeq)return;
+      const dict=await loadPersonalDict();
+      if(Object.keys(dict).length>=OCR_DICT_MIN_ENTRIES)recognized=correctWordWithDictionary(dict,recognized);
+      if(!recognized)return;
+      liveRecCandidate={text:recognized,strokes:candidate.strokeRefs,x:candidate.word.minX,y:candidate.word.minY,medianH:candidate.medianH};
+      liveRecWord.textContent=recognized;
+      liveRecWord.className='liveRecWord f-'+liveRecStyle;
+      liveRecMeta.textContent='Tocá Convertir';
+      positionLiveRecognition(candidate);
+    }catch(err){}
+  }
+  function scheduleLiveRecognition(finishedStroke){
+    clearTimeout(liveRecTimer); liveRecSeq++;
+    const seq=liveRecSeq;
+    liveRecTimer=setTimeout(()=>recognizeLiveCandidate(finishedStroke,seq),520);
+  }
+  function insertLiveRecognizedText(){
+    const c=liveRecCandidate;
+    if(!c||!c.text)return;
+    const toRemove=new Set(c.strokes||[]);
+    strokes=strokes.filter(s=>!toRemove.has(s));
+    const size=widths.text, y=c.y+Math.max(size,c.medianH);
+    growPageIfNeeded({x:c.x,y:y});
+    strokes.push({tool:'text',x:c.x,y:y,text:c.text,font:liveRecStyle,size:size,color:inkColor});
+    redoStack=[]; hideLiveRecognition(); redrawAll(); scheduleSave(); learnVocabularyFromText(c.text);
+  }
+  liveRecConvert.addEventListener('click',insertLiveRecognizedText);
+  liveRecDismiss.addEventListener('click',hideLiveRecognition);
+  liveRecWord.addEventListener('click',()=>{
+    const styles=['impMin','impMay','impLow','cursiva'];
+    liveRecStyle=styles[(styles.indexOf(liveRecStyle)+1)%styles.length];
+    liveRecWord.className='liveRecWord f-'+liveRecStyle;
+  });
 
   async function tidyHandwriting(){
     closePopover();
