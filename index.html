@@ -749,8 +749,25 @@
   #micUnsupportedHint{font-size:11px;color:var(--cream-dim);margin-top:6px;line-height:1.4;}
 
   /* ---------- Herramienta Formas (cuadros conceptuales) ---------- */
-  #shapeTypeGrp{display:none;}
   .shapeType svg{width:19px;height:19px;}
+
+  /* ---------- Menús flotantes que se desprenden de un botón (bolígrafo / formas) ---------- */
+  .floatDrop{
+    display:none;position:absolute;top:100%;left:0;margin-top:6px;
+    background:var(--panel-2);border:1px solid var(--panel-edge);border-radius:10px;
+    padding:6px;gap:6px;box-shadow:0 14px 34px rgba(0,0,0,.55);z-index:25;
+    max-width:calc(100vw - 20px);overflow-x:auto;
+  }
+  .floatDrop.open{display:flex;}
+  .floatDrop::-webkit-scrollbar{height:0;}
+  .penStyleOpt{
+    background:var(--panel);border:1px solid var(--panel-edge);color:var(--cream-dim);
+    border-radius:7px;padding:0 12px;height:30px;display:flex;align-items:center;
+    font-family:'Inter',sans-serif;font-size:12px;font-weight:600;white-space:nowrap;
+    cursor:pointer;flex-shrink:0;transition:background .15s,color .15s,border-color .15s;
+  }
+  .penStyleOpt:hover{color:var(--cream);}
+  .penStyleOpt.active{background:var(--pine);border-color:var(--pine);color:#fff;}
 
 
   /* ---------- Toast "Deshacer emprolijado" ---------- */
@@ -788,6 +805,7 @@
     .swatch{width:20px;height:20px;}
     input[type=range]{width:64px;}
     #kebabBtn{width:36px;height:36px;font-size:19px;}
+    .penStyleOpt{height:36px;padding:0 14px;font-size:13px;}
     #popover{top:calc(98px + env(safe-area-inset-top));right:calc(12px + env(safe-area-inset-right));width:260px;padding:16px;}
     #popover .row{margin-bottom:14px;}
     #popover select{padding:10px;font-size:14px;}
@@ -957,23 +975,6 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg>
       </button>
     </div>
-    <div class="grp" id="shapeTypeGrp">
-      <button type="button" class="tool shapeType active" data-shape="line" title="Línea">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="20" x2="20" y2="4"/></svg>
-      </button>
-      <button type="button" class="tool shapeType" data-shape="arrow" title="Flecha">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="20" x2="20" y2="4"/><polyline points="10 4 20 4 20 14"/></svg>
-      </button>
-      <button type="button" class="tool shapeType" data-shape="rect" title="Rectángulo">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="6" width="16" height="12" rx="1.5"/></svg>
-      </button>
-      <button type="button" class="tool shapeType" data-shape="oval" title="Óvalo / círculo">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="12" rx="9" ry="6.5"/></svg>
-      </button>
-      <button type="button" class="tool shapeType" data-shape="cloud" title="Nube">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17a4 4 0 01-.5-7.97A5 5 0 0116 8a4 4 0 011 7.87"/><path d="M7 17h10"/></svg>
-      </button>
-    </div>
     <div class="divider"></div>
     <button class="icon" id="undoBtn" title="Deshacer">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10h10a5 5 0 0 1 0 10h-2"/><polyline points="7 5 3 10 7 15"/></svg>
@@ -993,6 +994,25 @@
     <div class="divider"></div>
     <input type="range" id="widthRange" min="1" max="14" value="3" title="Grosor">
    </div>
+
+    <div class="floatDrop" id="shapeTypeGrp">
+      <button type="button" class="tool shapeType active" data-shape="line" title="Línea">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="20" x2="20" y2="4"/></svg>
+      </button>
+      <button type="button" class="tool shapeType" data-shape="arrow" title="Flecha">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="20" x2="20" y2="4"/><polyline points="10 4 20 4 20 14"/></svg>
+      </button>
+      <button type="button" class="tool shapeType" data-shape="rect" title="Rectángulo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="6" width="16" height="12" rx="1.5"/></svg>
+      </button>
+      <button type="button" class="tool shapeType" data-shape="oval" title="Óvalo / círculo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="12" rx="9" ry="6.5"/></svg>
+      </button>
+      <button type="button" class="tool shapeType" data-shape="cloud" title="Nube">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17a4 4 0 01-.5-7.97A5 5 0 0116 8a4 4 0 011 7.87"/><path d="M7 17h10"/></svg>
+      </button>
+    </div>
+    <div class="floatDrop" id="penStyleDrop"></div>
 
     <div id="kebabWrap">
       <button id="kebabBtn" title="Más opciones">⋮</button>
@@ -1273,16 +1293,41 @@
   // valor para bajar.
   const ZOOM_RENDER_CAP = 8;
   // Límite de seguridad para el tamaño físico (en píxeles) de los canvas.
-  // No es una preferencia estética: superarlo puede hacer que Safari/iOS
+  // No es una preferencia estética: superarlo puede hacer que el navegador
   // directamente vacíe el canvas (crash silencioso) en vez de mostrarlo borroso.
-  // 8192px de lado: nitidez casi total en pantallas de alta densidad,
-  // incluso con bastante zoom. Es un valor alto: en una hoja A4 completa
-  // esto puede significar ~550-600px de memoria de video entre los 3
-  // canvas (visible + base + buffer). Anda bien en celulares de gama media
-  // para arriba; si en algún dispositivo viejo/gama baja ves que la app
-  // se pone lenta al hacer zoom o el canvas se "vacía" de golpe (típico
-  // síntoma de quedarse sin memoria de video), bajá este número.
-  const MAX_CANVAS_DIMENSION = 8192;
+  // Antes era un valor fijo (8192) pensado para el peor caso (celulares
+  // viejos/gama baja), pero eso topaba la nitidez mucho antes de lo
+  // necesario en dispositivos más potentes (tablets, notebooks con pantalla
+  // de alta densidad como la Lenovo Tab M11): con dpr≈2 y zoom > ~230%
+  // sobre una hoja A4, ya se pedía más resolución de la que 8192 permitía,
+  // y ahí es donde la hoja y los trazos se ven granulados al acercar zoom.
+  //
+  // Para evitar eso sin volver a arriesgar el crash de memoria, probamos
+  // UNA vez al cargar (ver probeMaxCanvasDimension) cuál es el tamaño real
+  // que este dispositivo/navegador soporta, y usamos ese valor en vez de
+  // asumir siempre el peor caso. Si la prueba falla, cae a 8192 como antes.
+  function probeMaxCanvasDimension(){
+    // Muchos navegadores no tiran error con un canvas "demasiado grande":
+    // lo crean pero queda vacío (fallo silencioso). Por eso no alcanza con
+    // ver si getContext() funciona: dibujamos un píxel en la esquina más
+    // lejana y lo volvemos a leer para confirmar que el canvas realmente
+    // tiene esa resolución utilizable.
+    const candidates = [16384, 14000, 12000, 10000, 8192];
+    for(const size of candidates){
+      try{
+        const test = document.createElement('canvas');
+        test.width = size; test.height = size;
+        const tctx = test.getContext('2d');
+        if(!tctx) continue;
+        tctx.fillStyle = '#fff';
+        tctx.fillRect(size-1, size-1, 1, 1);
+        const data = tctx.getImageData(size-1, size-1, 1, 1).data;
+        if(data[0] === 255 && data[3] === 255) return size;
+      }catch(e){ /* probamos con el siguiente tamaño, más chico */ }
+    }
+    return 8192;
+  }
+  let MAX_CANVAS_DIMENSION = probeMaxCanvasDimension();
   // Cuánta resolución EXTRA (relativa al dpr del dispositivo) le dejamos ganar
   // al canvas al acercar el zoom. 1.6 = hasta un 60% más nítido, sin disparar
   // la memoria/CPU en dispositivos con dpr ya alto (celulares).
@@ -1618,8 +1663,10 @@
   const toolMicBtn = document.getElementById('toolMic');
   const toolEraserBtn = document.getElementById('toolEraser');
   const toolPanBtn = document.getElementById('toolPan');
+  const toolbarEl = document.getElementById('toolbar');
   const shapeTypeGrp = document.getElementById('shapeTypeGrp');
   const shapeTypeBtns = [...document.querySelectorAll('.shapeType')];
+  const penStyleDrop = document.getElementById('penStyleDrop');
   const micToggleBtn = document.getElementById('micToggleBtn');
   const micStatus = document.getElementById('micStatus');
   const swatchesEl = document.getElementById('swatches');
@@ -2256,6 +2303,7 @@
   }
   kebabBtn.addEventListener('click', (e)=>{
     e.stopPropagation();
+    closeAllDropdowns();
     const willOpen = !popover.classList.contains('open');
     popover.classList.toggle('open', willOpen);
     kebabBtn.classList.toggle('active', willOpen);
@@ -2334,22 +2382,83 @@
     const r = TOOL_RANGE[t];
     if(r){ widthRange.min=r.min; widthRange.max=r.max; widthRange.value=widths[t]; widthRange.style.visibility='visible'; }
     else { widthRange.style.visibility='hidden'; }
-    shapeTypeGrp.style.display = t==='shape' ? 'flex' : 'none';
     renderSwatches();
   }
-  toolPenBtn.addEventListener('click', ()=>setTool('pen'));
-  toolTextBtn.addEventListener('click', ()=>setTool('text'));
-  toolHighlighterBtn.addEventListener('click', ()=>setTool('highlighter'));
-  toolUnderlineBtn.addEventListener('click', ()=>setTool('underline'));
-  toolShapeBtn.addEventListener('click', ()=>setTool('shape'));
-  toolMicBtn.addEventListener('click', ()=>setTool('mic'));
-  toolEraserBtn.addEventListener('click', ()=>setTool('eraser'));
-  toolPanBtn.addEventListener('click', ()=>setTool('pan'));
+
+  // ---- Menús flotantes que se desprenden de un botón (bolígrafo / formas) ----
+  function closeAllDropdowns(){
+    shapeTypeGrp.classList.remove('open');
+    penStyleDrop.classList.remove('open');
+  }
+  function positionDropdown(dropEl, btnEl){
+    const toolbarRect = toolbarEl.getBoundingClientRect();
+    const btnRect = btnEl.getBoundingClientRect();
+    let left = btnRect.left - toolbarRect.left;
+    const maxLeft = Math.max(4, toolbarEl.clientWidth - dropEl.offsetWidth - 8);
+    left = Math.max(4, Math.min(left, maxLeft));
+    dropEl.style.left = left + 'px';
+  }
+  function openDropdown(dropEl, btnEl){
+    closeAllDropdowns();
+    dropEl.classList.add('open');
+    positionDropdown(dropEl, btnEl);
+  }
+  function toggleDropdown(dropEl, btnEl){
+    if(dropEl.classList.contains('open')){ closeAllDropdowns(); }
+    else { openDropdown(dropEl, btnEl); }
+  }
+  document.addEventListener('pointerdown', (e)=>{
+    if(!shapeTypeGrp.classList.contains('open') && !penStyleDrop.classList.contains('open')) return;
+    const withinShape = shapeTypeGrp.contains(e.target) || toolShapeBtn.contains(e.target);
+    const withinPen = penStyleDrop.contains(e.target) || toolPenBtn.contains(e.target);
+    if(!withinShape && !withinPen) closeAllDropdowns();
+  }, true);
+  document.getElementById('toolbarScroll').addEventListener('scroll', closeAllDropdowns);
+  window.addEventListener('resize', closeAllDropdowns);
+
+  function renderPenStyleDrop(){
+    penStyleDrop.innerHTML = '';
+    Object.keys(PEN_STYLES).forEach(key=>{
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'penStyleOpt' + (key===currentPenStyle ? ' active' : '');
+      b.textContent = PEN_STYLES[key].name;
+      b.dataset.penStyle = key;
+      b.addEventListener('click', ()=>{
+        currentPenStyle = key;
+        penStyleSelect.value = key;
+        [...penStyleDrop.children].forEach(x=>x.classList.toggle('active', x===b));
+        closeAllDropdowns();
+      });
+      penStyleDrop.appendChild(b);
+    });
+  }
+  renderPenStyleDrop();
+
+  toolPenBtn.addEventListener('click', ()=>{
+    const wasActive = tool==='pen';
+    setTool('pen');
+    if(wasActive) toggleDropdown(penStyleDrop, toolPenBtn);
+    else openDropdown(penStyleDrop, toolPenBtn);
+  });
+  toolTextBtn.addEventListener('click', ()=>{ closeAllDropdowns(); setTool('text'); });
+  toolHighlighterBtn.addEventListener('click', ()=>{ closeAllDropdowns(); setTool('highlighter'); });
+  toolUnderlineBtn.addEventListener('click', ()=>{ closeAllDropdowns(); setTool('underline'); });
+  toolShapeBtn.addEventListener('click', ()=>{
+    const wasActive = tool==='shape';
+    setTool('shape');
+    if(wasActive) toggleDropdown(shapeTypeGrp, toolShapeBtn);
+    else openDropdown(shapeTypeGrp, toolShapeBtn);
+  });
+  toolMicBtn.addEventListener('click', ()=>{ closeAllDropdowns(); setTool('mic'); });
+  toolEraserBtn.addEventListener('click', ()=>{ closeAllDropdowns(); setTool('eraser'); });
+  toolPanBtn.addEventListener('click', ()=>{ closeAllDropdowns(); setTool('pan'); });
 
   shapeTypeBtns.forEach(b=>{
     b.addEventListener('click', ()=>{
       currentShapeType = b.dataset.shape;
       shapeTypeBtns.forEach(x=>x.classList.toggle('active', x===b));
+      closeAllDropdowns();
     });
   });
 
@@ -2358,8 +2467,11 @@
     if(widths[tool] !== undefined) widths[tool] = v;
   });
 
-  penOnlyChk.addEventListener('change', ()=>{ penOnly = penOnlyChk.checked; });
-  penStyleSelect.addEventListener('change', ()=>{ currentPenStyle = penStyleSelect.value; });
+  penOnlyChk.addEventListener('change', async ()=>{ penOnly = penOnlyChk.checked; await storageSet('pen-only', penOnly); });
+  penStyleSelect.addEventListener('change', ()=>{
+    currentPenStyle = penStyleSelect.value;
+    [...penStyleDrop.children].forEach(x=>x.classList.toggle('active', x.dataset.penStyle===currentPenStyle));
+  });
   tidyModeChk.addEventListener('change', async ()=>{ tidyMode = tidyModeChk.checked; await storageSet('tidy-mode', tidyMode); });
 
   paperSelect.addEventListener('change', async ()=>{
@@ -2995,22 +3107,37 @@
 
     // Firmeza del pulso: suaviza el punto nuevo contra los últimos puntos del
     // trazo (promedio móvil), en vez de dibujar la posición cruda del dedo/lápiz.
-    // El peso del suavizado depende del GROSOR elegido:
-    //  - Lapicera fina: el temblor de la mano se nota mucho más a bajo grosor,
-    //    así que se suaviza más fuerte para que el trazo quede firme y parejo.
-    //  - Lapicera gruesa: el temblor se nota menos, pero igual se suma firmeza
-    //    (menos que en fina) para que las curvas no salgan onduladas.
-    // Con "Suavizar el trazo" (tidyMode) activo se aplica un suavizado extra
-    // y, en hojas rayadas, se alinea además al renglón más cercano.
+    // El suavizado ahora es ADAPTATIVO a la velocidad del gesto, además de al
+    // grosor elegido:
+    //  - Movimiento LENTO (mano quieta, apoyada): es justo ahí donde más se
+    //    nota el microtemblor, así que se suaviza fuerte para que la línea
+    //    salga firme en vez de "peluda".
+    //  - Movimiento RÁPIDO (trazo intencional, gesto de la letra): se suaviza
+    //    poco, para no sentirse pegajoso ni redondear las puntas y ángulos
+    //    propios de la letra.
+    //  - Lapicera fina: el temblor se nota más a bajo grosor, así que parte
+    //    de un piso de suavizado más alto que la gruesa.
+    // Con "Suavizar el trazo" (tidyMode) activo se suma firmeza extra y, en
+    // hojas rayadas, se alinea además al renglón más cercano.
     if(tool === 'pen' && currentStroke && currentStroke.points.length){
       const pts = currentStroke.points;
       const last = pts[pts.length-1];
       const prev = pts.length > 1 ? pts[pts.length-2] : last;
       const w = currentStroke.width || widths.pen;
       const t = clamp((w - 1) / 13, 0, 1); // 0 = muy fina, 1 = muy gruesa
-      // Peso del punto nuevo: más bajo = más suavizado/firme.
-      const baseNewWeight = tidyMode ? 0.42 : 0.58;
-      const newWeight = clamp(baseNewWeight - (1 - t) * 0.16, 0.24, 0.7);
+
+      // Velocidad del gesto: distancia entre la posición cruda y el último
+      // punto ya suavizado, normalizada a un rango típico de trazo a mano.
+      const rawDist = Math.hypot(pt.x-last.x, pt.y-last.y);
+      const speedT = clamp(rawDist / (16/zoom), 0, 1); // 0 = casi quieto, 1 = gesto rápido
+
+      // Peso del punto nuevo: más bajo = más suavizado/firme. Interpolamos
+      // entre un piso (quieto/tembloroso) y un techo (gesto rápido) según speedT.
+      const slowWeight = tidyMode ? 0.22 : 0.32;
+      const fastWeight = tidyMode ? 0.60 : 0.72;
+      const floor = clamp(slowWeight - (1 - t) * 0.08, 0.14, slowWeight);
+      const ceil = clamp(fastWeight - (1 - t) * 0.08, floor + 0.1, fastWeight);
+      const newWeight = floor + (ceil - floor) * speedT;
       const midWeight = (1 - newWeight) * 0.35;
       const oldWeight = 1 - newWeight - midWeight;
       pt.x = last.x*oldWeight + prev.x*midWeight + pt.x*newWeight;
@@ -3020,7 +3147,7 @@
         if(page && page.paperType === 'rayado'){
           const lineSpacing = 35, lineOffset = 34;
           const nearestLine = Math.round((pt.y-lineOffset)/lineSpacing)*lineSpacing + lineOffset;
-          if(Math.abs(pt.y-nearestLine) < 9) pt.y = pt.y*0.75 + nearestLine*0.25;
+          if(Math.abs(pt.y-nearestLine) < 10) pt.y = pt.y*0.7 + nearestLine*0.3;
         }
       }
     }
@@ -4225,6 +4352,8 @@
     if(Array.isArray(savedCustomMark)) customMarkColors = savedCustomMark;
     const savedTidy = await storageGet('tidy-mode');
     if(savedTidy === false){ tidyMode = false; tidyModeChk.checked = false; }
+    const savedPenOnly = await storageGet('pen-only');
+    if(savedPenOnly === true){ penOnly = true; penOnlyChk.checked = true; }
     // Migración: versiones previas guardaban un único cuaderno bajo 'pages-index'.
     const oldPages = await storageGet('pages-index');
     const savedFolders = await storageGet('folders-index');
