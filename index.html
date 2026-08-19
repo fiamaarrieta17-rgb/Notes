@@ -461,6 +461,17 @@
   .pdfMark.highlight{mix-blend-mode:multiply;}
   .pdfMark.underline{border-radius:0;}
 
+  /* ---------- Capa de dibujo libre (lápiz/marcador) sobre el PDF ---------- */
+  #pdfInkCanvas{position:absolute;inset:0;pointer-events:none;touch-action:none;}
+  #pdfInkCanvas.drawing{pointer-events:auto;cursor:crosshair;}
+  #pdfDrawToolbar{
+    display:flex;align-items:center;gap:6px;padding:6px 10px;
+    border-bottom:1px solid var(--panel-edge);flex-shrink:0;overflow-x:auto;
+  }
+  #pdfDrawToolbar .pdfSelDivider{width:1px;height:20px;background:var(--panel-edge);margin:0 1px;flex-shrink:0;}
+  #pdfDrawDots{display:flex;align-items:center;gap:5px;flex-shrink:0;}
+  #pdfDrawDots .pdfSelDot{width:16px;height:16px;}
+
   /* ---------- Barra flotante al seleccionar texto del PDF ---------- */
   #pdfSelToolbar{
     position:fixed;display:none;align-items:center;gap:6px;
@@ -1047,10 +1058,10 @@
           </select>
         </div>
         <div class="row">
-          <label class="chk-label"><input type="checkbox" id="tidyMode" checked> Suavizar el trazo al escribir</label>
+          <label class="chk-label"><input type="checkbox" id="tidyMode" checked autocomplete="off"> Suavizar el trazo al escribir</label>
         </div>
         <div class="row">
-          <label class="chk-label"><input type="checkbox" id="penOnly"> Ignorar dedos</label>
+          <label class="chk-label"><input type="checkbox" id="penOnly" autocomplete="off"> Ignorar dedos</label>
         </div>
         <div class="row">
           <button class="action" id="clearBtn">Vaciar página</button>
@@ -1141,11 +1152,28 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
+      <div id="pdfDrawToolbar">
+        <button type="button" class="tool active" id="pdfToolSelect" title="Seleccionar texto / mover">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/></svg>
+        </button>
+        <button type="button" class="tool" id="pdfToolPen" title="Lápiz (dibujar a mano libre, sirve sobre escaneos)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        </button>
+        <button type="button" class="tool" id="pdfToolMarker" title="Marcador (resaltado a mano libre)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l6-6 4 4-6 6-4-4z"/><path d="M2 22l4-4"/><path d="M14 9l4 4"/></svg>
+        </button>
+        <button type="button" class="tool" id="pdfToolEraser" title="Borrar trazos dibujados">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20H9l-6.5-6.5a2 2 0 010-2.83l8-8a2 2 0 012.83 0l6.5 6.5a2 2 0 010 2.83L13 20"/><path d="M6 15l6 6"/></svg>
+        </button>
+        <div class="pdfSelDivider"></div>
+        <div id="pdfDrawDots"></div>
+      </div>
       <div id="pdfCanvasWrap">
         <div id="pdfPageStack">
           <canvas id="pdfCanvas"></canvas>
           <div id="pdfTextLayer" class="textLayer"></div>
           <div id="pdfMarksLayer"></div>
+          <canvas id="pdfInkCanvas"></canvas>
         </div>
         <div id="pdfEmptyState">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
@@ -1617,6 +1645,12 @@
   let drawing = false, currentStroke = null, saveTimer = null;
   let zoom = 1, panX = 0, panY = 0;
   let activePointers = new Map(), pinch = null, panDrag = null, hasInteracted = false;
+  // Id del puntero (no-táctil) que está dibujando en este momento, si hay
+  // alguno. Se usa para el rechazo de palma real con "Ignorar dedos": mientras
+  // este puntero esté escribiendo, cualquier OTRO puntero táctil (la palma
+  // apoyada) se descarta por completo, en vez de contarse como un segundo
+  // dedo y disparar un pellizco/zoom accidental que corta el trazo.
+  let activeDrawPointerId = null;
 
   const homeView = document.getElementById('homeView');
   const notebookView = document.getElementById('notebookView');
@@ -1756,9 +1790,24 @@
   const pdfSelCopyBtn = document.getElementById('pdfSelCopyBtn');
   const pdfSelDotsEl = document.getElementById('pdfSelDots');
   const pdfSelCopiedHintEl = document.getElementById('pdfSelCopiedHint');
+  const pdfInkCanvasEl = document.getElementById('pdfInkCanvas');
+  const pdfDrawToolbarEl = document.getElementById('pdfDrawToolbar');
+  const pdfToolSelectBtn = document.getElementById('pdfToolSelect');
+  const pdfToolPenBtn = document.getElementById('pdfToolPen');
+  const pdfToolMarkerBtn = document.getElementById('pdfToolMarker');
+  const pdfToolEraserBtn = document.getElementById('pdfToolEraser');
+  const pdfDrawDotsEl = document.getElementById('pdfDrawDots');
 
   let currentPdfDoc = null, currentPdfMeta = null, currentPdfPageNum = 1, pdfZoom = 1, pdfRenderTask = null;
   let pdfTextLayerTask = null, currentPdfMarks = [], pdfMarkColor = MARK_COLORS[0].hex;
+  // ---- Estado del dibujo libre (lápiz/marcador) sobre el PDF ----
+  // Se guarda por marca (igual que resaltar/subrayar por selección) pero con
+  // type:'ink' y puntos en fracción del tamaño visible del PDF (xFrac/yFrac),
+  // para que sobrevivan a cambios de zoom/página igual que las otras marcas.
+  let pdfDrawTool = 'select'; // 'select' | 'pen' | 'marker' | 'eraser'
+  let pdfDrawColor = MARK_COLORS[8].hex; // rojo por defecto para el lápiz
+  let pdfDrawing = false, pdfCurrentStroke = null, pdfDrawPointerId = null;
+  const PDF_PEN_WIDTH = 3, PDF_MARKER_WIDTH = 16, PDF_ERASER_WIDTH = 18;
 
   pageEl.style.width = BASE_W + 'px';
   pageEl.style.height = BASE_H + 'px';
@@ -1772,6 +1821,7 @@
     pdfZoomLabelEl.textContent = '100%';
     if(pdfTextLayerEl) pdfTextLayerEl.innerHTML = '';
     if(pdfMarksLayerEl) pdfMarksLayerEl.innerHTML = '';
+    if(pdfInkCanvasEl){ const ic = pdfInkCanvasEl.getContext('2d'); ic.setTransform(1,0,0,1,0,0); ic.clearRect(0,0,pdfInkCanvasEl.width,pdfInkCanvasEl.height); }
     currentPdfMarks = [];
     hidePdfSelToolbar();
   }
@@ -2006,6 +2056,7 @@
     if(pdfTextLayerTask) pdfTextLayerTask = null;
 
     renderPdfMarksLayer();
+    renderPdfInkLayer();
   }
 
   // ---------- Subrayado/resaltado sobre el texto del PDF ----------
@@ -2050,6 +2101,165 @@
   }
 
   function hidePdfSelToolbar(){ pdfSelToolbarEl.classList.remove('show'); }
+
+  // ---------- Dibujo libre (lápiz/marcador) sobre el PDF ----------
+  // Esto complementa el resaltado por selección de texto de arriba: sirve
+  // tanto sobre PDFs con texto real como sobre escaneos/imágenes (donde no
+  // hay texto que seleccionar). Los trazos se guardan como una marca más
+  // (type:'ink') con los puntos en fracción del tamaño visible del PDF, así
+  // sobreviven a cambios de zoom o de tamaño de panel igual que el resto de
+  // las marcas.
+  function pdfInkStrokeFromMark(mark, w, h){
+    return {
+      tool: mark.tool,
+      color: mark.color,
+      width: mark.width,
+      penStyle: mark.penStyle,
+      points: mark.points.map(p=> ({ x:p.xFrac*w, y:p.yFrac*h, p:p.p })),
+    };
+  }
+  function renderPdfInkLayer(){
+    const w = pdfCanvasEl.clientWidth, h = pdfCanvasEl.clientHeight;
+    if(!w || !h) return;
+    const outputScale = window.devicePixelRatio || 1;
+    pdfInkCanvasEl.width = Math.max(1, Math.floor(w*outputScale));
+    pdfInkCanvasEl.height = Math.max(1, Math.floor(h*outputScale));
+    pdfInkCanvasEl.style.width = w + 'px';
+    pdfInkCanvasEl.style.height = h + 'px';
+    const ictx = pdfInkCanvasEl.getContext('2d');
+    ictx.setTransform(outputScale,0,0,outputScale,0,0);
+    ictx.clearRect(0,0,w,h);
+    if(!currentPdfMeta) return;
+    const strokesForPage = currentPdfMarks
+      .filter(m=> m.page===currentPdfPageNum && m.type==='ink' && m.points && m.points.length)
+      .sort((a,b)=> a.createdAt - b.createdAt);
+    for(const m of strokesForPage){
+      const stroke = pdfInkStrokeFromMark(m, w, h);
+      drawFreehandSmooth(ictx, stroke, styleFor(stroke.tool));
+    }
+  }
+
+  function setPdfDrawTool(tool){
+    pdfDrawTool = tool;
+    const map = { select:pdfToolSelectBtn, pen:pdfToolPenBtn, marker:pdfToolMarkerBtn, eraser:pdfToolEraserBtn };
+    Object.values(map).forEach(b=> b.classList.remove('active'));
+    map[tool].classList.add('active');
+    // Mientras se dibuja, la capa de tinta captura el puntero (para poder
+    // trazar); en modo "seleccionar" queda transparente a los eventos para
+    // no tapar la selección de texto ni el scroll/pellizco del panel.
+    pdfInkCanvasEl.classList.toggle('drawing', tool !== 'select');
+    if(tool !== 'select') hidePdfSelToolbar();
+  }
+  pdfToolSelectBtn.addEventListener('click', ()=> setPdfDrawTool('select'));
+  pdfToolPenBtn.addEventListener('click', ()=> setPdfDrawTool('pen'));
+  pdfToolMarkerBtn.addEventListener('click', ()=> setPdfDrawTool('marker'));
+  pdfToolEraserBtn.addEventListener('click', ()=> setPdfDrawTool('eraser'));
+
+  function renderPdfDrawDots(){
+    pdfDrawDotsEl.innerHTML = '';
+    MARK_COLORS.forEach(c=>{
+      const dot = document.createElement('div');
+      dot.className = 'pdfSelDot' + (c.hex.toLowerCase()===pdfDrawColor.toLowerCase() ? ' active' : '');
+      dot.style.background = c.hex;
+      dot.title = c.name;
+      dot.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        pdfDrawColor = c.hex;
+        pdfDrawDotsEl.querySelectorAll('.pdfSelDot').forEach(d=> d.classList.remove('active'));
+        dot.classList.add('active');
+      });
+      pdfDrawDotsEl.appendChild(dot);
+    });
+  }
+  renderPdfDrawDots();
+
+  function pdfDistToSegment(p, a, b){
+    const dx=b.x-a.x, dy=b.y-a.y;
+    const len2 = dx*dx + dy*dy;
+    if(len2 === 0) return Math.hypot(p.x-a.x, p.y-a.y);
+    let t = ((p.x-a.x)*dx + (p.y-a.y)*dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(p.x - (a.x+t*dx), p.y - (a.y+t*dy));
+  }
+  function pdfEraseAt(pt){
+    const w = pdfCanvasEl.clientWidth, h = pdfCanvasEl.clientHeight;
+    if(!w || !h) return;
+    const radius = PDF_ERASER_WIDTH/2;
+    const toRemove = [];
+    for(const m of currentPdfMarks){
+      if(m.page !== currentPdfPageNum || m.type !== 'ink' || !m.points || !m.points.length) continue;
+      const pts = m.points.map(p=> ({x:p.xFrac*w, y:p.yFrac*h}));
+      let hit = pts.length === 1 ? Math.hypot(pt.x-pts[0].x, pt.y-pts[0].y) <= radius : false;
+      for(let i=1; i<pts.length && !hit; i++){
+        if(pdfDistToSegment(pt, pts[i-1], pts[i]) <= radius) hit = true;
+      }
+      if(hit) toRemove.push(m);
+    }
+    if(!toRemove.length) return;
+    const ids = new Set(toRemove.map(m=>m.id));
+    currentPdfMarks = currentPdfMarks.filter(m=> !ids.has(m.id));
+    toRemove.forEach(m=> pdfMarkDelete(m.id).catch(()=>{}));
+    renderPdfInkLayer();
+  }
+
+  pdfInkCanvasEl.addEventListener('pointerdown', (e)=>{
+    if(pdfDrawTool === 'select' || !currentPdfMeta) return;
+    e.preventDefault();
+    try{ pdfInkCanvasEl.setPointerCapture(e.pointerId); }catch(err){}
+    pdfDrawPointerId = e.pointerId;
+    pdfDrawing = true;
+    const rect = pdfInkCanvasEl.getBoundingClientRect();
+    const pt = { x:e.clientX-rect.left, y:e.clientY-rect.top, p: e.pressure && e.pressure>0 ? e.pressure : 0.5 };
+    if(pdfDrawTool === 'eraser'){ pdfEraseAt(pt); return; }
+    const toolName = pdfDrawTool === 'marker' ? 'highlighter' : 'pen';
+    pdfCurrentStroke = {
+      tool: toolName, color: pdfDrawColor,
+      width: toolName === 'pen' ? PDF_PEN_WIDTH : PDF_MARKER_WIDTH,
+      penStyle: toolName === 'pen' ? 'estandar' : undefined,
+      points: [pt],
+    };
+    dotTo(pdfInkCanvasEl.getContext('2d'), pdfCurrentStroke, styleFor(toolName));
+  });
+  pdfInkCanvasEl.addEventListener('pointermove', (e)=>{
+    if(!pdfDrawing || e.pointerId !== pdfDrawPointerId) return;
+    const rect = pdfInkCanvasEl.getBoundingClientRect();
+    const pt = { x:e.clientX-rect.left, y:e.clientY-rect.top, p: e.pressure && e.pressure>0 ? e.pressure : 0.5 };
+    if(pdfDrawTool === 'eraser'){ pdfEraseAt(pt); return; }
+    if(!pdfCurrentStroke) return;
+    const pts = pdfCurrentStroke.points;
+    const last = pts[pts.length-1];
+    if(Math.hypot(pt.x-last.x, pt.y-last.y) < 0.8) return;
+    pts.push(pt);
+    drawFreehandIncrement(pdfInkCanvasEl.getContext('2d'), pdfCurrentStroke, styleFor(pdfCurrentStroke.tool));
+  });
+  function endPdfDraw(e){
+    if(!pdfDrawing || (e && e.pointerId !== pdfDrawPointerId)) return;
+    pdfDrawing = false;
+    pdfDrawPointerId = null;
+    if(pdfDrawTool === 'eraser'){ pdfCurrentStroke = null; return; }
+    const stroke = pdfCurrentStroke;
+    pdfCurrentStroke = null;
+    if(!stroke || !stroke.points.length) return;
+    if(stroke.points.length > 1) drawFreehandTail(pdfInkCanvasEl.getContext('2d'), stroke, styleFor(stroke.tool));
+    const w = pdfCanvasEl.clientWidth, h = pdfCanvasEl.clientHeight;
+    if(!w || !h || !currentPdfMeta) return;
+    const mark = {
+      id: 'mark_' + uid(),
+      pdfId: currentPdfMeta.id,
+      page: currentPdfPageNum,
+      type: 'ink',
+      tool: stroke.tool,
+      color: stroke.color,
+      width: stroke.width,
+      penStyle: stroke.penStyle,
+      points: stroke.points.map(p=> ({ xFrac:p.x/w, yFrac:p.y/h, p:p.p })),
+      createdAt: Date.now(),
+    };
+    currentPdfMarks.push(mark);
+    pdfMarkPut(mark).catch(()=>{ alert('No se pudo guardar el trazo.'); });
+  }
+  pdfInkCanvasEl.addEventListener('pointerup', endPdfDraw);
+  pdfInkCanvasEl.addEventListener('pointercancel', endPdfDraw);
 
   function renderPdfSelDots(){
     pdfSelDotsEl.innerHTML = '';
@@ -2450,7 +2660,19 @@
     if(wasActive) toggleDropdown(shapeTypeGrp, toolShapeBtn);
     else openDropdown(shapeTypeGrp, toolShapeBtn);
   });
-  toolMicBtn.addEventListener('click', ()=>{ closeAllDropdowns(); setTool('mic'); });
+  toolMicBtn.addEventListener('click', ()=>{
+    closeAllDropdowns();
+    setTool('mic');
+    // A diferencia del resto de las herramientas (lápiz, texto, forma), acá
+    // no tiene sentido obligar a un toque extra sobre la hoja para recién
+    // ahí arrancar: un botón de "dictar" se espera que escuche apenas se lo
+    // toca (como el micrófono del teclado), si no parece que "no hace nada".
+    // Insertamos el texto dictado en el centro de lo que se ve en pantalla.
+    const rect = viewport.getBoundingClientRect();
+    textInsertPt = pageCoordsFromClient(rect.left + rect.width/2, rect.top + rect.height/2);
+    openTextEditor();
+    startDictation();
+  });
   toolEraserBtn.addEventListener('click', ()=>{ closeAllDropdowns(); setTool('eraser'); });
   toolPanBtn.addEventListener('click', ()=>{ closeAllDropdowns(); setTool('pan'); });
 
@@ -2567,14 +2789,31 @@
     clearTimeout(resolutionUpdateTimer);
     // Debounce: mientras el usuario está pellizcando para hacer zoom no
     // recalculamos en cada frame (sería carísimo); esperamos a que se
-    // asiente el gesto.
-    resolutionUpdateTimer = setTimeout(updateCanvasResolutionIfNeeded, 120);
+    // asiente el gesto. Un poco más largo que antes para no disparar el
+    // recálculo pesado (redibujar toda la hoja) por pausas cortas dentro
+    // del mismo gesto de pellizco.
+    resolutionUpdateTimer = setTimeout(()=>{
+      // requestAnimationFrame: deja que el navegador termine de procesar el
+      // "soltar los dedos" (pointerup) y pinte ese frame antes de arrancar
+      // el trabajo pesado y síncrono de redibujar. Sin esto, el recálculo
+      // compite por el mismo frame que el gesto de soltar y se percibe como
+      // que la app se traba justo al terminar de hacer zoom.
+      requestAnimationFrame(updateCanvasResolutionIfNeeded);
+    }, 180);
   }
   function updateCanvasResolutionIfNeeded(){
     const desired = clamp(zoom, 1, ZOOM_RENDER_CAP);
     // Solo si el cambio es significativo: evita re-renderizar por variaciones
-    // mínimas de zoom.
-    if(Math.abs(desired - canvasRenderZoom) < 0.15) return;
+    // mínimas de zoom. OJO: este chequeo ya está detrás de un debounce de
+    // 180ms (ver scheduleCanvasResolutionUpdate), así que solo se evalúa UNA
+    // vez que el usuario terminó de pellizcar/soltar la rueda, no en cada
+    // frame del gesto. Por eso el umbral puede (y debe) ser chico: antes era
+    // 0.25, lo que dejaba el canvas hasta un 25% "borroso" (CSS-estirado)
+    // de forma PERMANENTE cada vez que el zoom se asentaba a menos de esa
+    // distancia de la última resolución horneada (p.ej. zoom quieto en 120%
+    // con el canvas todavía horneado a 100%). Con un umbral chico, la
+    // resolución física siempre queda prácticamente igualada al zoom visual.
+    if(Math.abs(desired - canvasRenderZoom) < 0.03) return;
     canvasRenderZoom = desired;
     applyCanvasResolution();
     redrawAll();
@@ -2744,8 +2983,7 @@
         tctx.clearRect(0,0,W,H);
         tctx.setTransform(scale,0,0,scale,0,0);
         if(s.tool === 'underline') lineSegmentTo(tctx, s, SILHOUETTE_STYLE);
-        else if(s.points.length < 2) dotTo(tctx, s, SILHOUETTE_STYLE);
-        else for(let i=1;i<s.points.length;i++) segmentTo(tctx, s, i-1, i, SILHOUETTE_STYLE);
+        else drawFreehandSmooth(tctx, s, SILHOUETTE_STYLE);
         ictx.setTransform(1,0,0,1,0,0);
         ictx.globalAlpha = styleFor(s.tool).alpha;
         ictx.globalCompositeOperation = styleFor(s.tool).composite;
@@ -2757,9 +2995,7 @@
       } else if(s.tool === 'shape'){
         drawShapeStroke(ictx, s);
       } else {
-        const st = styleFor(s.tool);
-        if(s.points.length < 2) dotTo(ictx, s, st);
-        else for(let i=1;i<s.points.length;i++) segmentTo(ictx, s, i-1, i, st);
+        drawFreehandSmooth(ictx, s, styleFor(s.tool));
       }
     }
 
@@ -2985,6 +3221,85 @@
     targetCtx.stroke();
     targetCtx.globalAlpha = 1; targetCtx.globalCompositeOperation = 'source-over';
   }
+  // ---------- Trazo suavizado tipo Nebo ----------
+  // El dibujado anterior unía los puntos crudos del puntero con líneas RECTAS
+  // (segmentTo), lo que se nota como "facetas" (ángulos) en vez de una curva
+  // continua — muy visible en curvas cerradas como la "A" o la "H". Nebo (y
+  // apps de escritura similares) suavizan el trazo dibujando una curva que
+  // pasa por los PUNTOS MEDIOS entre puntos consecutivos, usando cada punto
+  // real como "tirador" (control point) de una Bézier cuadrática. Esto da una
+  // curva C1-continua (sin quiebres de ángulo) sin perder la forma general
+  // de la letra, y el ancho sigue variando suavemente con la presión.
+  //
+  // drawFreehandIncrement: se llama en cada pointermove, dibuja SOLO el tramo
+  // recién completado (con 1 punto de "atraso" porque el segmento i necesita
+  // conocer el punto i+1 para curvar hacia él). Mantiene el trazo fluido en
+  // vivo sin tener que rehacer todo el trazo en cada evento.
+  // drawFreehandTail: al soltar, dibuja el último tramito pendiente (desde el
+  // último punto medio hasta la posición final real).
+  // drawFreehandSmooth: dibuja un trazo COMPLETO ya guardado (redrawAll,
+  // exportación, miniaturas) con el mismo criterio, para que se vea igual
+  // que en vivo.
+  function drawFreehandIncrement(targetCtx, stroke, style){
+    const pts = stroke.points;
+    const n = pts.length;
+    if(n < 2) return;
+    if(n === 2){ segmentTo(targetCtx, stroke, 0, 1, style); return; }
+    const i = n - 2; // punto que ya tiene vecino anterior Y siguiente
+    const p0 = pts[i-1], p1 = pts[i], p2 = pts[i+1];
+    const start = (i === 1) ? p0 : midpoint(p0, p1);
+    const end = midpoint(p1, p2);
+    targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, i);
+    targetCtx.globalCompositeOperation = style.composite;
+    targetCtx.strokeStyle = stroke.color;
+    targetCtx.lineWidth = widthForStroke(stroke, p1.p);
+    targetCtx.lineJoin = 'round'; targetCtx.lineCap = 'round';
+    targetCtx.beginPath();
+    targetCtx.moveTo(start.x, start.y);
+    targetCtx.quadraticCurveTo(p1.x, p1.y, end.x, end.y);
+    targetCtx.stroke();
+    targetCtx.globalAlpha = 1; targetCtx.globalCompositeOperation = 'source-over';
+  }
+  function drawFreehandTail(targetCtx, stroke, style){
+    const pts = stroke.points;
+    const n = pts.length;
+    if(n < 3) return; // con 2 puntos el segmento recto ya quedó completo
+    const prev = pts[n-2], last = pts[n-1];
+    const start = midpoint(prev, last);
+    targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, n-1);
+    targetCtx.globalCompositeOperation = style.composite;
+    targetCtx.strokeStyle = stroke.color;
+    targetCtx.lineWidth = widthForStroke(stroke, last.p);
+    targetCtx.lineJoin = 'round'; targetCtx.lineCap = 'round';
+    targetCtx.beginPath();
+    targetCtx.moveTo(start.x, start.y);
+    targetCtx.lineTo(last.x, last.y);
+    targetCtx.stroke();
+    targetCtx.globalAlpha = 1; targetCtx.globalCompositeOperation = 'source-over';
+  }
+  function drawFreehandSmooth(targetCtx, stroke, style){
+    const pts = stroke.points;
+    const n = pts.length;
+    if(n === 0) return;
+    if(n === 1){ dotTo(targetCtx, stroke, style); return; }
+    if(n === 2){ segmentTo(targetCtx, stroke, 0, 1, style); return; }
+    for(let i=1;i<n-1;i++){
+      const p0 = pts[i-1], p1 = pts[i], p2 = pts[i+1];
+      const start = (i === 1) ? p0 : midpoint(p0, p1);
+      const end = midpoint(p1, p2);
+      targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, i);
+      targetCtx.globalCompositeOperation = style.composite;
+      targetCtx.strokeStyle = stroke.color;
+      targetCtx.lineWidth = widthForStroke(stroke, p1.p);
+      targetCtx.lineJoin = 'round'; targetCtx.lineCap = 'round';
+      targetCtx.beginPath();
+      targetCtx.moveTo(start.x, start.y);
+      targetCtx.quadraticCurveTo(p1.x, p1.y, end.x, end.y);
+      targetCtx.stroke();
+    }
+    drawFreehandTail(targetCtx, stroke, style);
+    targetCtx.globalAlpha = 1; targetCtx.globalCompositeOperation = 'source-over';
+  }
   function lineSegmentTo(targetCtx, stroke, style){
     targetCtx.globalAlpha = style.alpha; targetCtx.globalCompositeOperation = style.composite;
     targetCtx.strokeStyle = stroke.color;
@@ -3004,6 +3319,18 @@
   viewport.addEventListener('pointerdown', (e)=>{
     if(e.target.closest('#liveRecognition')) return;
     hasInteracted = true;
+
+    // Rechazo de palma real: si "Ignorar dedos" está activo y ya hay un
+    // puntero (lápiz) escribiendo, cualquier OTRO puntero táctil que aparezca
+    // (la palma apoyada sobre la pantalla) se ignora del todo: no se agrega a
+    // activePointers, no se captura, no cuenta como segundo dedo. Sin esto,
+    // la palma sumaba un segundo puntero y el código de más abajo lo trataba
+    // como el arranque de un pellizco, cortando el trazo en curso — que es
+    // justo el "no ignora los dedos" que se estaba viendo.
+    if(penOnly && e.pointerType === 'touch' && activeDrawPointerId !== null && activeDrawPointerId !== e.pointerId){
+      return;
+    }
+
     activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
     try{ viewport.setPointerCapture(e.pointerId); }catch(err){}
 
@@ -3037,6 +3364,7 @@
     }
 
     drawing = true; redoStack = [];
+    activeDrawPointerId = e.pointerId;
     hideLiveRecognition();
     hideTidyUndoToast();
     const pt = pageCoordsFromClient(e.clientX, e.clientY);
@@ -3124,7 +3452,18 @@
       const last = pts[pts.length-1];
       const prev = pts.length > 1 ? pts[pts.length-2] : last;
       const w = currentStroke.width || widths.pen;
-      const t = clamp((w - 1) / 13, 0, 1); // 0 = muy fina, 1 = muy gruesa
+      // Antes 't' se calculaba a partir del ancho crudo del control (w), pero
+      // cada estilo de lapicera dibuja mucho más fino o más grueso que ese
+      // valor crudo (por ej. "Fina" multiplica el ancho por ~0.3-0.6). Un
+      // trazo fino tiembla más a la vista con el mismo pulso, así que hay que
+      // firmarlo más — pero el cálculo viejo ignoraba esa diferencia y trataba
+      // "Fina" y "Estilográfica" igual que "Bolígrafo" al mismo w. Ahora se usa
+      // el ancho EFECTIVO ya renderizado (con la fórmula propia de cada
+      // estilo, a una presión media de referencia) para que la firmeza se
+      // ajuste a lo que realmente se ve en la hoja.
+      const ps = PEN_STYLES[currentStroke.penStyle] || PEN_STYLES.estandar;
+      const effectiveW = ps.widthFn(w, 0.55);
+      const t = clamp((effectiveW - 1) / 13, 0, 1); // 0 = muy fina, 1 = muy gruesa
 
       // Velocidad del gesto: distancia entre la posición cruda y el último
       // punto ya suavizado, normalizada a un rango típico de trazo a mano.
@@ -3133,9 +3472,12 @@
 
       // Peso del punto nuevo: más bajo = más suavizado/firme. Interpolamos
       // entre un piso (quieto/tembloroso) y un techo (gesto rápido) según speedT.
-      const slowWeight = tidyMode ? 0.22 : 0.32;
+      // Piso general un poco más bajo que antes (más firmeza de base en todos
+      // los estilos), sin tocar el techo: los trazos rápidos siguen sintiéndose
+      // igual de sueltos, solo se afirma el micro-temblor de la mano quieta.
+      const slowWeight = tidyMode ? 0.20 : 0.28;
       const fastWeight = tidyMode ? 0.60 : 0.72;
-      const floor = clamp(slowWeight - (1 - t) * 0.08, 0.14, slowWeight);
+      const floor = clamp(slowWeight - (1 - t) * 0.10, 0.11, slowWeight);
       const ceil = clamp(fastWeight - (1 - t) * 0.08, floor + 0.1, fastWeight);
       const newWeight = floor + (ceil - floor) * speedT;
       const midWeight = (1 - newWeight) * 0.35;
@@ -3177,13 +3519,13 @@
     pts.push(pt);
 
     if(currentStroke.tool === 'highlighter'){
-      segmentTo(bufferCtx, currentStroke, pts.length-2, pts.length-1, SILHOUETTE_STYLE);
+      drawFreehandIncrement(bufferCtx, currentStroke, SILHOUETTE_STYLE);
       restoreFromBase();
       overlayBuffer('highlighter');
       return;
     }
 
-    segmentTo(ctx, currentStroke, pts.length-2, pts.length-1, styleFor(currentStroke.tool));
+    drawFreehandIncrement(ctx, currentStroke, styleFor(currentStroke.tool));
   });
 
   function finishStroke(){
@@ -3199,11 +3541,16 @@
         rawCopy(canvas, baseCtx);
       }
       drawing = false; currentStroke = null;
+      activeDrawPointerId = null;
       scheduleSave();
       return;
     }
     if(BUFFERED_TOOLS.has(t)){
       if(t === 'underline') strokes.push(currentStroke);
+      // El trazado en vivo (drawFreehandIncrement) queda un punto "atrasado"
+      // por diseño (necesita el siguiente punto para curvar); acá cerramos
+      // ese último tramito antes de confirmar la silueta sobre la base.
+      if(t === 'highlighter') drawFreehandTail(bufferCtx, currentStroke, SILHOUETTE_STYLE);
       // Se confirma el trazo (silueta ya construida) sobre la base UNA sola vez:
       // ahí es donde se aplica el oscurecido, así que solo se nota más fuerte
       // si este trazo se superpone con OTRO trazo ya confirmado.
@@ -3211,10 +3558,12 @@
       restoreFromBase();
       clearBuffer();
     } else if(t) {
+      drawFreehandTail(ctx, currentStroke, styleFor(t));
       rawCopy(canvas, baseCtx);
     }
     const finishedStroke = currentStroke;
     drawing = false; currentStroke = null;
+    activeDrawPointerId = null;
     scheduleSave();
     if(t === 'pen' && finishedStroke && finishedStroke.points && finishedStroke.points.length){
       scheduleLiveRecognition(finishedStroke);
@@ -3244,10 +3593,8 @@
         clearBuffer();
         if(s.tool === 'underline'){
           lineSegmentTo(bufferCtx, s, SILHOUETTE_STYLE);
-        } else if(s.points.length < 2){
-          dotTo(bufferCtx, s, SILHOUETTE_STYLE);
         } else {
-          for(let i=1;i<s.points.length;i++) segmentTo(bufferCtx, s, i-1, i, SILHOUETTE_STYLE);
+          drawFreehandSmooth(bufferCtx, s, SILHOUETTE_STYLE);
         }
         rawCopy(bufferCanvas, baseCtx, {clear:false, alpha:styleFor(s.tool).alpha, composite:styleFor(s.tool).composite});
       } else if(s.tool === 'text'){
@@ -3255,9 +3602,7 @@
       } else if(s.tool === 'shape'){
         drawShapeStroke(baseCtx, s);
       } else {
-        const st = styleFor(s.tool);
-        if(s.points.length < 2) dotTo(baseCtx, s, st);
-        else for(let i=1;i<s.points.length;i++) segmentTo(baseCtx, s, i-1, i, st);
+        drawFreehandSmooth(baseCtx, s, styleFor(s.tool));
       }
     }
     clearBuffer();
@@ -3810,7 +4155,7 @@
     };
     recognizer.onerror = (e)=>{
       if(e.error === 'no-speech' || e.error === 'aborted') return;
-      micStatus.textContent = 'No se pudo escuchar el micrófono';
+      micStatus.textContent = micErrorMessage(e.error);
       stopDictation();
     };
     recognizer.onend = ()=>{
@@ -3819,7 +4164,11 @@
       if(recognizing){
         dictationBaseText = textInputArea.value ? textInputArea.value.replace(/\s+$/,'') + ' ' : '';
         finalTranscript = '';
-        try{ recognizer.start(); }catch(err){ recognizing = false; updateMicUI(); }
+        try{ recognizer.start(); }catch(err){
+          recognizing = false;
+          micToggleBtn.classList.remove('listening');
+          micStatus.textContent = micErrorMessage();
+        }
       }
     };
     try{
@@ -3827,9 +4176,27 @@
       recognizing = true;
       updateMicUI();
     }catch(err){
+      // Antes esto revertía en silencio al mensaje por defecto ("Tocá el
+      // micrófono para dictar"), como si el toque no hubiese hecho nada. El
+      // motivo más común es que la página no está en un origen seguro
+      // (https, o instalada) — el reconocimiento de voz necesita eso para
+      // poder pedir permiso de micrófono.
       recognizing = false;
-      updateMicUI();
+      micToggleBtn.classList.remove('listening');
+      micStatus.textContent = micErrorMessage();
     }
+  }
+  function micErrorMessage(code){
+    if(!window.isSecureContext){
+      return 'El dictado necesita que la app esté abierta en una dirección https (o instalada) — no funciona así, desde un archivo/vista previa.';
+    }
+    if(code === 'not-allowed' || code === 'service-not-allowed'){
+      return 'No hay permiso de micrófono. Revisalo en el candado/ícono del sitio, arriba del navegador.';
+    }
+    if(code === 'audio-capture'){
+      return 'No se encontró un micrófono disponible en el dispositivo.';
+    }
+    return 'No se pudo activar el micrófono.';
   }
   function stopDictation(){
     recognizing = false;
@@ -3908,7 +4275,39 @@
     return ocrWorkerPromise;
   }
   const OCR_PSM_SINGLE_WORD = '8';
+  const OCR_PSM_SINGLE_LINE = '7';
   const OCR_PSM_AUTO = '3';
+
+  // Reconoce una imagen de UNA palabra con reintento por confianza: el modo
+  // "una sola palabra" (PSM 8) es el más preciso en general, pero a veces
+  // falla con letra cursiva/pegada porque el segmentador interno de Tesseract
+  // no encuentra un único "blob" de palabra. Si el resultado viene vacío o
+  // con confianza baja, reintentamos esa misma imagen en modo "una sola
+  // línea" (PSM 7), que es más permisivo con trazos unidos, y nos quedamos
+  // con el resultado de mayor confianza de los dos intentos.
+  const OCR_MIN_CONFIDENCE = 55;
+  async function recognizeWordImage(worker, img){
+    await worker.setParameters({ tessedit_pageseg_mode: OCR_PSM_SINGLE_WORD, user_defined_dpi: '300' });
+    let best = '', bestConf = -1;
+    try{
+      const { data } = await worker.recognize(img);
+      best = ((data && data.text) || '').replace(/\s+/g, '').trim();
+      bestConf = data && typeof data.confidence === 'number' ? data.confidence : (best ? 100 : -1);
+    }catch(err){ /* seguimos al reintento */ }
+
+    if(!best || bestConf < OCR_MIN_CONFIDENCE){
+      try{
+        await worker.setParameters({ tessedit_pageseg_mode: OCR_PSM_SINGLE_LINE, user_defined_dpi: '300' });
+        const { data } = await worker.recognize(img);
+        const retryText = ((data && data.text) || '').replace(/\s+/g, '').trim();
+        const retryConf = data && typeof data.confidence === 'number' ? data.confidence : (retryText ? 100 : -1);
+        if(retryText && (retryConf > bestConf || !best)){ best = retryText; bestConf = retryConf; }
+      }catch(err){ /* nos quedamos con lo que había, si algo */ }
+      // Dejamos el worker listo en modo palabra para la próxima llamada.
+      await worker.setParameters({ tessedit_pageseg_mode: OCR_PSM_SINGLE_WORD, user_defined_dpi: '300' });
+    }
+    return best;
+  }
 
   // Caja delimitadora de un trazo (con un poco de aire según el grosor real
   // dibujado), usada tanto para agrupar en renglones/palabras como para
@@ -3949,7 +4348,35 @@
   // siguiente; huecos chicos son solo espacio entre letras de una palabra.
   function groupLineIntoWords(line, medianH){
     const sorted = [...line.boxes].sort((a,b)=>a.minX-b.minX);
-    const wordGap = Math.max(12, medianH*0.65);
+    // Umbral de separación ADAPTATIVO: en vez de un número fijo para todo el
+    // mundo, miramos los huecos horizontales reales entre trazos de ESTE
+    // renglón. La mayoría de esos huecos son espacio entre letras de una
+    // misma palabra (chicos); el hueco entre palabras suele ser claramente
+    // mayor. Usamos la mediana de los huecos "chicos" como referencia de
+    // cuánto separa este usuario sus letras, y marcamos como palabra nueva
+    // todo hueco bastante más grande que eso. Esto ayuda tanto a letra muy
+    // apretada (el piso fijo la unía toda) como a letra muy suelta (el piso
+    // fijo la partía en pedazos).
+    const gaps = [];
+    for(let i=1;i<sorted.length;i++){
+      const g = sorted[i].minX - sorted[i-1].maxX;
+      if(g > -medianH) gaps.push(g); // ignoramos superposiciones grandes (trazos de una misma letra)
+    }
+    const fallbackGap = Math.max(12, medianH*0.65);
+    let wordGap = fallbackGap;
+    if(gaps.length >= 2){
+      const sortedGaps = [...gaps].sort((a,b)=>a-b);
+      // Mediana de la mitad inferior: aproxima el espaciado típico ENTRE
+      // letras, dejando afuera los huecos grandes (que sí son entre palabras).
+      const lowerHalf = sortedGaps.slice(0, Math.max(1, Math.ceil(sortedGaps.length/2)));
+      const letterGap = lowerHalf[Math.floor(lowerHalf.length/2)];
+      const adaptive = Math.max(letterGap*2.4, 8);
+      // Mezclamos con el piso fijo y lo acotamos a un rango razonable para
+      // que un caso raro (una sola letra en el renglón, huecos todos chicos
+      // o todos grandes) no dispare el umbral a algo absurdo.
+      wordGap = clamp(adaptive, medianH*0.35, medianH*1.5);
+      wordGap = Math.max(wordGap, 10);
+    }
     const words = [];
     let current = null;
     sorted.forEach(b=>{
@@ -3970,6 +4397,13 @@
   // mínimo para que la letra fina también se lea bien) sobre un canvas
   // aparte, recortado a su caja + margen.
   function renderStrokesToImage(boxes, minX, minY, w, h, scale){
+    // Resolución mínima: a una imagen chica (letra chica o palabra corta)
+    // Tesseract le cuesta mucho más, así que si el alto resultante quedaría
+    // por debajo de un piso razonable, subimos la escala para esa palabra en
+    // particular (con un techo para no generar canvases gigantes/lentos).
+    const MIN_PIXEL_H = 46, MAX_SCALE = 7;
+    if(h > 0 && h*scale < MIN_PIXEL_H) scale = Math.min(MAX_SCALE, MIN_PIXEL_H / h);
+
     const off = document.createElement('canvas');
     off.width = Math.max(1, Math.round(w*scale));
     off.height = Math.max(1, Math.round(h*scale));
@@ -3979,13 +4413,31 @@
     octx.scale(scale, scale);
     octx.translate(-minX, -minY);
     boxes.forEach(b=>{
-      // Forzamos color negro sólido, estilo "estándar" (sin veteado ni
-      // opacidad reducida de marcador/grafito) y un grosor mínimo, para que
-      // el reconocimiento tenga siempre el mejor contraste posible.
-      const forced = Object.assign({}, b.stroke, { color:'#000000', penStyle:'estandar', width: Math.max(b.stroke.width, 2.6) });
+      // Antes de "fotografiar" el trazo para el OCR lo suavizamos apenas
+      // (mismo promedio móvil que usa "Emprolijar letra"): el microtemblor
+      // de mano no aporta información a la forma de la letra y sí puede
+      // confundir al reconocedor, que interpreta mejor un trazo limpio que
+      // uno entrecortado. Además forzamos color negro sólido, estilo
+      // "estándar" (sin veteado ni opacidad reducida de marcador/grafito) y
+      // un grosor mínimo, para el mejor contraste posible.
+      const smoothedPoints = smoothStrokePoints(b.stroke.points);
+      const forced = Object.assign({}, b.stroke, { color:'#000000', penStyle:'estandar', width: Math.max(b.stroke.width, 2.8), points: smoothedPoints });
       if(forced.points.length < 2) dotTo(octx, forced, SILHOUETTE_STYLE);
       else for(let i=1;i<forced.points.length;i++) segmentTo(octx, forced, i-1, i, SILHOUETTE_STYLE);
     });
+
+    // Binarizamos a blanco y negro puro: el antialiasing del canvas deja
+    // píxeles grises en los bordes de cada trazo, y esos grises intermedios
+    // le hacen perder precisión a Tesseract (sobre todo en letra fina o a
+    // escalas altas). Un borde 100% nítido se reconoce mucho mejor.
+    octx.setTransform(1,0,0,1,0,0);
+    const imgData = octx.getImageData(0, 0, off.width, off.height);
+    const d = imgData.data;
+    for(let i=0;i<d.length;i+=4){
+      const v = d[i] < 200 ? 0 : 255; // dibujamos siempre en negro puro sobre blanco
+      d[i] = d[i+1] = d[i+2] = v;
+    }
+    octx.putImageData(imgData, 0, 0);
     return off;
   }
 
@@ -4104,14 +4556,13 @@
       if(seq!==liveRecSeq)return;
       const worker=await getOcrWorker();
       if(seq!==liveRecSeq)return;
-      const pad=Math.max(8,candidate.medianH*.35);
+      const pad=Math.max(12,candidate.medianH*.5);
       const minX=Math.max(0,candidate.word.minX-pad),minY=Math.max(0,candidate.word.minY-pad);
       const maxX=Math.min(PAGE_W,candidate.word.maxX+pad),maxY=Math.min(PAGE_H,candidate.word.maxY+pad);
-      const img=renderStrokesToImage(candidate.word.boxes,minX,minY,Math.max(1,Math.ceil(maxX-minX)),Math.max(1,Math.ceil(maxY-minY)),3.2);
-      await worker.setParameters({tessedit_pageseg_mode:OCR_PSM_SINGLE_WORD});
-      const {data}=await worker.recognize(img);
-      let recognized=((data&&data.text)||'').replace(/\s+/g,'').trim();
-      if(!recognized||seq!==liveRecSeq)return;
+      const img=renderStrokesToImage(candidate.word.boxes,minX,minY,Math.max(1,Math.ceil(maxX-minX)),Math.max(1,Math.ceil(maxY-minY)),3.5);
+      let recognized=await recognizeWordImage(worker, img);
+      if(seq!==liveRecSeq)return;
+      if(!recognized)return;
       const dict=await loadPersonalDict();
       if(Object.keys(dict).length>=OCR_DICT_MIN_ENTRIES)recognized=correctWordWithDictionary(dict,recognized);
       if(!recognized)return;
@@ -4169,10 +4620,11 @@
       const boxes = strokeBBoxes(penStrokes);
       const heights = boxes.map(b=>b.h).filter(h=>h>1).sort((a,b)=>a-b);
       const medianH = heights.length ? heights[Math.floor(heights.length/2)] : 30;
-      const pad = Math.max(10, medianH*0.4);
-      const scale = 3;
-
-      await worker.setParameters({ tessedit_pageseg_mode: OCR_PSM_SINGLE_WORD });
+      // Margen generoso alrededor de cada palabra: si el recorte queda justo,
+      // se comen tildes, la cola de la "g/j/y" o el palo de la "l/d", y eso
+      // le hace perder letras al reconocedor.
+      const pad = Math.max(14, medianH*0.55);
+      const scale = 3.5;
 
       const lines = groupIntoLines(boxes, medianH)
         .sort((a,b)=> (a.minY+a.maxY) - (b.minY+b.maxY));
@@ -4188,10 +4640,7 @@
           const w = Math.max(1, Math.ceil(maxX-minX)), h = Math.max(1, Math.ceil(maxY-minY));
           const img = renderStrokesToImage(word.boxes, minX, minY, w, h, scale);
           let text = '';
-          try{
-            const { data } = await worker.recognize(img);
-            text = ((data && data.text) || '').replace(/\s+/g, '').trim();
-          }catch(err){ text = ''; }
+          try{ text = await recognizeWordImage(worker, img); }catch(err){ text = ''; }
           if(dictReady && text) text = correctWordWithDictionary(personalDict, text);
           if(text) outWords.push(text);
         }
@@ -4203,7 +4652,7 @@
       // (letra muy pegada, trazos atípicos, etc.), reconocemos toda la
       // selección de una sola vez, como antes de esta mejora.
       if(!recognized){
-        await worker.setParameters({ tessedit_pageseg_mode: OCR_PSM_AUTO });
+        await worker.setParameters({ tessedit_pageseg_mode: OCR_PSM_AUTO, user_defined_dpi: '300', preserve_interword_spaces: '1' });
         let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
         boxes.forEach(b=>{ minX=Math.min(minX,b.minX); minY=Math.min(minY,b.minY); maxX=Math.max(maxX,b.maxX); maxY=Math.max(maxY,b.maxY); });
         minX = Math.max(0, minX-20); minY = Math.max(0, minY-20);
@@ -4353,7 +4802,8 @@
     const savedTidy = await storageGet('tidy-mode');
     if(savedTidy === false){ tidyMode = false; tidyModeChk.checked = false; }
     const savedPenOnly = await storageGet('pen-only');
-    if(savedPenOnly === true){ penOnly = true; penOnlyChk.checked = true; }
+    penOnly = savedPenOnly === true;
+    penOnlyChk.checked = penOnly;
     // Migración: versiones previas guardaban un único cuaderno bajo 'pages-index'.
     const oldPages = await storageGet('pages-index');
     const savedFolders = await storageGet('folders-index');
