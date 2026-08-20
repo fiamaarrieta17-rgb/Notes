@@ -45,11 +45,25 @@ window.OcrEngine = (function(){
   const WORKER_OPTIONS = {
     workerPath: `https://cdn.jsdelivr.net/npm/tesseract.js@${TESS_VERSION}/dist/worker.min.js`,
     corePath: `https://cdn.jsdelivr.net/npm/tesseract.js-core@${TESS_VERSION}`,
+    // Nota: tesseract.js v5 ya baja por defecto el modelo "best_int" (el más
+    // preciso de los que reparte el proyecto) para el idioma español, así
+    // que no hace falta apuntar langPath a otro lado — no hay un modelo
+    // "mejor" disponible sin entrenar uno propio.
   };
   const SCRIPT_URL = `https://cdn.jsdelivr.net/npm/tesseract.js@${TESS_VERSION}/dist/tesseract.min.js`;
   const PSM_SINGLE_WORD='8', PSM_SINGLE_LINE='7', PSM_AUTO='3';
+  // MIN_CONFIDENCE dispara el reintento en modo "línea" cuando la primera
+  // pasada dio poca confianza. REJECT_CONFIDENCE es distinto: si ni con el
+  // reintento se supera este piso, preferimos no devolver nada antes que
+  // devolver una palabra inventada con alta seguridad aparente.
   const MIN_CONFIDENCE=55;
+  const REJECT_CONFIDENCE=35;
   const TIMEOUT_MS=25000;
+  // Restringe el alfabeto a lo que razonablemente puede aparecer en una
+  // nota manuscrita en español. Sin esto, Tesseract confunde trazos sueltos
+  // con símbolos raros (¤, §, ~, etc.) que nunca vas a haber escrito, y esas
+  // confusiones bajan la precisión general.
+  const CHAR_WHITELIST = 'AÁBCDEÉFGHIÍJKLMNÑOÓPQRSTUÚÜVWXYZaábcdeéfghiíjklmnñoópqrstuúüvwxyz0123456789.,;:¿?¡!\'-()"';
 
   let scriptPromise=null, workerPromise=null;
 
@@ -78,9 +92,37 @@ window.OcrEngine = (function(){
     if(!workerPromise){
       workerPromise = ensureScriptLoaded()
         .then(()=> withTimeout(Tesseract.createWorker('spa', 1, WORKER_OPTIONS), TIMEOUT_MS, 'inicio del motor de OCR'))
+        .then(async worker=>{ await worker.setParameters({ tessedit_char_whitelist: CHAR_WHITELIST }); return worker; })
         .catch(err=>{ workerPromise=null; throw err; });
     }
     return workerPromise;
+  }
+
+  // Umbral de binarización adaptativo (método de Otsu) en vez de un número
+  // fijo: separa mejor tinta de fondo según el contraste real de CADA
+  // imagen (varía con el grosor de línea, la escala usada, el suavizado del
+  // canvas, etc.), en vez de asumir que 200 siempre es el corte correcto.
+  function binarizeImageData(imgData){
+    const d = imgData.data, n = d.length/4;
+    const hist = new Array(256).fill(0);
+    for(let i=0;i<d.length;i+=4) hist[d[i]]++;
+    let sum=0; for(let t=0;t<256;t++) sum += t*hist[t];
+    let sumB=0, wB=0, varMax=0, threshold=200;
+    for(let t=0;t<256;t++){
+      wB += hist[t];
+      if(wB===0) continue;
+      const wF = n-wB;
+      if(wF===0) break;
+      sumB += t*hist[t];
+      const mB = sumB/wB, mF = (sum-sumB)/wF;
+      const varBetween = wB*wF*(mB-mF)*(mB-mF);
+      if(varBetween>varMax){ varMax=varBetween; threshold=t; }
+    }
+    for(let i=0;i<d.length;i+=4){
+      const v = d[i]<=threshold ? 0 : 255;
+      d[i]=d[i+1]=d[i+2]=v;
+    }
+    return imgData;
   }
 
   // Reconoce una imagen de UNA palabra, con reintento en modo "línea" si la
@@ -104,6 +146,10 @@ window.OcrEngine = (function(){
       }catch(err){ /* nos quedamos con lo que había, si algo */ }
       await worker.setParameters({ tessedit_pageseg_mode: PSM_SINGLE_WORD, user_defined_dpi: '300' });
     }
+    // Si ni siquiera con el reintento se llega a una confianza mínima
+    // razonable, mejor no devolver nada: una palabra inventada obliga a
+    // corregir igual, pero además engaña porque parece "reconocida".
+    if(best && bestConf<REJECT_CONFIDENCE) return '';
     return best;
   }
 
@@ -117,7 +163,7 @@ window.OcrEngine = (function(){
     return (data && data.text) || '';
   }
 
-  return { recognizeWord, recognizeAuto };
+  return { recognizeWord, recognizeAuto, binarizeImageData };
 })();
 </script>
 <style>
@@ -1058,7 +1104,7 @@ window.OcrEngine = (function(){
     --vb-ui:#1B1D24;--vb-ui-2:#20222B;--vb-ink:#EEF0F5;--vb-muted:#9799A6;--vb-line:#2C2F38;--vb-accent:#4F7CFF;
     font-family:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
   }
-  #vectorPanelView #vbBoard{position:fixed;inset:0;background:#fff;touch-action:none;cursor:crosshair;}
+  #vectorPanelView #vbBoard{position:fixed;left:0;right:0;bottom:0;top:var(--vb-header-h,108px);background:#fff;touch-action:none;cursor:crosshair;}
   #vectorPanelView #vbSvg{position:absolute;inset:0;width:100%;height:100%;display:block;}
   #vectorPanelView #vbGrid{pointer-events:none;}
   #vectorPanelView #vbPageRect{pointer-events:none;}
@@ -1070,40 +1116,42 @@ window.OcrEngine = (function(){
   #vectorPanelView #vbSelectHint{position:fixed;z-index:22;display:none;left:50%;bottom:20px;transform:translateX(-50%);padding:7px 10px;border-radius:8px;background:rgba(27,29,36,.94);color:var(--vb-ink);font:11px Inter,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.3);}
   #vectorPanelView #vbSelectHint.show{display:block;}
   #vectorPanelView.vb-a4-mode #vbBoard{background:var(--desk,#15161B);}
+  /* Encabezado único, sólido, fijo arriba: agrupa la barra de páginas y la
+     barra de herramientas en dos filas dentro de la misma franja oscura,
+     en vez de dos "píldoras" flotando sobre la hoja. */
+  #vectorPanelView #vbHeader{
+    position:fixed;z-index:11;left:0;right:0;top:0;
+    display:flex;flex-direction:column;
+    background:var(--vb-ui);border-bottom:1px solid var(--vb-line);
+    box-shadow:0 8px 24px rgba(0,0,0,.35);
+    padding-top:env(safe-area-inset-top);
+  }
   #vectorPanelView #vbPageBar{
-    position:fixed;z-index:11;left:8px;right:8px;top:12px;
-    display:flex;align-items:center;gap:6px;
-  }
-  @media (min-width:700px){
-    #vectorPanelView #vbPageBar{left:50%;right:auto;transform:translateX(-50%);width:max-content;max-width:calc(100vw - 32px);}
-  }
-  @media (max-width:699px){
-    #vectorPanelView #vbPageBar{left:8px;right:8px;top:10px;}
+    position:relative;left:auto;right:auto;top:auto;transform:none;width:auto;max-width:none;
+    display:flex;align-items:center;gap:6px;padding:6px 10px 4px;
   }
   #vectorPanelView #vbToolbar{
-    position:fixed;z-index:10;left:8px;right:8px;top:62px;
-    display:flex;align-items:center;gap:6px;padding:7px 10px;flex-wrap:nowrap;justify-content:flex-start;
-    background:rgba(27,29,36,.96);border:1px solid var(--vb-line);border-radius:15px;
-    box-shadow:0 7px 28px rgba(0,0,0,.35);backdrop-filter:blur(12px);
+    position:relative;left:auto;right:auto;top:auto;transform:none;width:auto;max-width:none;
+    display:flex;align-items:center;gap:5px;padding:4px 10px 6px;flex-wrap:nowrap;justify-content:flex-start;
+    background:transparent;border:none;border-top:1px solid var(--vb-line);border-radius:0;
+    box-shadow:none;backdrop-filter:none;
     overflow-x:auto;-webkit-overflow-scrolling:touch;
   }
   #vectorPanelView #vbToolbar::-webkit-scrollbar{height:0;}
-  @media (min-width:700px){
-    #vectorPanelView #vbToolbar{left:50%;right:auto;transform:translateX(-50%);width:max-content;max-width:calc(100vw - 32px);}
-  }
   @media (max-width:699px){
-    #vectorPanelView #vbToolbar{left:8px;right:8px;top:58px;padding:6px 8px;gap:5px;}
+    #vectorPanelView #vbPageBar{padding:5px 8px 3px;}
+    #vectorPanelView #vbToolbar{padding:3px 8px 5px;gap:4px;}
     #vectorPanelView .vbChoicePanel,#vectorPanelView #vbThicknessPanel{max-width:calc(100vw - 16px);}
   }
   #vectorPanelView #vbToolbar button, #vectorPanelView .vb-swatch{
-    border:1px solid var(--vb-line);background:var(--vb-ui-2);color:var(--vb-ink);height:38px;min-width:38px;
-    border-radius:10px;cursor:pointer;font-size:17px;display:inline-flex;align-items:center;justify-content:center;
+    border:1px solid var(--vb-line);background:var(--vb-ui-2);color:var(--vb-ink);height:32px;min-width:32px;
+    border-radius:9px;cursor:pointer;font-size:15px;display:inline-flex;align-items:center;justify-content:center;
     flex-shrink:0;
   }
   #vectorPanelView #vbToolbar button:hover{background:#2A2D38;}
   #vectorPanelView #vbToolbar button.active{background:var(--vb-accent);color:#fff;border-color:var(--vb-accent);}
-  #vectorPanelView #vbToolbar button svg{width:18px;height:18px;flex-shrink:0;}
-  #vectorPanelView .vb-sep{width:1px;height:26px;background:var(--vb-line);margin:0 2px;flex:none;flex-shrink:0;}
+  #vectorPanelView #vbToolbar button svg{width:16px;height:16px;flex-shrink:0;}
+  #vectorPanelView .vb-sep{width:1px;height:22px;background:var(--vb-line);margin:0 2px;flex:none;flex-shrink:0;}
   #vectorPanelView #vbSize{width:80px;accent-color:var(--vb-accent);flex-shrink:0;}
   #vectorPanelView #vbSizeQuickBtn,#vectorPanelView #vbSizeLabel,#vectorPanelView #vbSize{display:none !important;}
   #vectorPanelView #vbThicknessPanel{display:none;position:fixed;z-index:30;min-width:220px;padding:10px;background:rgba(27,29,36,.98);border:1px solid var(--vb-line);border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.5);}
@@ -1113,14 +1161,14 @@ window.OcrEngine = (function(){
   #vectorPanelView .vb-thick-opt{border:1px solid var(--vb-line);background:var(--vb-ui-2);color:#fff;border-radius:8px;min-width:32px;height:30px;cursor:pointer;}
   #vectorPanelView .vb-thick-opt.active{background:var(--vb-accent);border-color:var(--vb-accent);}
   #vectorPanelView #vbSizeLabel{
-    display:inline-flex;align-items:center;justify-content:center;width:22px;height:38px;
+    display:inline-flex;align-items:center;justify-content:center;width:22px;height:32px;
     color:var(--vb-muted);font-size:15px;flex:none;
   }
-  #vectorPanelView #vbColor{width:38px;height:38px;padding:3px;border:1px solid var(--vb-line);border-radius:10px;background:var(--vb-ui-2);}
+  #vectorPanelView #vbColor{width:32px;height:32px;padding:3px;border:1px solid var(--vb-line);border-radius:9px;background:var(--vb-ui-2);}
   #vectorPanelView select{
-    border:1px solid var(--vb-line);background:var(--vb-ui-2);color:var(--vb-ink);height:38px;
-    border-radius:10px;cursor:pointer;font-size:12.5px;font-family:'Inter',sans-serif;
-    padding:0 8px;max-width:128px;flex-shrink:0;
+    border:1px solid var(--vb-line);background:var(--vb-ui-2);color:var(--vb-ink);height:32px;
+    border-radius:9px;cursor:pointer;font-size:12px;font-family:'Inter',sans-serif;
+    padding:0 7px;max-width:128px;flex-shrink:0;
   }
   #vectorPanelView select:hover{background:#2A2D38;}
   #vectorPanelView select option{background:#20222B;color:var(--vb-ink);}
@@ -1144,23 +1192,23 @@ window.OcrEngine = (function(){
   #vectorPanelView #vbZoom button svg{width:16px;height:16px;}
   #vectorPanelView #vbZoomPct{width:56px;text-align:center;font-size:13px;color:var(--vb-muted);}
   #vectorPanelView #vbCloseBtn{
-    position:static;z-index:20;height:38px;width:38px;min-width:38px;padding:0;
+    position:static;z-index:20;height:32px;width:32px;min-width:32px;padding:0;
     border:1px solid var(--vb-line);background:rgba(27,29,36,.96);color:var(--vb-ink);
-    border-radius:12px;box-shadow:0 5px 20px rgba(0,0,0,.3);cursor:pointer;
+    border-radius:10px;box-shadow:0 5px 20px rgba(0,0,0,.3);cursor:pointer;
     font-family:Inter,sans-serif;font-weight:600;font-size:13px;
-    display:flex;align-items:center;justify-content:center;gap:6px;flex:0 0 38px;
+    display:flex;align-items:center;justify-content:center;gap:6px;flex:0 0 32px;
   }
   #vectorPanelView #vbCloseBtn:hover{background:#2A2D38;}
-  #vectorPanelView #vbCloseBtn svg{width:15px;height:15px;flex-shrink:0;}
+  #vectorPanelView #vbCloseBtn svg{width:14px;height:14px;flex-shrink:0;}
   #vectorPanelView #vbFolderName{display:none;}
   #vectorPanelView #vbPageNav{display:flex;align-items:center;gap:6px;flex-shrink:0;}
-  #vectorPanelView #vbPageSelect{height:38px;max-width:140px;min-width:90px;padding:0 8px;border:1px solid var(--vb-line);border-radius:10px;background:rgba(27,29,36,.96);color:var(--vb-ink);font:13px Inter,system-ui,sans-serif;box-shadow:0 7px 28px rgba(0,0,0,.35);backdrop-filter:blur(12px);}
-  #vectorPanelView #vbAddPage{height:38px;padding:0 12px;border:1px dashed var(--vb-line);border-radius:10px;background:rgba(27,29,36,.7);color:var(--vb-ink);font-size:13px;font-family:Inter,system-ui,sans-serif;line-height:1;cursor:pointer;white-space:nowrap;backdrop-filter:blur(12px);}
+  #vectorPanelView #vbPageSelect{height:32px;max-width:140px;min-width:90px;padding:0 7px;border:1px solid var(--vb-line);border-radius:9px;background:rgba(27,29,36,.96);color:var(--vb-ink);font:12.5px Inter,system-ui,sans-serif;box-shadow:0 7px 28px rgba(0,0,0,.35);backdrop-filter:blur(12px);}
+  #vectorPanelView #vbAddPage{height:32px;padding:0 11px;border:1px dashed var(--vb-line);border-radius:9px;background:rgba(27,29,36,.7);color:var(--vb-ink);font-size:12.5px;font-family:Inter,system-ui,sans-serif;line-height:1;cursor:pointer;white-space:nowrap;backdrop-filter:blur(12px);}
   #vectorPanelView #vbAddPage:hover{background:var(--vb-accent);border-color:var(--vb-accent);border-style:solid;}
   #vectorPanelView #vbPenStyleWrap,#vectorPanelView #vbMarkStyleWrap{position:relative;flex-shrink:0;}
   #vectorPanelView #vbPenStyle,#vectorPanelView #vbMarkStyle{
     display:none;position:fixed;z-index:16;width:180px;max-width:calc(100vw - 16px);
-    height:auto;top:64px;left:8px;padding:8px;background:rgba(27,29,36,.98);
+    height:auto;top:calc(var(--vb-header-h,108px) + 6px);left:8px;padding:8px;background:rgba(27,29,36,.98);
     border:1px solid var(--vb-line);border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.45);
   }
   #vectorPanelView #vbPenStyle.open,#vectorPanelView #vbMarkStyle.open{display:block;}
@@ -1196,7 +1244,7 @@ window.OcrEngine = (function(){
   #vectorPanelView .vbChoiceOpt.active{background:var(--vb-accent);border-color:var(--vb-accent);}
   #vectorPanelView #vbZoom{display:none !important;}
   #vectorPanelView #vbLiveRecognition{
-    position:fixed;z-index:25;top:66px;left:50%;transform:translateX(-50%);display:none;
+    position:fixed;z-index:25;top:calc(var(--vb-header-h,108px) + 8px);left:50%;transform:translateX(-50%);display:none;
     align-items:center;gap:8px;max-width:calc(100vw - 24px);padding:8px 10px;
     background:rgba(255,255,255,.97);color:#20232b;border:1px solid rgba(79,124,255,.35);
     border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.25);font-family:Inter,sans-serif;
@@ -1214,7 +1262,7 @@ window.OcrEngine = (function(){
   #vectorPanelView #vbLiveConvert,#vectorPanelView #vbLiveDismiss{border:0;border-radius:7px;padding:7px 9px;font-family:Inter,sans-serif;font-size:11px;font-weight:700;cursor:pointer;}
   #vectorPanelView #vbLiveConvert{background:#4f7cff;color:#fff;}
   #vectorPanelView #vbLiveDismiss{background:#eef0f5;color:#555a66;font-size:15px;padding:5px 8px;}
-  #vectorPanelView #vbVoiceStatus{position:fixed;z-index:24;top:62px;left:50%;transform:translateX(-50%);display:none;color:#fff;background:#b23a48;border-radius:8px;padding:7px 10px;font:600 11px Inter,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.3);}
+  #vectorPanelView #vbVoiceStatus{position:fixed;z-index:24;top:calc(var(--vb-header-h,108px) + 4px);left:50%;transform:translateX(-50%);display:none;color:#fff;background:#b23a48;border-radius:8px;padding:7px 10px;font:600 11px Inter,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.3);}
   #vectorPanelView #vbVoiceStatus.show{display:block;}
   #vectorPanelView #vbTextBox{
     position:fixed;z-index:30;display:none;min-width:180px;max-width:70vw;
@@ -1258,7 +1306,7 @@ window.OcrEngine = (function(){
 
   /* ---------- Panel lateral de PDFs (ventana en paralelo a la hoja) ---------- */
   #vectorPanelView #vbPdfPanel{
-    position:fixed;z-index:17;top:70px;left:12px;right:auto;bottom:52px;
+    position:fixed;z-index:17;top:calc(var(--vb-header-h,108px) + 8px);left:12px;right:auto;bottom:52px;
     width:min(560px,48vw);max-width:calc(100vw - 24px);
     background:rgba(27,29,36,.98);border:1px solid var(--vb-line);border-radius:14px;
     box-shadow:0 12px 32px rgba(0,0,0,.4);
@@ -1335,11 +1383,8 @@ window.OcrEngine = (function(){
   #vectorPanelView .vbPdfFolderGroup{margin:10px 0 8px;color:var(--vb-muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;}
   #vectorPanelView .vbPdfFolderGroup:first-child{margin-top:0;}
   @media (max-width:760px){
-    #vectorPanelView #vbPdfPanel{top:58px;left:8px;right:8px;bottom:8px;width:auto;max-width:none;}
+    #vectorPanelView #vbPdfPanel{top:calc(var(--vb-header-h,100px) + 6px);left:8px;right:8px;bottom:8px;width:auto;max-width:none;}
     #vectorPanelView #vbPdfViewerCanvasWrap{max-height:48vh;}
-  }
-  @media (max-width:760px){
-    #vectorPanelView #vbToolbar{ top:58px; }
   }
 </style>
 </head>
@@ -1803,6 +1848,7 @@ window.OcrEngine = (function(){
     <div id="vbEraserCursor"></div>
   </div>
 
+  <div id="vbHeader">
   <div id="vbPageBar">
     <button id="vbCloseBtn" title="Volver a carpetas" aria-label="Volver a carpetas">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
@@ -1893,6 +1939,7 @@ window.OcrEngine = (function(){
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
       </button>
     </div>
+  </div>
   </div>
 
   <div id="vbSettingsBackdrop"></div>
@@ -5399,7 +5446,7 @@ window.OcrEngine = (function(){
     // Tesseract le cuesta mucho más, así que si el alto resultante quedaría
     // por debajo de un piso razonable, subimos la escala para esa palabra en
     // particular (con un techo para no generar canvases gigantes/lentos).
-    const MIN_PIXEL_H = 46, MAX_SCALE = 7;
+    const MIN_PIXEL_H = 64, MAX_SCALE = 9;
     if(h > 0 && h*scale < MIN_PIXEL_H) scale = Math.min(MAX_SCALE, MIN_PIXEL_H / h);
 
     const off = document.createElement('canvas');
@@ -5427,14 +5474,12 @@ window.OcrEngine = (function(){
     // Binarizamos a blanco y negro puro: el antialiasing del canvas deja
     // píxeles grises en los bordes de cada trazo, y esos grises intermedios
     // le hacen perder precisión a Tesseract (sobre todo en letra fina o a
-    // escalas altas). Un borde 100% nítido se reconoce mucho mejor.
+    // escalas altas). Un borde 100% nítido se reconoce mucho mejor. Usamos
+    // el umbral de Otsu (adaptativo) en vez de un número fijo, porque el
+    // contraste real varía según el grosor de línea y la escala usada.
     octx.setTransform(1,0,0,1,0,0);
     const imgData = octx.getImageData(0, 0, off.width, off.height);
-    const d = imgData.data;
-    for(let i=0;i<d.length;i+=4){
-      const v = d[i] < 200 ? 0 : 255; // dibujamos siempre en negro puro sobre blanco
-      d[i] = d[i+1] = d[i+2] = v;
-    }
+    window.OcrEngine.binarizeImageData(imgData);
     octx.putImageData(imgData, 0, 0);
     return off;
   }
@@ -5842,8 +5887,19 @@ window.OcrEngine = (function(){
 (function(){
   "use strict";
   const vbView=document.getElementById('vectorPanelView');
+  const vbHeader=document.getElementById('vbHeader');
   const vbSvg=document.getElementById('vbSvg'), vbCamera=document.getElementById('vbCamera'), vbObjects=document.getElementById('vbObjects');
   const vbBoard=document.getElementById('vbBoard'), vbTextBox=document.getElementById('vbTextBox');
+  // Mide la altura real del encabezado (barra de páginas + barra de
+  // herramientas, ya juntas en una sola franja oscura) y la publica como
+  // variable CSS, para que el lienzo arranque justo debajo y nunca quede
+  // tapado por él, sin depender de números fijos por breakpoint.
+  function vbSyncHeaderHeight(){
+    if(!vbHeader) return 108;
+    const h = Math.round(vbHeader.getBoundingClientRect().height) || 108;
+    vbView.style.setProperty('--vb-header-h', h+'px');
+    return h;
+  }
   const vbColor=document.getElementById('vbColor'), vbSize=document.getElementById('vbSize');
   const vbSizeLabel=document.getElementById('vbSizeLabel');
   const vbSizeQuickBtn=document.getElementById('vbSizeQuickBtn');
@@ -6105,6 +6161,7 @@ window.OcrEngine = (function(){
     const style = VB_PEN_STYLES[vPenStyle] || VB_PEN_STYLES.estandar;
     vStroke.setAttribute('vector-effect','non-scaling-stroke');
     vStroke.dataset.obj='stroke';
+    vStroke.dataset.tool=vTool; // usado por el OCR para ignorar trazos de marcador
     if(vTool==='highlighter'){
       const ms=VB_MARK_STYLES[vMarkStyle]||VB_MARK_STYLES.translucido;
       vStroke.setAttribute('stroke-width', Math.max(8, w*4*ms.widthMul));
@@ -6296,25 +6353,106 @@ window.OcrEngine = (function(){
     vbLiveRecognition.style.left=Math.round(Math.max(8,Math.min(x,maxLeft)))+'px';
     vbLiveRecognition.style.top=Math.round(Math.max(8,y-vbLiveRecognition.offsetHeight-8))+'px';
   }
-  function vbRecentPaths(){ return [...vbObjects.querySelectorAll('path[data-obj="stroke"]')].slice(-12); }
+  // Solo trazos de lápiz/lapicera (no marcador, que ensucia el OCR con manchas
+  // translúcidas anchas) y que tengan puntos crudos guardados.
+  function vbRecentPaths(){
+    return [...vbObjects.querySelectorAll('path[data-obj="stroke"]')]
+      .filter(p=>p.dataset.tool!=='highlighter' && p.dataset.pts)
+      .slice(-12);
+  }
+  // Suavizado leve (promedio móvil), igual criterio que usa "Emprolijar
+  // letra" en el cuaderno: saca el microtemblor de la mano sin cambiar la
+  // forma real de la letra, y eso ayuda bastante a Tesseract.
+  function vbSmoothPoints(points){
+    if(!points || points.length<5) return points;
+    const src=points.map(p=>({x:p.x,y:p.y}));
+    const out=points.map(p=>({x:p.x,y:p.y}));
+    for(let i=2;i<out.length-2;i++){
+      out[i].x=(src[i-2].x+2*src[i-1].x+4*src[i].x+2*src[i+1].x+src[i+2].x)/10;
+      out[i].y=(src[i-2].y+2*src[i-1].y+4*src[i].y+2*src[i+1].y+src[i+2].y)/10;
+    }
+    return out;
+  }
+  // Arma la imagen para el OCR dibujando directo en un canvas a partir de los
+  // puntos crudos de cada trazo (dataset.pts), en vez de pasar por
+  // SVG→blob→<img>: ese camino podía fallar según el entorno (CSP, iframes
+  // con sandbox estricto) y además no permitía binarizar/escalar la imagen
+  // como sí hace el cuaderno para mejorar la precisión.
   function vbBuildOcrImage(paths){
     if(!paths.length) return null;
-    const box=paths.reduce((b,p)=>{ const x=p.getBBox(); b.x=Math.min(b.x,x.x); b.y=Math.min(b.y,x.y); b.r=Math.max(b.r,x.x+x.width); b.b=Math.max(b.b,x.y+x.height); return b; },{x:Infinity,y:Infinity,r:-Infinity,b:-Infinity});
-    const pad=24, w=Math.max(80,box.r-box.x+pad*2), h=Math.max(50,box.b-box.y+pad*2), scale=3;
-    const svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+(w*scale)+'" height="'+(h*scale)+'" viewBox="'+(box.x-pad)+' '+(box.y-pad)+' '+w+' '+h+'"><rect width="100%" height="100%" fill="white"/>'+paths.map(p=>{const q=p.cloneNode(true); q.setAttribute('stroke','#000'); q.setAttribute('stroke-opacity','1'); q.setAttribute('stroke-width',Math.max(1,+(q.getAttribute('stroke-width')||3))); return q.outerHTML;}).join('')+'</svg>';
-    return {svg,box};
+    const strokes=paths.map(p=>{
+      let pts; try{ pts=JSON.parse(p.dataset.pts); }catch(e){ pts=null; }
+      if(!pts||pts.length<1) return null;
+      const width=Math.max(2.5, parseFloat(p.getAttribute('stroke-width'))||3);
+      return {pts, width};
+    }).filter(Boolean);
+    if(!strokes.length) return null;
+
+    let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+    strokes.forEach(s=>s.pts.forEach(pt=>{
+      const r=s.width/2+1.5;
+      minX=Math.min(minX,pt.x-r); maxX=Math.max(maxX,pt.x+r);
+      minY=Math.min(minY,pt.y-r); maxY=Math.max(maxY,pt.y+r);
+    }));
+    const pad=Math.max(14,(maxY-minY)*0.4);
+    minX-=pad; minY-=pad; maxX+=pad; maxY+=pad;
+    const w=Math.max(1,maxX-minX), h=Math.max(1,maxY-minY);
+
+    // Resolución mínima: si la palabra queda chica, subimos la escala para
+    // que Tesseract tenga suficientes píxeles con los que trabajar.
+    const MIN_PIXEL_H=64, MAX_SCALE=9;
+    let scale=3.5;
+    if(h>0 && h*scale<MIN_PIXEL_H) scale=Math.min(MAX_SCALE, MIN_PIXEL_H/h);
+
+    const canvas=document.createElement('canvas');
+    canvas.width=Math.max(1,Math.round(w*scale));
+    canvas.height=Math.max(1,Math.round(h*scale));
+    const ctx=canvas.getContext('2d');
+    ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.scale(scale,scale); ctx.translate(-minX,-minY);
+    ctx.strokeStyle='#000000'; ctx.fillStyle='#000000';
+    ctx.lineCap='round'; ctx.lineJoin='round';
+    strokes.forEach(s=>{
+      const pts=vbSmoothPoints(s.pts);
+      ctx.lineWidth=s.width;
+      if(pts.length<2){
+        ctx.beginPath(); ctx.arc(pts[0].x,pts[0].y,s.width/2,0,Math.PI*2); ctx.fill();
+      }else{
+        ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
+        for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x,pts[i].y);
+        ctx.stroke();
+      }
+    });
+
+    // Binarizamos a blanco/negro puro: el antialiasing deja grises en los
+    // bordes que le hacen perder precisión a Tesseract, sobre todo en letra
+    // fina o a escalas altas. Usamos el umbral de Otsu (adaptativo) en vez
+    // de un número fijo.
+    const imgData=ctx.getImageData(0,0,canvas.width,canvas.height);
+    window.OcrEngine.binarizeImageData(imgData);
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.putImageData(imgData,0,0);
+
+    return {canvas, box:{x:minX,y:minY,r:maxX,b:maxY}};
   }
   async function vbRecognizeRecentWord(){
     try{
       const paths=vbRecentPaths(), pack=vbBuildOcrImage(paths); if(!pack) return;
-      const img=new Image(); const url=URL.createObjectURL(new Blob([pack.svg],{type:'image/svg+xml'}));
-      await new Promise((ok,no)=>{img.onload=ok;img.onerror=no;img.src=url;}); URL.revokeObjectURL(url);
-      const text=await window.OcrEngine.recognizeWord(img);
-      if(text){ vbLiveCandidate={text,box:pack.box}; vbLiveWord.textContent=text; vbLiveWord.className='f-impMin'; vbPositionLiveRecognition(pack.box); }
+      const text=await window.OcrEngine.recognizeWord(pack.canvas);
+      if(text){
+        vbLiveCandidate={text,box:pack.box}; vbLiveWord.textContent=text; vbLiveWord.className='f-impMin'; vbPositionLiveRecognition(pack.box);
+      }else{
+        // El motor respondió pero no reconoció nada (letra poco clara, trazo
+        // muy corto, etc.). Antes esto dejaba el popup clavado en
+        // "Reconociendo…" para siempre porque no caía ni acá ni en el catch.
+        vbLiveCandidate=null;
+        vbLiveWord.textContent='No se reconoció letra';
+        vbPositionLiveRecognition(pack.box);
+      }
     }catch(e){
       console.warn('OCR en vivo no disponible',e);
       vbLiveCandidate=null;
-      const reason = (e && (e.message || e.toString && e.toString())) || '';
+      const reason = (e && e.message) || '';
       vbLiveWord.textContent = reason ? ('OCR no disponible: '+reason) : 'OCR no disponible';
       vbLiveRecognition.classList.add('show','vbLiveOverWord');
     }
@@ -6393,13 +6531,13 @@ window.OcrEngine = (function(){
   document.getElementById('vbClear').onclick=()=>{ if(vbObjects.children.length && confirm('¿Borrar todo?')){ vHistory.push(vSaved); vbObjects.innerHTML=''; vFuture=[]; vbCommit(); } };
   document.getElementById('vbPlus').onclick=()=>vbZoomAt(1.3, innerWidth/2, innerHeight/2);
   document.getElementById('vbMinus').onclick=()=>vbZoomAt(.77, innerWidth/2, innerHeight/2);
-  document.getElementById('vbReset').onclick=()=>{ vScale=1; vTx=innerWidth/2; vTy=innerHeight/2; vbTransform(); };
+  document.getElementById('vbReset').onclick=()=>{ vScale=1; vTx=innerWidth/2; vTy=(vbSyncHeaderHeight()+innerHeight)/2; vbTransform(); };
   vbView.querySelectorAll('.vb-dot').forEach(d=>d.onclick=()=>vbColor.value=d.dataset.c);
 
   // ---------- Tipo de hoja ----------
   const VB_PATTERNS = { cuadriculado:'vbPatternGrid', rayado:'vbPatternLined', punteado:'vbPatternDotted' };
   function vbFitToPage(){
-    const margin=48, topReserve=110, bottomReserve=90;
+    const margin=48, topReserve=vbSyncHeaderHeight()+16, bottomReserve=90;
     const availW = Math.max(200, innerWidth - margin*2);
     const availH = Math.max(200, innerHeight - topReserve - bottomReserve);
     const page=vbPageSize(vbPaperSel.value);
@@ -6908,8 +7046,9 @@ window.OcrEngine = (function(){
   }
 
   window.addEventListener('resize', ()=>{
+    vbSyncHeaderHeight();
     if(vbPaperSel.value==='a4' || vbPaperSel.value==='oficio'){ vbFitToPage(); return; }
-    if(vScale===1){ vTx=innerWidth/2; vTy=innerHeight/2; }
+    if(vScale===1){ vTx=innerWidth/2; vTy=(vbSyncHeaderHeight()+innerHeight)/2; }
     vbTransform();
   });
 
@@ -6967,6 +7106,7 @@ window.OcrEngine = (function(){
     vbHomeView.style.display='none';
     vbNotebookView.style.display='none';
     vbView.style.display='block';
+    vbSyncHeaderHeight();
     vbClosePdfPanel();
 
     vbLoadCurrentPage();
@@ -6981,7 +7121,7 @@ window.OcrEngine = (function(){
     if(paper==='a4' || paper==='oficio'){
       vbApplyPaper(paper,style); // centra y encuadra A4 u oficio con su estilo
     } else {
-      vTx = innerWidth/2; vTy = innerHeight/2; vScale = 1; vbTransform();
+      vTx = innerWidth/2; vTy = (vbSyncHeaderHeight() + innerHeight)/2; vScale = 1; vbTransform();
       vbApplyPaper('infinite',style);
     }
     vbSetTool('pen');
