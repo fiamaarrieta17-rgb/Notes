@@ -978,8 +978,18 @@
   #vectorPanelView #vbSelectHint{position:fixed;z-index:22;display:none;left:50%;bottom:20px;transform:translateX(-50%);padding:7px 10px;border-radius:8px;background:rgba(27,29,36,.94);color:var(--vb-ink);font:11px Inter,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.3);}
   #vectorPanelView #vbSelectHint.show{display:block;}
   #vectorPanelView.vb-a4-mode #vbBoard{background:var(--desk,#15161B);}
+  #vectorPanelView #vbPageBar{
+    position:fixed;z-index:11;left:8px;right:8px;top:12px;
+    display:flex;align-items:center;gap:6px;
+  }
+  @media (min-width:700px){
+    #vectorPanelView #vbPageBar{left:50%;right:auto;transform:translateX(-50%);width:max-content;max-width:calc(100vw - 32px);}
+  }
+  @media (max-width:699px){
+    #vectorPanelView #vbPageBar{left:8px;right:8px;top:10px;}
+  }
   #vectorPanelView #vbToolbar{
-    position:fixed;z-index:10;left:8px;right:8px;top:12px;
+    position:fixed;z-index:10;left:8px;right:8px;top:62px;
     display:flex;align-items:center;gap:6px;padding:7px 10px;flex-wrap:nowrap;justify-content:flex-start;
     background:rgba(27,29,36,.96);border:1px solid var(--vb-line);border-radius:15px;
     box-shadow:0 7px 28px rgba(0,0,0,.35);backdrop-filter:blur(12px);
@@ -990,7 +1000,7 @@
     #vectorPanelView #vbToolbar{left:50%;right:auto;transform:translateX(-50%);width:max-content;max-width:calc(100vw - 32px);}
   }
   @media (max-width:699px){
-    #vectorPanelView #vbToolbar{left:8px;right:8px;top:10px;padding:6px 8px;gap:5px;}
+    #vectorPanelView #vbToolbar{left:8px;right:8px;top:58px;padding:6px 8px;gap:5px;}
     #vectorPanelView .vbChoicePanel,#vectorPanelView #vbThicknessPanel{max-width:calc(100vw - 16px);}
   }
   #vectorPanelView #vbToolbar button, #vectorPanelView .vb-swatch{
@@ -1051,10 +1061,10 @@
   #vectorPanelView #vbCloseBtn:hover{background:#2A2D38;}
   #vectorPanelView #vbCloseBtn svg{width:15px;height:15px;flex-shrink:0;}
   #vectorPanelView #vbFolderName{display:none;}
-  #vectorPanelView #vbPageNav{display:flex;align-items:center;gap:4px;margin-left:4px;flex-shrink:0;}
-  #vectorPanelView #vbPageSelect{height:30px;max-width:120px;min-width:82px;padding:0 5px;border:1px solid var(--vb-line);border-radius:7px;background:var(--vb-ui-2);color:var(--vb-ink);font:12px Inter,system-ui,sans-serif;}
-  #vectorPanelView #vbAddPage{width:30px;height:30px;border:1px solid var(--vb-line);border-radius:7px;background:var(--vb-ui-2);color:var(--vb-ink);font-size:18px;line-height:1;cursor:pointer;}
-  #vectorPanelView #vbAddPage:hover{background:var(--vb-accent);border-color:var(--vb-accent);}
+  #vectorPanelView #vbPageNav{display:flex;align-items:center;gap:6px;flex-shrink:0;}
+  #vectorPanelView #vbPageSelect{height:38px;max-width:140px;min-width:90px;padding:0 8px;border:1px solid var(--vb-line);border-radius:10px;background:rgba(27,29,36,.96);color:var(--vb-ink);font:13px Inter,system-ui,sans-serif;box-shadow:0 7px 28px rgba(0,0,0,.35);backdrop-filter:blur(12px);}
+  #vectorPanelView #vbAddPage{height:38px;padding:0 12px;border:1px dashed var(--vb-line);border-radius:10px;background:rgba(27,29,36,.7);color:var(--vb-ink);font-size:13px;font-family:Inter,system-ui,sans-serif;line-height:1;cursor:pointer;white-space:nowrap;backdrop-filter:blur(12px);}
+  #vectorPanelView #vbAddPage:hover{background:var(--vb-accent);border-color:var(--vb-accent);border-style:solid;}
   #vectorPanelView #vbPenStyleWrap,#vectorPanelView #vbMarkStyleWrap{position:relative;flex-shrink:0;}
   #vectorPanelView #vbPenStyle,#vectorPanelView #vbMarkStyle{
     display:none;position:fixed;z-index:16;width:180px;max-width:calc(100vw - 16px);
@@ -1237,7 +1247,7 @@
     #vectorPanelView #vbPdfViewerCanvasWrap{max-height:48vh;}
   }
   @media (max-width:760px){
-    #vectorPanelView #vbToolbar{ top:12px; }
+    #vectorPanelView #vbToolbar{ top:58px; }
   }
 </style>
 </head>
@@ -1701,16 +1711,18 @@
     <div id="vbEraserCursor"></div>
   </div>
 
-  <div id="vbToolbar">
+  <div id="vbPageBar">
     <button id="vbCloseBtn" title="Volver a carpetas" aria-label="Volver a carpetas">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
       <span id="vbFolderName">Carpetas</span>
     </button>
     <div id="vbPageNav" title="Páginas de esta carpeta">
       <select id="vbPageSelect" aria-label="Página actual"></select>
-      <button id="vbAddPage" type="button" title="Agregar página">+</button>
+      <button id="vbAddPage" type="button" title="Agregar página">+ Página</button>
     </div>
-    <div class="vb-sep"></div>
+  </div>
+
+  <div id="vbToolbar">
     <button id="vbSelect" title="Seleccionar y mover">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l7.5 17 2.5-7.5L21.5 11z"/><path d="M14 14l6 6"/></svg>
     </button>
@@ -6192,6 +6204,16 @@
   vbBoard.addEventListener('touchend', e=>{ if(e.touches.length<2) vTouchInfo=null; });
 
   // ---------- Estilizador de palabras en vivo ----------
+  // Mismas opciones que usa el worker de "Emprolijar letra" (definidas en el
+  // otro <script>/IIFE de más arriba). Como cada <script> tiene su propio
+  // scope, ese OCR_WORKER_OPTIONS no es visible acá: si lo referenciábamos
+  // directo tirába "OCR_WORKER_OPTIONS is not defined" y el reconocimiento en
+  // vivo quedaba roto. Por eso lo redeclaramos local, con los mismos valores.
+  const OCR_WORKER_OPTIONS={
+    workerPath:'https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/worker.min.js',
+    corePath:'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.0.0',
+    langPath:'https://tessdata.projectnaptha.com/4.0.0'
+  };
   let vbOcrWorkerPromise=null, vbLiveTimer=null, vbLiveCandidate=null;
   function vbHideLiveRecognition(){ vbLiveRecognition.classList.remove('show','vbLiveOverWord'); vbLiveRecognition.style.left=''; vbLiveRecognition.style.top=''; vbLiveCandidate=null; }
   function vbPositionLiveRecognition(box){
