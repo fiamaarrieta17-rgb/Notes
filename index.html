@@ -69,6 +69,113 @@ window.OcrEngine = (function(){
   // con símbolos raros (¤, §, ~, etc.) que nunca vas a haber escrito, y esas
   // confusiones bajan la precisión general.
   const CHAR_WHITELIST = 'AÁBCDEÉFGHIÍJKLMNÑOÓPQRSTUÚÜVWXYZaábcdeéfghiíjklmnñoópqrstuúüvwxyz0123456789.,;:¿?¡!\'-()"';
+  // Para UNA sola palabra (que es el caso de "OCR en vivo") achicamos el
+  // alfabeto todavía más: sin puntuación. Dejar signos como : ; ¿ ¡ " ( ) ,
+  // disponibles para una imagen que sólo tiene una palabra le da a Tesseract
+  // "opciones" extra para confundir una letra con un signo parecido (una "l"
+  // con un "!", un trazo suelto con una ","), que es una de las causas más
+  // comunes de que adivine mal la letra. Sólo dejamos guion y apóstrofo,
+  // que sí aparecen dentro de palabras reales.
+  const WORD_CHAR_WHITELIST = "AÁBCDEÉFGHIÍJKLMNÑOÓPQRSTUÚÜVWXYZaábcdeéfghiíjklmnñoópqrstuúüvwxyz0123456789-'";
+
+  // ---------- Red de seguridad por diccionario ----------
+  // Tesseract no tiene forma de "saber" qué es una palabra real en español;
+  // cuando duda entre dos letras parecidas (m/n, e/c, u/n, etc.) puede
+  // devolver algo que se parece mucho a una palabra común pero con UNA letra
+  // cambiada. Guardamos una lista compacta de palabras muy frecuentes
+  // (las típicas de una nota/apunte) y, si lo que reconoció no es ninguna de
+  // ellas pero hay una sola que está a 1 letra de distancia, corregimos hacia
+  // esa. Es conservador a propósito: si hay más de una candidata a la misma
+  // distancia, o si la palabra reconocida ya es válida, no tocamos nada, para
+  // no "corregir" nombres propios o palabras poco comunes que sí escribiste.
+  const COMMON_WORDS = new Set(`
+    el la los las un una unos unas de del al a en con por para sin sobre entre
+    desde hasta hacia según durante mediante contra tras
+    que quien quienes cual cuales cuyo cuya donde cuando como porque pero mas
+    aunque si no ni o u y e también tampoco solo sólo muy más menos tan tanto
+    este esta estos estas ese esa esos esas aquel aquella aquellos aquellas
+    esto eso aquello mi mis tu tus su sus nuestro nuestra nuestros nuestras
+    yo tú vos él ella usted nosotros nosotras ustedes ellos ellas me te se
+    nos les lo la le
+    es son fue fueron era eran ser estar está están estaba estaban estoy
+    estas somos soy eres sos hay habia había había tiene tienen tenía tenía
+    tengo tenes tenés puede pueden podía puedo debe deben debía debo va van
+    iba voy vas vamos viene vienen venia venía hace hacen hacia hacía hago
+    dice dicen decía digo dijo dijeron sabe saben sabia sabía se ve ven veo
+    quiere quieren queria quería quiero cree creen creia creía hizo hacer
+    tener haber decir poder saber querer creer ver dar ir venir llegar pasar
+    deber poner parecer quedar seguir encontrar llevar dejar llamar pensar
+    salir volver tomar conocer vivir sentir tratar mirar contar empezar
+    esperar buscar existir entrar trabajar escribir perder producir ocurrir
+    entender pedir recibir recordar terminar permitir aparecer conseguir
+    comenzar servir sacar necesitar mantener resultar leer caer cambiar
+    presentar crear abrir considerar oir oír poner
+    día días hoy ayer mañana ahora antes despues después luego siempre nunca
+    tiempo vez veces año años mes meses semana semanas hora horas minuto
+    minutos
+    casa trabajo clase clases escuela colegio universidad facultad curso
+    profesor profesora maestro maestra alumno alumna estudiante examen
+    tarea tareas apunte apuntes nota notas cuaderno libro libros pagina
+    página capitulo capítulo tema temas ejercicio ejercicios pregunta
+    preguntas respuesta respuestas resumen resúmen problema problemas
+    materia materias historia matematica matemática matematicas matemáticas
+    fisica física quimica química lengua idioma
+    persona personas gente hombre hombres mujer mujeres nino niño nina niña
+    ninos niños ninas niñas familia amigo amiga amigos amigas padre madre
+    padres hijo hija hijos hijas hermano hermana
+    lugar lugares ciudad pais país mundo parte cosa cosas manera forma
+    momento razon razón motivo ejemplo caso resultado idea ideas plan
+    proyecto grupo equipo numero número precio dinero
+    bien mal bueno buena buenos buenas mejor peor grande pequeño pequeña
+    nuevo nueva nuevos nuevas mismo misma mismos mismas otro otra otros
+    otras todo toda todos todas cada algo alguien algun algún alguna
+    algunos algunas ningun ningún ninguna nada nadie mucho mucha muchos
+    muchas poco poca pocos pocas primero primera primeros primeras ultimo
+    último ultima última siguiente proximo próximo
+    hola chau gracias favor perdon perdón disculpa saludos abrazo beso
+    si sí no ok dale bueno listo claro exacto obvio
+  `.trim().split(/\s+/));
+
+  function levenshteinAtMost1(a,b){
+    if(a===b) return 0;
+    const la=a.length, lb=b.length;
+    if(Math.abs(la-lb) > 1) return 2; // no puede estar a distancia <=1
+    // Caso longitudes iguales: contar sustituciones.
+    if(la===lb){
+      let diff=0;
+      for(let i=0;i<la;i++){ if(a[i]!==b[i]){ diff++; if(diff>1) return 2; } }
+      return diff;
+    }
+    // Longitudes difieren en 1: buscar una inserción/borrado que las alinee.
+    const [shortS, longS] = la<lb ? [a,b] : [b,a];
+    let i=0, j=0, skipped=false;
+    while(i<shortS.length && j<longS.length){
+      if(shortS[i]===longS[j]){ i++; j++; continue; }
+      if(skipped) return 2;
+      skipped=true; j++;
+    }
+    return 1;
+  }
+  // Si "word" no es una palabra común pero hay EXACTAMENTE una palabra común
+  // a distancia 1 (una letra cambiada, agregada o de menos), corrige hacia
+  // ella. Case-insensitive; conserva la mayúscula inicial si el original la
+  // tenía (para no des-capitalizar nombres al arranque de una oración).
+  function correctWithDictionary(word){
+    if(!word) return word;
+    const lower=word.toLowerCase();
+    if(COMMON_WORDS.has(lower)) return word;
+    if(lower.length<3) return word; // muy corta: demasiado ambiguo corregir
+    let match=null, matches=0;
+    for(const w of COMMON_WORDS){
+      if(Math.abs(w.length-lower.length)>1) continue;
+      if(levenshteinAtMost1(lower,w)===1){ match=w; matches++; if(matches>1) break; }
+    }
+    if(matches!==1) return word; // ambiguo o sin candidatos: no tocar
+    if(word[0] && word[0]===word[0].toUpperCase() && word[0]!==word[0].toLowerCase()){
+      return match[0].toUpperCase()+match.slice(1);
+    }
+    return match;
+  }
 
   let scriptPromise=null, workerPromise=null;
 
@@ -130,14 +237,19 @@ window.OcrEngine = (function(){
     return imgData;
   }
 
-  // Reconoce una imagen de UNA palabra, con reintentos progresivos si la
-  // confianza queda baja: primero como palabra suelta, después como línea
-  // (ayuda cuando el trazo cursiva "pega" letras entre sí) y por último como
+  // Reconoce una imagen de UNA palabra, con reintentos progresivos: primero
+  // como palabra suelta, después como línea (ayuda cuando el trazo cursiva
+  // "pega" letras entre sí) y por último, sólo si todavía hace falta, como
   // "línea cruda" sin análisis de layout (ayuda cuando la forma es rara y
-  // Tesseract ni siquiera encuentra dónde "empieza" el texto, que es lo que
-  // suele pasar con letra manuscrita muy suelta o con trazos separados).
+  // Tesseract ni siquiera encuentra dónde "empieza" el texto). Los primeros
+  // dos intentos SIEMPRE se corren los dos (no sólo si el primero da baja
+  // confianza): para letra manuscrita la confianza que informa Tesseract no
+  // es muy confiable como señal de acierto, así que un primer intento
+  // "seguro pero mal" puede tapar a un segundo intento mejor si sólo
+  // comparáramos por confianza cuando ya se descartó seguir probando.
   async function recognizeWord(img){
     const worker=await getWorker();
+    await worker.setParameters({ tessedit_char_whitelist: WORD_CHAR_WHITELIST });
     let best='', bestConf=-1;
     async function attempt(psm){
       await worker.setParameters({ tessedit_pageseg_mode: psm, user_defined_dpi: '300' });
@@ -149,14 +261,18 @@ window.OcrEngine = (function(){
       }catch(err){ /* seguimos al siguiente intento */ }
     }
     await attempt(PSM_SINGLE_WORD);
-    if(!best || bestConf<MIN_CONFIDENCE) await attempt(PSM_SINGLE_LINE);
+    await attempt(PSM_SINGLE_LINE);
     if(!best || bestConf<MIN_CONFIDENCE) await attempt(PSM_RAW_LINE);
-    await worker.setParameters({ tessedit_pageseg_mode: PSM_SINGLE_WORD, user_defined_dpi: '300' });
-    // Si ni con los tres intentos se llega a una confianza mínima razonable,
+    await worker.setParameters({ tessedit_pageseg_mode: PSM_SINGLE_WORD, user_defined_dpi: '300', tessedit_char_whitelist: CHAR_WHITELIST });
+    // Si ni con los intentos se llega a una confianza mínima razonable,
     // mejor no devolver nada: una palabra inventada obliga a corregir igual,
     // pero además engaña porque parece "reconocida".
     if(best && bestConf<REJECT_CONFIDENCE) return '';
-    return best;
+    if(!best) return '';
+    // Red de seguridad: si lo reconocido no es una palabra común pero hay
+    // una sola candidata a un cambio de letra de distancia, preferimos esa
+    // — es el error más típico de OCR en letra manuscrita.
+    return correctWithDictionary(best);
   }
 
   // Reconoce una imagen con varias palabras/renglones (red de seguridad
@@ -6900,10 +7016,10 @@ window.OcrEngine = (function(){
 
     // Resolución mínima: si la palabra queda chica, subimos la escala para
     // que Tesseract tenga suficientes píxeles con los que trabajar. El piso
-    // se subió de 64 a 96px por la misma razón que en el cuaderno: letra
-    // manuscrita necesita más resolución que letra de imprenta para que el
-    // motor la lea bien.
-    const MIN_PIXEL_H=96, MAX_SCALE=12;
+    // se subió de 96 a 150px: con letra manuscrita, cuantos más píxeles por
+    // letra tenga el motor, menos confunde trazos parecidos (m/n, e/c, u/n),
+    // que es la causa más común de que adivine mal la palabra.
+    const MIN_PIXEL_H=150, MAX_SCALE=18;
     let scale=3.5;
     if(h>0 && h*scale<MIN_PIXEL_H) scale=Math.min(MAX_SCALE, MIN_PIXEL_H/h);
 
