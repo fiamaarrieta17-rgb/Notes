@@ -2996,7 +2996,7 @@
     scheduleCanvasResolutionUpdate();
   }
   zoomInBtn.addEventListener('click', ()=>{ const r=viewport.getBoundingClientRect(); zoomAround(r.left+r.width/2, r.top+r.height/2, zoom*1.25); bakeCanvasResolutionNow(); });
-  zoomOutBtn.addEventListener('click', ()=>{ const r=viewport.getBoundingClientRect(); zoomAround(r.left+r.width/2, r.top+r.height/2, zoom*0.8); bakeCanvasResolutionNow(); });
+  zoomOutBtn.addEventListener('click', ()=>{ const r=viewport.getBoundingClientRect(); zoomAround(r.left+r.width/2, r.top+r.height/2, zoom*0.8); });
   zoomFitBtn.addEventListener('click', ()=>{ fitToViewport(); closePopover(); });
 
   // ---------- Exportar a PDF ----------
@@ -3679,10 +3679,13 @@
     activePointers.delete(e.pointerId);
     const wasPinching = !!pinch;
     if(activePointers.size < 2) pinch = null;
-    // Al soltar el segundo dedo del pellizco no quedan más eventos de zoom
-    // en camino: horneamos la resolución de una vez en vez de esperar el
-    // debounce, para que la hoja se vea nítida apenas se sueltan los dedos.
-    if(wasPinching && !pinch) bakeCanvasResolutionNow();
+    // Solo horneamos de inmediato si el pellizco terminó ACERCANDO zoom (hace
+    // falta más resolución para verse nítido). Si terminó alejando, la
+    // resolución que ya tenemos siempre alcanza (achicar nunca se ve borroso,
+    // sea cual sea la resolución de origen), así que forzar el rehorneado
+    // igual sólo generaba trabajo synchrono innecesario justo al soltar los
+    // dedos — eso es lo que se sentía como una trabada.
+    if(wasPinching && !pinch && zoom > canvasRenderZoom) bakeCanvasResolutionNow();
     if(activePointers.size === 0){
       if(drawing) finishStroke();
       if(panDrag){ panDrag = null; viewport.style.cursor = tool==='pan' ? 'grab' : 'crosshair'; }
