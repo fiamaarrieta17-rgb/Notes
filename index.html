@@ -28,6 +28,98 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&family=Inter:wght@400;500;600&family=Caveat:wght@500;600;700&family=Patrick+Hand&family=Shadows+Into+Light&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+// ---------- Motor de OCR compartido ----------
+// Antes había DOS copias de esta lógica (una por cada <script> de la app),
+// con versiones de tesseract.js y tesseract.js-core que no coincidían entre
+// sí, y usando un mirror viejo (tessdata.projectnaptha.com) para el
+// diccionario de español. Esa combinación es la causante más común de los
+// "Failed to fetch": la librería intenta bajar un archivo de un CDN con una
+// versión distinta a la que espera, o el mirror está lento/caído.
+// Ahora hay una sola copia, con versiones de tesseract.js y su -core
+// explícitamente iguales (ambas @5), y sin langPath propio: a partir de la
+// v5, tesseract.js baja el diccionario desde jsdelivr por defecto, que es
+// más confiable que el mirror que usábamos antes.
+window.OcrEngine = (function(){
+  const TESS_VERSION = '5.1.1';
+  const WORKER_OPTIONS = {
+    workerPath: `https://cdn.jsdelivr.net/npm/tesseract.js@${TESS_VERSION}/dist/worker.min.js`,
+    corePath: `https://cdn.jsdelivr.net/npm/tesseract.js-core@${TESS_VERSION}`,
+  };
+  const SCRIPT_URL = `https://cdn.jsdelivr.net/npm/tesseract.js@${TESS_VERSION}/dist/tesseract.min.js`;
+  const PSM_SINGLE_WORD='8', PSM_SINGLE_LINE='7', PSM_AUTO='3';
+  const MIN_CONFIDENCE=55;
+  const TIMEOUT_MS=25000;
+
+  let scriptPromise=null, workerPromise=null;
+
+  function withTimeout(promise, ms, label){
+    let timer;
+    return Promise.race([
+      promise.finally(()=>clearTimeout(timer)),
+      new Promise((_,reject)=>{ timer=setTimeout(()=>reject(new Error('Tiempo de espera agotado: '+label)), ms); })
+    ]);
+  }
+
+  function ensureScriptLoaded(){
+    if(window.Tesseract) return Promise.resolve();
+    if(scriptPromise) return scriptPromise;
+    scriptPromise = withTimeout(new Promise((resolve,reject)=>{
+      const s=document.createElement('script');
+      s.src=SCRIPT_URL; s.crossOrigin='anonymous';
+      s.onload=()=>resolve();
+      s.onerror=()=>reject(new Error('No se pudo cargar la librería de OCR'));
+      document.head.appendChild(s);
+    }), TIMEOUT_MS, 'carga de la librería').catch(err=>{ scriptPromise=null; throw err; });
+    return scriptPromise;
+  }
+
+  function getWorker(){
+    if(!workerPromise){
+      workerPromise = ensureScriptLoaded()
+        .then(()=> withTimeout(Tesseract.createWorker('spa', 1, WORKER_OPTIONS), TIMEOUT_MS, 'inicio del motor de OCR'))
+        .catch(err=>{ workerPromise=null; throw err; });
+    }
+    return workerPromise;
+  }
+
+  // Reconoce una imagen de UNA palabra, con reintento en modo "línea" si la
+  // confianza queda baja (pasa seguido con letra cursiva o muy pegada).
+  async function recognizeWord(img){
+    const worker=await getWorker();
+    await worker.setParameters({ tessedit_pageseg_mode: PSM_SINGLE_WORD, user_defined_dpi: '300' });
+    let best='', bestConf=-1;
+    try{
+      const {data}=await withTimeout(worker.recognize(img), TIMEOUT_MS, 'reconocimiento');
+      best=((data&&data.text)||'').replace(/\s+/g,'').trim();
+      bestConf = data && typeof data.confidence==='number' ? data.confidence : (best?100:-1);
+    }catch(err){ /* seguimos al reintento */ }
+    if(!best || bestConf<MIN_CONFIDENCE){
+      try{
+        await worker.setParameters({ tessedit_pageseg_mode: PSM_SINGLE_LINE, user_defined_dpi: '300' });
+        const {data}=await withTimeout(worker.recognize(img), TIMEOUT_MS, 'reconocimiento');
+        const retryText=((data&&data.text)||'').replace(/\s+/g,'').trim();
+        const retryConf = data && typeof data.confidence==='number' ? data.confidence : (retryText?100:-1);
+        if(retryText && (retryConf>bestConf || !best)){ best=retryText; bestConf=retryConf; }
+      }catch(err){ /* nos quedamos con lo que había, si algo */ }
+      await worker.setParameters({ tessedit_pageseg_mode: PSM_SINGLE_WORD, user_defined_dpi: '300' });
+    }
+    return best;
+  }
+
+  // Reconoce una imagen con varias palabras/renglones (red de seguridad
+  // cuando la segmentación por palabras no encontró nada).
+  async function recognizeAuto(img){
+    const worker=await getWorker();
+    await worker.setParameters({ tessedit_pageseg_mode: PSM_AUTO, user_defined_dpi: '300', preserve_interword_spaces: '1' });
+    const {data}=await withTimeout(worker.recognize(img), TIMEOUT_MS, 'reconocimiento');
+    await worker.setParameters({ tessedit_pageseg_mode: PSM_SINGLE_WORD, user_defined_dpi: '300' });
+    return (data && data.text) || '';
+  }
+
+  return { recognizeWord, recognizeAuto };
+})();
+</script>
 <style>
   :root{
     --ink:#232529; --ink-soft:#57534C; --paper:#FBF8F2;
@@ -5211,75 +5303,9 @@
   // Si por algún motivo la segmentación no encuentra nada (letra muy pegada,
   // trazos atípicos), volvemos al modo anterior (toda la selección junta)
   // como red de seguridad.
-  let tesseractLoadPromise = null;
-  function ensureTesseractLoaded(){
-    if(window.Tesseract) return Promise.resolve();
-    if(tesseractLoadPromise) return tesseractLoadPromise;
-    tesseractLoadPromise = new Promise((resolve, reject)=>{
-      const s = document.createElement('script');
-      s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.min.js';
-      s.onload = ()=> resolve();
-      s.onerror = ()=> { tesseractLoadPromise = null; reject(new Error('load-failed')); };
-      document.head.appendChild(s);
-    });
-    return tesseractLoadPromise;
-  }
-  // Un solo worker reutilizable: crearlo carga el idioma una vez y hace que
-  // cada "emprolijar" (y cada palabra dentro de él) sea rápido.
-  let ocrWorkerPromise = null;
-  const OCR_WORKER_OPTIONS={
-    workerPath:'https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/worker.min.js',
-    corePath:'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.0.0',
-    langPath:'https://tessdata.projectnaptha.com/4.0.0'
-  };
-  function getOcrWorker(){
-    if(!ocrWorkerPromise){
-      // Si la creación del worker falla (típicamente por una conexión lenta/
-      // inestable la primera vez que hay que bajar el wasm + el diccionario),
-      // NO nos quedamos con esa promesa rota cacheada para siempre: la
-      // soltamos para que el próximo intento vuelva a crear el worker desde
-      // cero, en vez de fallar por el resto de la sesión sin motivo real.
-      ocrWorkerPromise = Tesseract.createWorker('spa', 1, OCR_WORKER_OPTIONS).catch(err=>{
-        ocrWorkerPromise = null;
-        throw err;
-      });
-    }
-    return ocrWorkerPromise;
-  }
-  const OCR_PSM_SINGLE_WORD = '8';
-  const OCR_PSM_SINGLE_LINE = '7';
-  const OCR_PSM_AUTO = '3';
-
-  // Reconoce una imagen de UNA palabra con reintento por confianza: el modo
-  // "una sola palabra" (PSM 8) es el más preciso en general, pero a veces
-  // falla con letra cursiva/pegada porque el segmentador interno de Tesseract
-  // no encuentra un único "blob" de palabra. Si el resultado viene vacío o
-  // con confianza baja, reintentamos esa misma imagen en modo "una sola
-  // línea" (PSM 7), que es más permisivo con trazos unidos, y nos quedamos
-  // con el resultado de mayor confianza de los dos intentos.
-  const OCR_MIN_CONFIDENCE = 55;
-  async function recognizeWordImage(worker, img){
-    await worker.setParameters({ tessedit_pageseg_mode: OCR_PSM_SINGLE_WORD, user_defined_dpi: '300' });
-    let best = '', bestConf = -1;
-    try{
-      const { data } = await worker.recognize(img);
-      best = ((data && data.text) || '').replace(/\s+/g, '').trim();
-      bestConf = data && typeof data.confidence === 'number' ? data.confidence : (best ? 100 : -1);
-    }catch(err){ /* seguimos al reintento */ }
-
-    if(!best || bestConf < OCR_MIN_CONFIDENCE){
-      try{
-        await worker.setParameters({ tessedit_pageseg_mode: OCR_PSM_SINGLE_LINE, user_defined_dpi: '300' });
-        const { data } = await worker.recognize(img);
-        const retryText = ((data && data.text) || '').replace(/\s+/g, '').trim();
-        const retryConf = data && typeof data.confidence === 'number' ? data.confidence : (retryText ? 100 : -1);
-        if(retryText && (retryConf > bestConf || !best)){ best = retryText; bestConf = retryConf; }
-      }catch(err){ /* nos quedamos con lo que había, si algo */ }
-      // Dejamos el worker listo en modo palabra para la próxima llamada.
-      await worker.setParameters({ tessedit_pageseg_mode: OCR_PSM_SINGLE_WORD, user_defined_dpi: '300' });
-    }
-    return best;
-  }
+  // El motor de OCR en sí (carga de la librería + worker de Tesseract) vive
+  // en window.OcrEngine, compartido con el reconocimiento en vivo del
+  // lienzo infinito — ver el <script> al principio del <head>.
 
   // Caja delimitadora de un trazo (con un poco de aire según el grosor real
   // dibujado), usada tanto para agrupar en renglones/palabras como para
@@ -5533,15 +5559,11 @@
     const candidate=liveCandidateWord(finishedStroke);
     if(!candidate||seq!==liveRecSeq)return;
     try{
-      await ensureTesseractLoaded();
-      if(seq!==liveRecSeq)return;
-      const worker=await getOcrWorker();
-      if(seq!==liveRecSeq)return;
       const pad=Math.max(12,candidate.medianH*.5);
       const minX=Math.max(0,candidate.word.minX-pad),minY=Math.max(0,candidate.word.minY-pad);
       const maxX=Math.min(PAGE_W,candidate.word.maxX+pad),maxY=Math.min(PAGE_H,candidate.word.maxY+pad);
       const img=renderStrokesToImage(candidate.word.boxes,minX,minY,Math.max(1,Math.ceil(maxX-minX)),Math.max(1,Math.ceil(maxY-minY)),3.5);
-      let recognized=await recognizeWordImage(worker, img);
+      let recognized=await window.OcrEngine.recognizeWord(img);
       if(seq!==liveRecSeq)return;
       if(!recognized)return;
       const dict=await loadPersonalDict();
@@ -5597,8 +5619,6 @@
     showStatus('Reconociendo tu letra…');
 
     try{
-      await ensureTesseractLoaded();
-      const worker = await getOcrWorker();
       const personalDict = await loadPersonalDict();
       const dictReady = Object.keys(personalDict).length >= OCR_DICT_MIN_ENTRIES;
 
@@ -5625,7 +5645,7 @@
           const w = Math.max(1, Math.ceil(maxX-minX)), h = Math.max(1, Math.ceil(maxY-minY));
           const img = renderStrokesToImage(word.boxes, minX, minY, w, h, scale);
           let text = '';
-          try{ text = await recognizeWordImage(worker, img); }catch(err){ text = ''; }
+          try{ text = await window.OcrEngine.recognizeWord(img); }catch(err){ text = ''; }
           if(dictReady && text) text = correctWordWithDictionary(personalDict, text);
           if(text) outWords.push(text);
         }
@@ -5637,15 +5657,14 @@
       // (letra muy pegada, trazos atípicos, etc.), reconocemos toda la
       // selección de una sola vez, como antes de esta mejora.
       if(!recognized){
-        await worker.setParameters({ tessedit_pageseg_mode: OCR_PSM_AUTO, user_defined_dpi: '300', preserve_interword_spaces: '1' });
         let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
         boxes.forEach(b=>{ minX=Math.min(minX,b.minX); minY=Math.min(minY,b.minY); maxX=Math.max(maxX,b.maxX); maxY=Math.max(maxY,b.maxY); });
         minX = Math.max(0, minX-20); minY = Math.max(0, minY-20);
         maxX = Math.min(PAGE_W, maxX+20); maxY = Math.min(PAGE_H, maxY+20);
         const w = Math.max(1, Math.ceil(maxX-minX)), h = Math.max(1, Math.ceil(maxY-minY));
         const img = renderStrokesToImage(boxes, minX, minY, w, h, 2);
-        const { data } = await worker.recognize(img);
-        recognized = ((data && data.text) || '')
+        const rawText = await window.OcrEngine.recognizeAuto(img);
+        recognized = (rawText || '')
           .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
         if(dictReady && recognized) recognized = correctTextBlock(personalDict, recognized);
       }
@@ -6102,27 +6121,83 @@
     vbObjects.appendChild(vStroke);
   }
 
-  // ---------- Goma de borrar: radio configurable, borra mientras se arrastra ----------
+  // ---------- Goma de borrar: borra sólo el trazo que toca el círculo, no la
+  // línea entera ----------
+  // Antes, tocar CUALQUIER punto de un trazo con la goma borraba el trazo
+  // COMPLETO (por eso "borraba de más"). Ahora cada trazo guarda sus puntos
+  // originales (world coords) en un atributo, y al borrar se recorta sólo el
+  // tramo que cae dentro del círculo de la goma: el resto del trazo queda
+  // intacto, partido en los pedazos que sobreviven.
   function vbEraserRadiusPx(){ return 6 + vEraserSize*1.4; }
   function vbUpdateEraserCursorSize(){
     const d = vbEraserRadiusPx()*2;
     vbEraserCursor.style.width = d+'px';
     vbEraserCursor.style.height = d+'px';
   }
-  function vbEraseCircleAt(cx, cy){
-    const r = vbEraserRadiusPx();
-    const pts = [[cx,cy]];
-    const steps = 10;
-    for(let i=0;i<steps;i++){
-      const a = (i/steps)*Math.PI*2;
-      pts.push([cx+Math.cos(a)*r, cy+Math.sin(a)*r]);
+  function vbEraseStroke(path, cx, cy, r2){
+    let pts;
+    try{ pts = JSON.parse(path.dataset.pts||'null'); }catch(e){ pts=null; }
+    if(!pts || pts.length<2){
+      // Trazo sin datos de puntos (por ejemplo, uno cargado de una sesión
+      // vieja, antes de este cambio): no podemos recortarlo con precisión,
+      // así que caemos al comportamiento anterior sólo para este caso.
+      const b=path.getBBox();
+      const nx=Math.max(b.x, Math.min(cx, b.x+b.width));
+      const ny=Math.max(b.y, Math.min(cy, b.y+b.height));
+      if((nx-cx)*(nx-cx)+(ny-cy)*(ny-cy) <= r2){ path.remove(); vEraseDirty=true; }
+      return;
     }
-    pts.forEach(([x,y])=>{
-      const el = document.elementFromPoint(x,y);
-      if(!el) return;
-      let e=el;
-      while(e && e!==vbObjects && e.parentNode!==vbObjects) e=e.parentNode;
-      if(e && e!==vbObjects){ e.remove(); vEraseDirty=true; }
+    // Un punto se considera "borrado" si él mismo, o el segmento hacia el
+    // punto siguiente, pasa cerca del centro de la goma.
+    const inCircle = p => (p.x-cx)*(p.x-cx)+(p.y-cy)*(p.y-cy) <= r2;
+    const segHits = (a,b) => {
+      const dx=b.x-a.x, dy=b.y-a.y, len2=dx*dx+dy*dy;
+      if(len2===0) return inCircle(a);
+      let t=((cx-a.x)*dx+(cy-a.y)*dy)/len2;
+      t=Math.max(0,Math.min(1,t));
+      const px=a.x+dx*t, py=a.y+dy*t;
+      return (px-cx)*(px-cx)+(py-cy)*(py-cy) <= r2;
+    };
+    const erased = pts.map(()=>false);
+    for(let i=0;i<pts.length;i++){
+      if(inCircle(pts[i])) erased[i]=true;
+      if(i<pts.length-1 && segHits(pts[i],pts[i+1])){ erased[i]=true; erased[i+1]=true; }
+    }
+    if(!erased.some(Boolean)) return; // la goma no tocó este trazo
+    vEraseDirty=true;
+    const segments=[];
+    let cur=[];
+    for(let i=0;i<pts.length;i++){
+      if(!erased[i]) cur.push(pts[i]);
+      else { if(cur.length>1) segments.push(cur); cur=[]; }
+    }
+    if(cur.length>1) segments.push(cur);
+    segments.forEach(seg=>{
+      const np=path.cloneNode(true);
+      np.setAttribute('d', vbSmoothPath(seg));
+      np.dataset.pts = JSON.stringify(seg);
+      path.parentNode.insertBefore(np, path);
+    });
+    path.remove();
+  }
+  function vbEraseCircleAt(clientX, clientY){
+    const r = vbEraserRadiusPx()/Math.max(vScale,.0001);
+    const c = vbClientWorldPoint(clientX, clientY);
+    const r2 = r*r;
+    // Trazos de lápiz/marcador: recorte preciso.
+    [...vbObjects.querySelectorAll('path[data-obj="stroke"]')].forEach(path=>{
+      vbEraseStroke(path, c.x, c.y, r2);
+    });
+    // Otros objetos (texto, etc.): se borran enteros si la goma los toca,
+    // porque no tiene sentido "partir" un bloque de texto.
+    [...vbObjects.children].forEach(el=>{
+      if(el.dataset && el.dataset.obj==='stroke') return;
+      try{
+        const b=el.getBBox();
+        const nx=Math.max(b.x, Math.min(c.x, b.x+b.width));
+        const ny=Math.max(b.y, Math.min(c.y, b.y+b.height));
+        if((nx-c.x)*(nx-c.x)+(ny-c.y)*(ny-c.y) <= r2){ el.remove(); vEraseDirty=true; }
+      }catch(e){}
     });
   }
   function vbZoomAt(f,x,y){
@@ -6172,7 +6247,10 @@
   });
   vbBoard.addEventListener('pointerup', ()=>{
     if(!vGesture) return;
-    if(vGesture.draw){ if(vPoints.length<2) vStroke.remove(); else { vbCommit(); vbScheduleLiveRecognition(); } }
+    if(vGesture.draw){
+      if(vPoints.length<2) vStroke.remove();
+      else { vStroke.dataset.pts = JSON.stringify(vPoints); vbCommit(); vbScheduleLiveRecognition(); }
+    }
     if(vGesture.erase && vEraseDirty){ vbCommit(); vEraseDirty=false; }
     if(vGesture.select && vSelected){ vbCommit(); }
     vGesture=null; vStroke=null; vPoints=[];
@@ -6204,17 +6282,9 @@
   vbBoard.addEventListener('touchend', e=>{ if(e.touches.length<2) vTouchInfo=null; });
 
   // ---------- Estilizador de palabras en vivo ----------
-  // Mismas opciones que usa el worker de "Emprolijar letra" (definidas en el
-  // otro <script>/IIFE de más arriba). Como cada <script> tiene su propio
-  // scope, ese OCR_WORKER_OPTIONS no es visible acá: si lo referenciábamos
-  // directo tirába "OCR_WORKER_OPTIONS is not defined" y el reconocimiento en
-  // vivo quedaba roto. Por eso lo redeclaramos local, con los mismos valores.
-  const OCR_WORKER_OPTIONS={
-    workerPath:'https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/worker.min.js',
-    corePath:'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.0.0',
-    langPath:'https://tessdata.projectnaptha.com/4.0.0'
-  };
-  let vbOcrWorkerPromise=null, vbLiveTimer=null, vbLiveCandidate=null;
+  // Usa el mismo motor de OCR compartido (window.OcrEngine, definido una
+  // sola vez al principio del <head>) que "Emprolijar letra".
+  let vbLiveTimer=null, vbLiveCandidate=null;
   function vbHideLiveRecognition(){ vbLiveRecognition.classList.remove('show','vbLiveOverWord'); vbLiveRecognition.style.left=''; vbLiveRecognition.style.top=''; vbLiveCandidate=null; }
   function vbPositionLiveRecognition(box){
     if(!box) return;
@@ -6236,24 +6306,10 @@
   }
   async function vbRecognizeRecentWord(){
     try{
-      if(!window.Tesseract) {
-        const s=document.createElement('script'); s.crossOrigin='anonymous'; s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.min.js';
-        await new Promise((ok,no)=>{s.onload=ok;s.onerror=()=>no(new Error('No se pudo cargar Tesseract'));document.head.appendChild(s);});
-      }
-      if(!vbOcrWorkerPromise){
-        // Mismo problema que en el cuaderno principal: si la primera creación
-        // del worker falla, no la dejamos cacheada rota para siempre.
-        vbOcrWorkerPromise = Tesseract.createWorker('spa', 1, OCR_WORKER_OPTIONS).catch(err=>{
-          vbOcrWorkerPromise = null;
-          throw err;
-        });
-      }
-      const worker=await vbOcrWorkerPromise;
       const paths=vbRecentPaths(), pack=vbBuildOcrImage(paths); if(!pack) return;
       const img=new Image(); const url=URL.createObjectURL(new Blob([pack.svg],{type:'image/svg+xml'}));
       await new Promise((ok,no)=>{img.onload=ok;img.onerror=no;img.src=url;}); URL.revokeObjectURL(url);
-      await worker.setParameters({tessedit_pageseg_mode:'8',user_defined_dpi:'300'});
-      const {data}=await worker.recognize(img); const text=((data&&data.text)||'').replace(/\s+/g,' ').trim();
+      const text=await window.OcrEngine.recognizeWord(img);
       if(text){ vbLiveCandidate={text,box:pack.box}; vbLiveWord.textContent=text; vbLiveWord.className='f-impMin'; vbPositionLiveRecognition(pack.box); }
     }catch(e){
       console.warn('OCR en vivo no disponible',e);
