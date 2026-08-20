@@ -51,13 +51,18 @@ window.OcrEngine = (function(){
     // "mejor" disponible sin entrenar uno propio.
   };
   const SCRIPT_URL = `https://cdn.jsdelivr.net/npm/tesseract.js@${TESS_VERSION}/dist/tesseract.min.js`;
-  const PSM_SINGLE_WORD='8', PSM_SINGLE_LINE='7', PSM_AUTO='3';
+  const PSM_SINGLE_WORD='8', PSM_SINGLE_LINE='7', PSM_RAW_LINE='13', PSM_AUTO='3';
   // MIN_CONFIDENCE dispara el reintento en modo "línea" cuando la primera
-  // pasada dio poca confianza. REJECT_CONFIDENCE es distinto: si ni con el
-  // reintento se supera este piso, preferimos no devolver nada antes que
-  // devolver una palabra inventada con alta seguridad aparente.
+  // pasada dio poca confianza. REJECT_CONFIDENCE es distinto: si ni con los
+  // reintentos se supera este piso, preferimos no devolver nada antes que
+  // devolver una palabra inventada con alta seguridad aparente. Se bajó de
+  // 35 a 22 porque con letra manuscrita real Tesseract casi nunca informa
+  // confianzas altas (a diferencia de letra de imprenta), así que el piso
+  // viejo terminaba descartando bastantes aciertos razonables; total, el
+  // resultado siempre queda a un toque de distancia de "Transcribir" a
+  // mano si está mal.
   const MIN_CONFIDENCE=55;
-  const REJECT_CONFIDENCE=35;
+  const REJECT_CONFIDENCE=22;
   const TIMEOUT_MS=25000;
   // Restringe el alfabeto a lo que razonablemente puede aparecer en una
   // nota manuscrita en español. Sin esto, Tesseract confunde trazos sueltos
@@ -125,30 +130,31 @@ window.OcrEngine = (function(){
     return imgData;
   }
 
-  // Reconoce una imagen de UNA palabra, con reintento en modo "línea" si la
-  // confianza queda baja (pasa seguido con letra cursiva o muy pegada).
+  // Reconoce una imagen de UNA palabra, con reintentos progresivos si la
+  // confianza queda baja: primero como palabra suelta, después como línea
+  // (ayuda cuando el trazo cursiva "pega" letras entre sí) y por último como
+  // "línea cruda" sin análisis de layout (ayuda cuando la forma es rara y
+  // Tesseract ni siquiera encuentra dónde "empieza" el texto, que es lo que
+  // suele pasar con letra manuscrita muy suelta o con trazos separados).
   async function recognizeWord(img){
     const worker=await getWorker();
-    await worker.setParameters({ tessedit_pageseg_mode: PSM_SINGLE_WORD, user_defined_dpi: '300' });
     let best='', bestConf=-1;
-    try{
-      const {data}=await withTimeout(worker.recognize(img), TIMEOUT_MS, 'reconocimiento');
-      best=((data&&data.text)||'').replace(/\s+/g,'').trim();
-      bestConf = data && typeof data.confidence==='number' ? data.confidence : (best?100:-1);
-    }catch(err){ /* seguimos al reintento */ }
-    if(!best || bestConf<MIN_CONFIDENCE){
+    async function attempt(psm){
+      await worker.setParameters({ tessedit_pageseg_mode: psm, user_defined_dpi: '300' });
       try{
-        await worker.setParameters({ tessedit_pageseg_mode: PSM_SINGLE_LINE, user_defined_dpi: '300' });
         const {data}=await withTimeout(worker.recognize(img), TIMEOUT_MS, 'reconocimiento');
-        const retryText=((data&&data.text)||'').replace(/\s+/g,'').trim();
-        const retryConf = data && typeof data.confidence==='number' ? data.confidence : (retryText?100:-1);
-        if(retryText && (retryConf>bestConf || !best)){ best=retryText; bestConf=retryConf; }
-      }catch(err){ /* nos quedamos con lo que había, si algo */ }
-      await worker.setParameters({ tessedit_pageseg_mode: PSM_SINGLE_WORD, user_defined_dpi: '300' });
+        const text=((data&&data.text)||'').replace(/\s+/g,'').trim();
+        const conf=data && typeof data.confidence==='number' ? data.confidence : (text?100:-1);
+        if(text && conf>bestConf){ best=text; bestConf=conf; }
+      }catch(err){ /* seguimos al siguiente intento */ }
     }
-    // Si ni siquiera con el reintento se llega a una confianza mínima
-    // razonable, mejor no devolver nada: una palabra inventada obliga a
-    // corregir igual, pero además engaña porque parece "reconocida".
+    await attempt(PSM_SINGLE_WORD);
+    if(!best || bestConf<MIN_CONFIDENCE) await attempt(PSM_SINGLE_LINE);
+    if(!best || bestConf<MIN_CONFIDENCE) await attempt(PSM_RAW_LINE);
+    await worker.setParameters({ tessedit_pageseg_mode: PSM_SINGLE_WORD, user_defined_dpi: '300' });
+    // Si ni con los tres intentos se llega a una confianza mínima razonable,
+    // mejor no devolver nada: una palabra inventada obliga a corregir igual,
+    // pero además engaña porque parece "reconocida".
     if(best && bestConf<REJECT_CONFIDENCE) return '';
     return best;
   }
@@ -586,7 +592,9 @@ window.OcrEngine = (function(){
   #pdfPanel{
     display:none;flex-direction:column;width:42%;min-width:230px;max-width:78%;
     background:var(--panel);border-right:1px solid var(--panel-edge);flex-shrink:0;
+    transition:width .18s ease;
   }
+  #pdfPanel.dragging-resize{transition:none;}
   #pdfPanel.open{display:flex;}
   #pdfResizeHandle{
     width:6px;flex-shrink:0;cursor:col-resize;background:var(--panel-edge);display:none;
@@ -1104,7 +1112,7 @@ window.OcrEngine = (function(){
     --vb-ui:#1B1D24;--vb-ui-2:#20222B;--vb-ink:#EEF0F5;--vb-muted:#9799A6;--vb-line:#2C2F38;--vb-accent:#4F7CFF;
     font-family:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
   }
-  #vectorPanelView #vbBoard{position:fixed;left:0;right:0;bottom:0;top:var(--vb-header-h,108px);background:#fff;touch-action:none;cursor:crosshair;}
+  #vectorPanelView #vbBoard{position:fixed;left:var(--vb-board-left,0);right:0;bottom:0;top:var(--vb-board-top,var(--vb-header-h,108px));background:#fff;touch-action:none;cursor:crosshair;transition:left .16s ease;}
   #vectorPanelView #vbSvg{position:absolute;inset:0;width:100%;height:100%;display:block;}
   #vectorPanelView #vbGrid{pointer-events:none;}
   #vectorPanelView #vbPageRect{pointer-events:none;}
@@ -1240,8 +1248,11 @@ window.OcrEngine = (function(){
   #vectorPanelView #vbToolThicknessPresets{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;}
   #vectorPanelView .vbChoiceThickOpt{border:1px solid var(--vb-line);background:var(--vb-ui-2);color:#fff;border-radius:7px;min-width:30px;height:28px;cursor:pointer;font-size:11px;}
   #vectorPanelView .vbChoiceThickOpt.active{background:var(--vb-accent);border-color:var(--vb-accent);}
-  #vectorPanelView .vbChoiceOpt{border:1px solid var(--vb-line);background:var(--vb-ui-2);color:#fff;border-radius:8px;padding:8px 10px;cursor:pointer;white-space:nowrap;}
+  #vectorPanelView .vbChoiceOpt{border:1px solid var(--vb-line);background:var(--vb-ui-2);color:#fff;border-radius:8px;padding:8px 10px;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;}
   #vectorPanelView .vbChoiceOpt.active{background:var(--vb-accent);border-color:var(--vb-accent);}
+  #vectorPanelView .vbChoiceOpt svg{width:18px;height:18px;flex-shrink:0;display:block;}
+  #vectorPanelView #vbShapeTypeGrp{display:none;}
+  #vectorPanelView #vbShapeTypeGrp.open{display:block;}
   #vectorPanelView #vbZoom{display:none !important;}
   #vectorPanelView #vbLiveRecognition{
     position:fixed;z-index:25;top:calc(var(--vb-header-h,108px) + 8px);left:50%;transform:translateX(-50%);display:none;
@@ -1376,6 +1387,40 @@ window.OcrEngine = (function(){
   #vectorPanelView #vbPdfViewerZoomValue{min-width:45px;text-align:center;color:var(--vb-muted);font-size:11px;}
   #vectorPanelView #vbPdfViewerControls button:disabled{opacity:.45;cursor:default;}
   #vectorPanelView #vbPdfViewerPage{min-width:52px;text-align:center;color:var(--vb-muted);font-size:11px;}
+
+  /* ---------- Dibujo/resaltado sobre el PDF de la biblioteca ---------- */
+  #vectorPanelView #vpDrawToolbar{display:flex;align-items:center;gap:6px;flex:0 0 auto;overflow-x:auto;-webkit-overflow-scrolling:touch;margin-bottom:7px;}
+  #vectorPanelView #vpDrawToolbar::-webkit-scrollbar{height:0;}
+  #vectorPanelView .vpTool{height:30px;min-width:30px;border:1px solid var(--vb-line);background:var(--vb-ui-2);color:var(--vb-ink);border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;padding:0;}
+  #vectorPanelView .vpTool svg{width:15px;height:15px;flex-shrink:0;}
+  #vectorPanelView .vpTool:hover{background:#2A2D38;}
+  #vectorPanelView .vpTool.active{background:var(--vb-accent);color:#fff;border-color:var(--vb-accent);}
+  #vectorPanelView .vpDivider{width:1px;height:20px;background:var(--vb-line);margin:0 2px;flex-shrink:0;}
+  #vectorPanelView #vpDrawDots{display:flex;align-items:center;gap:5px;flex-shrink:0;}
+  #vectorPanelView .vpDot{width:16px;height:16px;border-radius:50%;border:1px solid rgba(255,255,255,.35);cursor:pointer;flex-shrink:0;}
+  #vectorPanelView .vpDot.active{outline:2px solid var(--vb-ink);outline-offset:1px;}
+
+  #vectorPanelView #vpPageStack{position:relative;display:inline-block;flex:0 0 auto;}
+  #vectorPanelView #vpMarksLayer{position:absolute;inset:0;pointer-events:none;z-index:3;}
+  #vectorPanelView #vpInkCanvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;touch-action:none;z-index:4;}
+  #vectorPanelView #vpInkCanvas.drawing{pointer-events:auto;cursor:crosshair;}
+  #vectorPanelView #vpTextLayer{pointer-events:none;z-index:2;}
+  #vectorPanelView #vpTextLayer.vp-selectable{pointer-events:auto;}
+
+  #vectorPanelView #vpSelToolbar{
+    position:fixed;display:none;align-items:center;gap:6px;z-index:60;
+    background:rgba(27,29,36,.98);border:1px solid var(--vb-line);border-radius:9px;
+    padding:6px 7px;box-shadow:0 8px 24px rgba(0,0,0,.45);
+  }
+  #vectorPanelView #vpSelToolbar.show{display:flex;}
+  #vectorPanelView #vpSelToolbar button{
+    background:var(--vb-ui-2);border:1px solid var(--vb-line);color:var(--vb-ink);
+    font-family:'Inter',sans-serif;font-weight:600;font-size:11.5px;
+    padding:6px 9px;border-radius:6px;cursor:pointer;white-space:nowrap;
+  }
+  #vectorPanelView #vpSelToolbar button:hover{border-color:var(--vb-accent);}
+  #vectorPanelView #vpSelToolbar .vpDivider{width:1px;align-self:stretch;background:var(--vb-line);margin:0 1px;}
+  #vectorPanelView #vpSelToolbar .vpDot{width:14px;height:14px;}
   #vectorPanelView #vbPdfFolderSelect{flex:1;min-width:0;max-width:none;height:34px;}
   #vectorPanelView #vbPdfNewFolder{width:34px;height:34px;border:1px solid var(--vb-line);border-radius:9px;background:var(--vb-ui-2);color:var(--vb-ink);font-size:18px;cursor:pointer;}
   #vectorPanelView #vbPdfNewFolder:hover{background:var(--vb-accent);border-color:var(--vb-accent);}
@@ -1383,8 +1428,17 @@ window.OcrEngine = (function(){
   #vectorPanelView .vbPdfFolderGroup{margin:10px 0 8px;color:var(--vb-muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;}
   #vectorPanelView .vbPdfFolderGroup:first-child{margin-top:0;}
   @media (max-width:760px){
-    #vectorPanelView #vbPdfPanel{top:calc(var(--vb-header-h,100px) + 6px);left:8px;right:8px;bottom:8px;width:auto;max-width:none;}
-    #vectorPanelView #vbPdfViewerCanvasWrap{max-height:48vh;}
+    /* En mobile el panel se acopla al costado izquierdo, ocupando el mismo
+       alto que la hoja (desde el header hasta abajo) y la mitad del ancho,
+       en vez de taparla por arriba: hoja y PDF quedan uno al lado del otro,
+       en paralelo, sin sobreponerse (split real, no una ventana flotante
+       encima de todo). */
+    #vectorPanelView #vbPdfPanel{
+      top:var(--vb-header-h,100px);left:0;right:auto;bottom:0;
+      width:50%;max-width:50%;height:auto;max-height:none;min-height:0;
+      border-radius:0;border-top:none;border-bottom:none;border-left:none;
+    }
+    #vectorPanelView #vbPdfViewerCanvasWrap{max-height:none;flex:1;min-height:0;}
   }
 </style>
 </head>
@@ -1533,20 +1587,26 @@ window.OcrEngine = (function(){
    </div>
 
     <div class="floatDrop" id="shapeTypeGrp">
-      <button type="button" class="tool shapeType active" data-shape="line" title="Línea">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="20" x2="20" y2="4"/></svg>
+      <button type="button" class="tool shapeType" data-shape="oval" title="Óvalo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="12" rx="9" ry="6.5"/></svg>
+      </button>
+      <button type="button" class="tool shapeType" data-shape="circle" title="Círculo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/></svg>
+      </button>
+      <button type="button" class="tool shapeType" data-shape="square" title="Cuadrado">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4.5" y="4.5" width="15" height="15" rx="1.5"/></svg>
+      </button>
+      <button type="button" class="tool shapeType" data-shape="rect" title="Rectángulo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="1.5"/></svg>
+      </button>
+      <button type="button" class="tool shapeType" data-shape="cloud" title="Nube">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17a4 4 0 01-.5-7.97A5 5 0 0116 8a4 4 0 011 7.87"/><path d="M7 17h10"/></svg>
       </button>
       <button type="button" class="tool shapeType" data-shape="arrow" title="Flecha">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="20" x2="20" y2="4"/><polyline points="10 4 20 4 20 14"/></svg>
       </button>
-      <button type="button" class="tool shapeType" data-shape="rect" title="Rectángulo">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="6" width="16" height="12" rx="1.5"/></svg>
-      </button>
-      <button type="button" class="tool shapeType" data-shape="oval" title="Óvalo / círculo">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="12" rx="9" ry="6.5"/></svg>
-      </button>
-      <button type="button" class="tool shapeType" data-shape="cloud" title="Nube">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17a4 4 0 01-.5-7.97A5 5 0 0116 8a4 4 0 011 7.87"/><path d="M7 17h10"/></svg>
+      <button type="button" class="tool shapeType active" data-shape="line" title="Línea">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="20" x2="20" y2="4"/></svg>
       </button>
     </div>
     <div class="floatDrop" id="penStyleDrop"></div>
@@ -1589,7 +1649,7 @@ window.OcrEngine = (function(){
           <label class="chk-label"><input type="checkbox" id="tidyMode" checked autocomplete="off"> Suavizar el trazo al escribir</label>
         </div>
         <div class="row">
-          <label class="chk-label"><input type="checkbox" id="penOnly" autocomplete="off"> Ignorar dedos</label>
+          <label class="chk-label"><input type="checkbox" id="penOnly" autocomplete="off"> Rechazo de mano (solo lapicera/stylus)</label>
         </div>
         <div class="row">
           <button class="action" id="clearBtn">Vaciar página</button>
@@ -1899,6 +1959,35 @@ window.OcrEngine = (function(){
     <button id="vbHighlighter" title="Marcador">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21l1.5-4.5L15 6l3 3-10.5 10.5z"/><path d="M12 9l3 3"/><path d="M15 6l3-3 3 3-3 3"/></svg>
     </button>
+    <button id="vbShape" title="Formas (para cuadros conceptuales)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1"/><circle cx="17" cy="17" r="4"/><line x1="11" y1="7" x2="17" y2="13"/></svg>
+    </button>
+    <div id="vbShapeTypeGrp" class="vbChoicePanel">
+      <div class="vbChoiceTitle">Forma</div>
+      <div class="vbChoiceOptions">
+        <button type="button" class="vbChoiceOpt" data-shape="oval" title="Óvalo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="12" rx="9" ry="6.5"/></svg>
+        </button>
+        <button type="button" class="vbChoiceOpt" data-shape="circle" title="Círculo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/></svg>
+        </button>
+        <button type="button" class="vbChoiceOpt" data-shape="square" title="Cuadrado">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4.5" y="4.5" width="15" height="15" rx="1.5"/></svg>
+        </button>
+        <button type="button" class="vbChoiceOpt" data-shape="rect" title="Rectángulo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="1.5"/></svg>
+        </button>
+        <button type="button" class="vbChoiceOpt" data-shape="cloud" title="Nube">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17a4 4 0 01-.5-7.97A5 5 0 0116 8a4 4 0 011 7.87"/><path d="M7 17h10"/></svg>
+        </button>
+        <button type="button" class="vbChoiceOpt" data-shape="arrow" title="Flecha">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="20" x2="20" y2="4"/><polyline points="10 4 20 4 20 14"/></svg>
+        </button>
+        <button type="button" class="vbChoiceOpt active" data-shape="line" title="Línea">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="20" x2="20" y2="4"/></svg>
+        </button>
+      </div>
+    </div>
     <button id="vbEraser" title="Borrador">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13l-6.5 6.5a2 2 0 0 1-2.83 0l-4.17-4.17a2 2 0 0 1 0-2.83L11 6l7 7z"/><path d="M8 21h11"/></svg>
     </button>
@@ -1934,6 +2023,10 @@ window.OcrEngine = (function(){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
     </button>
     <div class="vb-sep"></div>
+    <button id="vbUploadPdfBtn" title="PDFs">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+    </button>
+    <div class="vb-sep"></div>
     <div id="vbSettingsWrap">
       <button id="vbSettingsBtn" title="Configuración">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
@@ -1961,10 +2054,9 @@ window.OcrEngine = (function(){
       </select>
     </div>
     <div class="vbs-row">
-      <button id="vbUploadPdfBtn" class="vbs-action" title="PDFs">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        PDFs
-      </button>
+      <label class="vbs-label" for="vbPenOnly" style="display:flex;align-items:center;gap:7px;cursor:pointer;">
+        <input type="checkbox" id="vbPenOnly" autocomplete="off"> Rechazo de mano (solo lapicera/stylus)
+      </label>
     </div>
     <div class="vbs-row">
       <button id="vbExportPdf" class="vbs-action" title="Guardar como PDF">
@@ -1995,8 +2087,37 @@ window.OcrEngine = (function(){
        </div>
        <div id="vbPdfViewer" aria-label="Visor PDF paralelo">
          <div id="vbPdfViewerHead"><span id="vbPdfViewerTitle">Vista previa</span><button type="button" id="vbPdfViewerClose" title="Cerrar vista previa">×</button></div>
-         <div id="vbPdfViewerCanvasWrap"><canvas id="vbPdfViewerCanvas"></canvas></div>
+         <div id="vpDrawToolbar">
+           <button type="button" class="vpTool active" id="vpToolSelect" title="Seleccionar texto / mover">
+             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l7.5 17 2.5-7.5L21.5 11z"/><path d="M14 14l6 6"/></svg>
+           </button>
+           <button type="button" class="vpTool" id="vpToolPen" title="Lápiz: dibujar a mano libre (también sirve sobre PDFs escaneados/imagen)">
+             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+           </button>
+           <button type="button" class="vpTool" id="vpToolMarker" title="Marcador: resaltar a mano libre (también sirve sobre PDFs escaneados/imagen)">
+             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21l1.5-4.5L15 6l3 3-10.5 10.5z"/><path d="M12 9l3 3"/><path d="M15 6l3-3 3 3-3 3"/></svg>
+           </button>
+           <button type="button" class="vpTool" id="vpToolEraser" title="Borrar trazos dibujados">
+             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13l-6.5 6.5a2 2 0 0 1-2.83 0l-4.17-4.17a2 2 0 0 1 0-2.83L11 6l7 7z"/><path d="M8 21h11"/></svg>
+           </button>
+           <div class="vpDivider"></div>
+           <div id="vpDrawDots"></div>
+         </div>
+         <div id="vbPdfViewerCanvasWrap">
+           <div id="vpPageStack">
+             <canvas id="vbPdfViewerCanvas"></canvas>
+             <div id="vpTextLayer" class="textLayer"></div>
+             <div id="vpMarksLayer"></div>
+             <canvas id="vpInkCanvas"></canvas>
+           </div>
+         </div>
          <div id="vbPdfViewerControls"><button type="button" id="vbPdfViewerPrev" title="Página anterior">‹</button><span id="vbPdfViewerPage">–</span><button type="button" id="vbPdfViewerNext" title="Página siguiente">›</button><span id="vbPdfViewerZoom"><button type="button" id="vbPdfViewerZoomOut" title="Alejar PDF">−</button><span id="vbPdfViewerZoomValue">100%</span><button type="button" id="vbPdfViewerZoomIn" title="Acercar PDF">+</button></span></div>
+       </div>
+       <div id="vpSelToolbar">
+         <button type="button" id="vpSelHighlightBtn" title="Resaltar">Resaltar</button>
+         <button type="button" id="vpSelUnderlineBtn" title="Subrayar">Subrayar</button>
+         <div class="vpDivider"></div>
+         <div id="vpSelDots"></div>
        </div>
        <div id="vbPdfList"></div>
       <p id="vbPdfEmpty">Todavía no subiste ningún PDF a esta carpeta. Tocá "Agregar PDF(s)" para subir uno o varios; quedan guardados acá aunque cierres la app.</p>
@@ -2194,6 +2315,16 @@ window.OcrEngine = (function(){
     }
     targetCtx.closePath();
   }
+  // Para círculo/cuadrado forzamos que el cuadro delimitador sea parejo
+  // (mismo ancho que alto), tomando el lado mayor y respetando la dirección
+  // en la que se arrastró el dedo/lapicera desde el punto inicial.
+  function evenBBoxFrom(x0,y0,x1,y1){
+    const dx = x1-x0, dy = y1-y0;
+    const side = Math.max(Math.abs(dx), Math.abs(dy));
+    const sx = dx < 0 ? -side : side;
+    const sy = dy < 0 ? -side : side;
+    return { x0, y0, x1: x0+sx, y1: y0+sy };
+  }
   function drawShapeStroke(targetCtx, s){
     const x0=s.x0, y0=s.y0, x1=s.x1, y1=s.y1;
     targetCtx.save();
@@ -2226,11 +2357,26 @@ window.OcrEngine = (function(){
         targetCtx.strokeRect(rx, ry, rw, rh);
         break;
       }
+      case 'square': {
+        const b = evenBBoxFrom(x0,y0,x1,y1);
+        const rx = Math.min(b.x0,b.x1), ry = Math.min(b.y0,b.y1), side = Math.abs(b.x1-b.x0);
+        targetCtx.strokeRect(rx, ry, side, side);
+        break;
+      }
       case 'oval': {
         const cx = (x0+x1)/2, cy = (y0+y1)/2;
         const rx = Math.max(Math.abs(x1-x0)/2, 0.5), ry = Math.max(Math.abs(y1-y0)/2, 0.5);
         targetCtx.beginPath();
         targetCtx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI*2);
+        targetCtx.stroke();
+        break;
+      }
+      case 'circle': {
+        const b = evenBBoxFrom(x0,y0,x1,y1);
+        const cx = (b.x0+b.x1)/2, cy = (b.y0+b.y1)/2;
+        const r = Math.max(Math.abs(b.x1-b.x0)/2, 0.5);
+        targetCtx.beginPath();
+        targetCtx.ellipse(cx, cy, r, r, 0, 0, Math.PI*2);
         targetCtx.stroke();
         break;
       }
@@ -2357,6 +2503,9 @@ window.OcrEngine = (function(){
     if(window.crypto && crypto.randomUUID) return crypto.randomUUID();
     return 'p_' + Date.now() + '_' + Math.random().toString(16).slice(2);
   }
+  // Se expone en window: el panel de PDFs (otra IIFE, más abajo) también
+  // genera ids para las marcas/trazos que guarda y usa este mismo generador.
+  window.uid = uid;
 
   const PAPER_DOT = {blanco:"#B8B3A8", rayado:"#AFC4DA", cuadriculado:"#DCD3C0", punteado:"#C7BCA5"};
   const INK_COLORS = [
@@ -2371,6 +2520,13 @@ window.OcrEngine = (function(){
     {name:"Azul", hex:"#7A9CF0"}, {name:"Naranja", hex:"#F5A25D"}, {name:"Rojo", hex:"#F0776E"},
     {name:"Lila", hex:"#B79CF0"},
   ];
+  // Se exponen en window porque el bloque <script> del panel de carpetas
+  // (más abajo en el archivo) es una IIFE separada y necesita estos mismos
+  // colores; sin esto, ese script tira "MARK_COLORS is not defined" y se
+  // corta antes de definir openVectorPanelForFolder, dejando las carpetas
+  // sin poder abrirse.
+  window.INK_COLORS = INK_COLORS;
+  window.MARK_COLORS = MARK_COLORS;
   const FOLDER_COLORS = [
     "#3448C5", "#2E5EAA", "#3E5C76", "#3E6259", "#6B7A3A", "#6E5AA8",
     "#C43D3D", "#B5502E", "#C99A3C", "#7A5230", "#8A8580", "#2B2A28",
@@ -2406,6 +2562,11 @@ window.OcrEngine = (function(){
   let currentPenStyle = 'estandar';
   let currentShapeType = 'line';
   let currentMarkStyle = 'translucido';
+  // Igual que con PDF_PEN_WIDTH: el panel de PDFs (otra IIFE) necesita leer
+  // el estilo de marcador actual para dibujar con el mismo aspecto. Como
+  // esta variable cambia en tiempo de ejecución, se sincroniza a window en
+  // cada reasignación (ver más abajo) en vez de copiarla una sola vez.
+  window.currentMarkStyle = currentMarkStyle;
   let tidyMode = true;
   let textInsertPt = null, textStyle = 'cursiva';
   let pendingTidy = null; // strokes a mano que se reemplazan al confirmar el texto reconocido por OCR
@@ -2593,6 +2754,13 @@ window.OcrEngine = (function(){
   let pdfDrawColor = MARK_COLORS[8].hex; // rojo por defecto para el lápiz
   let pdfDrawing = false, pdfCurrentStroke = null, pdfDrawPointerId = null;
   const PDF_PEN_WIDTH = 3, PDF_MARKER_WIDTH = 16, PDF_ERASER_WIDTH = 18;
+  // Se exponen en window porque el panel de PDFs del bloque <script> de más
+  // abajo (otra IIFE separada) también dibuja lápiz/marcador sobre el PDF y
+  // necesita estos mismos anchos; sin esto, ese bloque tira "PDF_PEN_WIDTH
+  // is not defined" al primer trazo y no dibuja nada.
+  window.PDF_PEN_WIDTH = PDF_PEN_WIDTH;
+  window.PDF_MARKER_WIDTH = PDF_MARKER_WIDTH;
+  window.PDF_ERASER_WIDTH = PDF_ERASER_WIDTH;
 
   pageEl.style.width = BASE_W + 'px';
   pageEl.style.height = BASE_H + 'px';
@@ -2852,6 +3020,23 @@ window.OcrEngine = (function(){
   pdfLibraryCloseBtn.addEventListener('click', closePdfLibraryModal);
   pdfLibraryBtn.addEventListener('click', openPdfLibraryModal);
 
+  // El panel de PDF se ancha o achica según el ancho real que necesita la
+  // página renderizada, para que se vea completa sin recortes ni espacio
+  // sobrante: lo que no usa el PDF queda para la hoja de apuntes.
+  let pdfPanelManualWidth = false;
+  function autoFitPdfPanelWidth(baseViewport){
+    if(pdfPanelManualWidth) return;
+    if(!pdfPanelEl.classList.contains('open')) return;
+    if(window.innerWidth <= 700) return; // en mobile el panel usa 100% de ancho
+    const wrapPadding = 24; // padding:12px a cada lado de #pdfCanvasWrap
+    const areaWidth = workArea.getBoundingClientRect().width;
+    const minW = 230;
+    const maxW = areaWidth * 0.78;
+    let desired = Math.ceil(baseViewport.width) + wrapPadding;
+    desired = Math.max(minW, Math.min(maxW, desired));
+    pdfPanelEl.style.width = desired + 'px';
+  }
+
   async function renderCurrentPdfPage(){
     if(!currentPdfDoc) return;
     pdfCanvasEl.style.display = '';
@@ -2877,6 +3062,7 @@ window.OcrEngine = (function(){
     if(pdfRenderTask === task) pdfRenderTask = null;
     pdfPageLabelEl.textContent = currentPdfPageNum + ' / ' + currentPdfDoc.numPages;
     pdfZoomLabelEl.textContent = Math.round(pdfZoom*100) + '%';
+    autoFitPdfPanelWidth(baseViewport);
     if(currentPdfMeta){
       currentPdfMeta.lastPage = currentPdfPageNum;
       currentPdfMeta.zoom = pdfZoom;
@@ -3233,6 +3419,7 @@ window.OcrEngine = (function(){
       const buf = await blob.arrayBuffer();
       currentPdfDoc = await pdfjsLib.getDocument({ data: buf }).promise;
       currentPdfMeta = meta;
+      pdfPanelManualWidth = false; // nuevo PDF: recalcular el ancho ideal
       currentPdfPageNum = Math.min(Math.max(1, meta.lastPage || 1), currentPdfDoc.numPages);
       pdfZoom = meta.zoom || 1;
       currentPdfMarks = await pdfMarksGetByPdf(id).catch(()=>[]);
@@ -3369,9 +3556,11 @@ window.OcrEngine = (function(){
     pdfResizeHandleEl.addEventListener('pointerdown', (e)=>{
       if(!pdfPanelEl.classList.contains('open')) return;
       dragging = true;
+      pdfPanelManualWidth = true; // el usuario toma el control del ancho
       startX = e.clientX;
       startWidth = pdfPanelEl.getBoundingClientRect().width;
       pdfResizeHandleEl.classList.add('dragging');
+      pdfPanelEl.classList.add('dragging-resize');
       try{ pdfResizeHandleEl.setPointerCapture(e.pointerId); }catch(err){}
       e.preventDefault();
     });
@@ -3386,6 +3575,7 @@ window.OcrEngine = (function(){
       if(!dragging) return;
       dragging = false;
       pdfResizeHandleEl.classList.remove('dragging');
+      pdfPanelEl.classList.remove('dragging-resize');
     }
     pdfResizeHandleEl.addEventListener('pointerup', endDrag);
     pdfResizeHandleEl.addEventListener('pointercancel', endDrag);
@@ -3516,6 +3706,13 @@ window.OcrEngine = (function(){
   }, true);
   document.getElementById('toolbarScroll').addEventListener('scroll', closeAllDropdowns);
   window.addEventListener('resize', closeAllDropdowns);
+  window.addEventListener('resize', ()=>{
+    if(currentPdfDoc && pdfPanelEl.classList.contains('open')){
+      currentPdfDoc.getPage(currentPdfPageNum).then(page=>{
+        autoFitPdfPanelWidth(page.getViewport({ scale: pdfZoom * 1.3 }));
+      }).catch(()=>{});
+    }
+  });
 
   function renderPenStyleDrop(){
     penStyleDrop.innerHTML = '';
@@ -3540,7 +3737,7 @@ window.OcrEngine = (function(){
     Object.keys(MARK_STYLES).forEach(key=>{
       const b=document.createElement('button'); b.type='button'; b.className='markStyleOpt'+(key===currentMarkStyle?' active':'');
       b.textContent=MARK_STYLES[key].name; b.dataset.markStyle=key;
-      b.addEventListener('click',()=>{ currentMarkStyle=key; renderMarkStyleDrop(); closeAllDropdowns(); });
+      b.addEventListener('click',()=>{ currentMarkStyle=key; window.currentMarkStyle=key; renderMarkStyleDrop(); closeAllDropdowns(); });
       markStyleDrop.appendChild(b);
     });
   }
@@ -4140,7 +4337,12 @@ window.OcrEngine = (function(){
     fino:        {name:'Subrayador fino',       alpha:.72, composite:'multiply', widthMul:.42, linecap:'round'},
     doble:       {name:'Subrayador doble',      alpha:.62, composite:'multiply', widthMul:.58, linecap:'butt'}
   };
-  function markStyleFor(stroke){ return MARK_STYLES[stroke.markStyle||currentMarkStyle] || MARK_STYLES.translucido; }
+  // Robusto ante stroke=undefined: varios llamadores de styleFor() (incluido
+  // el panel de PDFs) pasan solo el nombre de la herramienta al dibujar el
+  // primer punto de un trazo, sin el objeto stroke todavía armado; sin este
+  // resguardo tira "Cannot read properties of undefined (reading 'markStyle')"
+  // y corta el dibujo con marcador en seco.
+  function markStyleFor(stroke){ const key = (stroke && stroke.markStyle) || currentMarkStyle; return MARK_STYLES[key] || MARK_STYLES.translucido; }
   renderMarkStyleDrop();
   function styleFor(t, stroke){
     switch(t){
@@ -4252,6 +4454,15 @@ window.OcrEngine = (function(){
     drawFreehandTail(targetCtx, stroke, style);
     targetCtx.globalAlpha = 1; targetCtx.globalCompositeOperation = 'source-over';
   }
+  // Se exponen en window: el panel de PDFs (otra IIFE, más abajo en el
+  // archivo) dibuja lápiz/marcador sobre el PDF con estas mismas funciones;
+  // sin esto tira "styleFor/dotTo/... is not defined" en el primer trazo y
+  // no dibuja nada.
+  window.styleFor = styleFor;
+  window.dotTo = dotTo;
+  window.drawFreehandIncrement = drawFreehandIncrement;
+  window.drawFreehandTail = drawFreehandTail;
+  window.drawFreehandSmooth = drawFreehandSmooth;
   function lineSegmentTo(targetCtx, stroke, style){
     targetCtx.globalAlpha = style.alpha; targetCtx.globalCompositeOperation = style.composite;
     targetCtx.strokeStyle = stroke.color;
@@ -5446,7 +5657,11 @@ window.OcrEngine = (function(){
     // Tesseract le cuesta mucho más, así que si el alto resultante quedaría
     // por debajo de un piso razonable, subimos la escala para esa palabra en
     // particular (con un techo para no generar canvases gigantes/lentos).
-    const MIN_PIXEL_H = 64, MAX_SCALE = 9;
+    // El piso se subió de 64 a 96px: con letra manuscrita (a diferencia de
+    // letra de imprenta) el motor rinde bastante mejor cuanto más grande es
+    // la altura de x real que le llega, y 64px se quedaba corto para trazos
+    // finos o palabras de pocas letras.
+    const MIN_PIXEL_H = 96, MAX_SCALE = 12;
     if(h > 0 && h*scale < MIN_PIXEL_H) scale = Math.min(MAX_SCALE, MIN_PIXEL_H / h);
 
     const off = document.createElement('canvas');
@@ -5455,6 +5670,11 @@ window.OcrEngine = (function(){
     const octx = off.getContext('2d');
     octx.fillStyle = '#ffffff';
     octx.fillRect(0, 0, off.width, off.height);
+    // Un desenfoque muy leve antes de binarizar simula mejor la tinta real
+    // (Tesseract está entrenado con fotos/scans, no con trazos de canvas
+    // perfectamente aliasados) y suaviza el escalonado de los bordes que deja
+    // el canvas al dibujar a escalas altas, sin borronear la forma general.
+    octx.filter = 'blur(0.5px)';
     octx.scale(scale, scale);
     octx.translate(-minX, -minY);
     boxes.forEach(b=>{
@@ -5478,6 +5698,7 @@ window.OcrEngine = (function(){
     // el umbral de Otsu (adaptativo) en vez de un número fijo, porque el
     // contraste real varía según el grosor de línea y la escala usada.
     octx.setTransform(1,0,0,1,0,0);
+    octx.filter='none';
     const imgData = octx.getImageData(0, 0, off.width, off.height);
     window.OcrEngine.binarizeImageData(imgData);
     octx.putImageData(imgData, 0, 0);
@@ -5886,6 +6107,19 @@ window.OcrEngine = (function(){
 <script>
 (function(){
   "use strict";
+  // MARK_COLORS/INK_COLORS y las funciones/anchos de dibujo viven en el otro
+  // bloque <script> (otra IIFE); se toman de window, donde ese bloque los expone.
+  const MARK_COLORS = window.MARK_COLORS;
+  const INK_COLORS = window.INK_COLORS;
+  const PDF_PEN_WIDTH = window.PDF_PEN_WIDTH;
+  const PDF_MARKER_WIDTH = window.PDF_MARKER_WIDTH;
+  const PDF_ERASER_WIDTH = window.PDF_ERASER_WIDTH;
+  const styleFor = window.styleFor;
+  const dotTo = window.dotTo;
+  const drawFreehandIncrement = window.drawFreehandIncrement;
+  const drawFreehandTail = window.drawFreehandTail;
+  const drawFreehandSmooth = window.drawFreehandSmooth;
+  const uid = window.uid;
   const vbView=document.getElementById('vectorPanelView');
   const vbHeader=document.getElementById('vbHeader');
   const vbSvg=document.getElementById('vbSvg'), vbCamera=document.getElementById('vbCamera'), vbObjects=document.getElementById('vbObjects');
@@ -5898,7 +6132,41 @@ window.OcrEngine = (function(){
     if(!vbHeader) return 108;
     const h = Math.round(vbHeader.getBoundingClientRect().height) || 108;
     vbView.style.setProperty('--vb-header-h', h+'px');
+    vbView.style.setProperty('--vb-board-top', h+'px');
     return h;
+  }
+  // vbPdfSplitW: ancho (px) reservado a la izquierda por el panel de PDFs
+  // cuando, en pantallas angostas, queda acoplado al costado (split real
+  // en paralelo con la hoja al lado, en vez de taparla). vbBoard usa
+  // --vb-board-left (este ancho) para su borde izquierdo, así el lienzo
+  // arranca justo donde termina el panel y nunca queda debajo de él.
+  let vbPdfSplitW = 0;
+  function vbUpdateBoardLeft(){
+    vbView.style.setProperty('--vb-board-left', vbPdfSplitW+'px');
+  }
+  function vbRecenterAfterLayoutChange(){
+    if(vbPaperSel.value==='a4' || vbPaperSel.value==='oficio'){ vbFitToPage(); return; }
+    if(vScale===1){ vTx=vbPdfSplitW+(innerWidth-vbPdfSplitW)/2; vTy=(vbSyncHeaderHeight()+innerHeight)/2; }
+    vbTransform();
+  }
+  // Recalcula (o apaga) el split cuando el panel de PDFs abre/cierra/cambia
+  // de tamaño en pantallas angostas, para que la hoja se vea siempre al
+  // lado, en paralelo, nunca tapada.
+  function vbUpdatePdfSplitLayout(){
+    const splitMode = window.innerWidth <= 760 && vbPdfPanel && vbPdfPanel.classList.contains('open');
+    if(!splitMode){
+      if(vbPdfSplitW !== 0){ vbPdfSplitW = 0; vbUpdateBoardLeft(); vbRecenterAfterLayoutChange(); }
+      return;
+    }
+    requestAnimationFrame(()=>{
+      const w = vbPdfPanel ? Math.round(vbPdfPanel.getBoundingClientRect().width) : 0;
+      const newW = w ? w + 6 : 0;
+      if(newW !== vbPdfSplitW){
+        vbPdfSplitW = newW;
+        vbUpdateBoardLeft();
+        vbRecenterAfterLayoutChange();
+      }
+    });
   }
   const vbColor=document.getElementById('vbColor'), vbSize=document.getElementById('vbSize');
   const vbSizeLabel=document.getElementById('vbSizeLabel');
@@ -5948,6 +6216,7 @@ window.OcrEngine = (function(){
   }
   function vbSavePaperState(format,style){ try{ localStorage.setItem(vbPaperKey(), JSON.stringify({format,style})); }catch(e){} }
   function vbPenStyleKey(){ return 'cuaderno:vectorPenStyle:' + (vCurrentFolder ? vCurrentFolder.id : 'scratch'); }
+  function vbMarkStyleKey(){ return 'cuaderno:vectorMarkStyle:' + (vCurrentFolder ? vCurrentFolder.id : 'scratch'); }
 
   // Tamaño de la hoja A4 en el mismo sistema de unidades que usa el resto de
   // la app para sus páginas (1240x1754 ≈ A4 a 150dpi), así el PDF exportado
@@ -5960,6 +6229,13 @@ window.OcrEngine = (function(){
   let vScale=1, vTx=innerWidth/2, vTy=innerHeight/2, vTool='pen', vSpace=false;
   let vStroke=null, vPoints=[], vGesture=null, vTouchInfo=null, vSelected=null;
   let vHistory=[], vFuture=[], vSaved='';
+  // ---- Herramienta Formas (para cuadros conceptuales) ----
+  let vShapeType='line', vShapeEl=null, vShapeStart=null;
+  // ---- Rechazo de palma real: con esto activo, un dedo (pointerType
+  // "touch") no dibuja ni interactúa con la hoja; sólo la lapicera/stylus
+  // (pointerType "pen") o el mouse pueden hacerlo. La única excepción es la
+  // herramienta "mover lienzo" (mano), que sigue funcionando con el dedo.
+  let vPenOnly=false;
   // ---- Estilos de trazo del lápiz (bolígrafo, caligráfico, etc.) ----
   const VB_PEN_STYLES = {
     estandar:      { name:'Estándar',        widthMul:1,    alpha:1,   linecap:'round',  blend:false },
@@ -6047,7 +6323,7 @@ window.OcrEngine = (function(){
   });
   vbMarkStyleSel.addEventListener('change', ()=>{
     vMarkStyle=vbMarkStyleSel.value;
-    try{ localStorage.setItem('vb-mark-style:'+currentFolderId, vMarkStyle); }catch(e){}
+    try{ localStorage.setItem(vbMarkStyleKey(), vMarkStyle); }catch(e){}
     vbMarkStyleSel.classList.remove('open');
   });
   function vbRenderToolThickness(kind){
@@ -6118,15 +6394,43 @@ window.OcrEngine = (function(){
     vTool=t;
     vbView.querySelectorAll('#vbToolbar button').forEach(b=>b.classList.remove('active'));
     document.getElementById('vb'+t.charAt(0).toUpperCase()+t.slice(1))?.classList.add('active');
-    vbBoard.style.cursor = t==='pen'||t==='highlighter' ? 'crosshair' : t==='text' ? 'text' : t==='eraser' ? 'none' : t==='select' ? 'default' : 'grab';
+    vbBoard.style.cursor = t==='pen'||t==='highlighter'||t==='shape' ? 'crosshair' : t==='text' ? 'text' : t==='eraser' ? 'none' : t==='select' ? 'default' : 'grab';
     vbSelectHint.classList.toggle('show',t==='select');
     vbSyncSizeUI();
     vbUpdateEraserCursorSize();
     if(vbThicknessPanel) vbRenderThicknessPanel();
     vbEraserCursor.style.display = (t==='eraser') ? 'block' : 'none';
   }
-  ['select','pen','highlighter','eraser','text','hand'].forEach(x=>{
+  ['select','pen','highlighter','eraser','text','hand','shape'].forEach(x=>{
     document.getElementById('vb'+x.charAt(0).toUpperCase()+x.slice(1)).onclick=()=>vbSetTool(x);
+  });
+
+  // ---- Botón de Formas: abre/cierra el desplegable con los tipos de forma,
+  // igual que hace el lápiz/marcador con su propio panel de estilo ----
+  const vbShapeBtn=document.getElementById('vbShape');
+  const vbShapeTypeGrp=document.getElementById('vbShapeTypeGrp');
+  const vbShapeTypeBtns=[...vbShapeTypeGrp.querySelectorAll('.vbChoiceOpt')];
+  if(vbShapeBtn) vbShapeBtn.addEventListener('click',(e)=>{
+    e.preventDefault(); e.stopPropagation();
+    const wasActive = vTool==='shape';
+    vbSetTool('shape');
+    if(wasActive){ vbShapeTypeGrp.classList.toggle('open'); }
+    else {
+      const r=vbShapeBtn.getBoundingClientRect();
+      vbShapeTypeGrp.style.left=Math.max(8,Math.min(r.left,innerWidth-236))+'px';
+      vbShapeTypeGrp.style.top=(r.bottom+8)+'px';
+      vbShapeTypeGrp.classList.add('open');
+    }
+  });
+  vbShapeTypeBtns.forEach(b=>{
+    b.addEventListener('click',(e)=>{
+      e.preventDefault(); e.stopPropagation();
+      vShapeType=b.dataset.shape;
+      vbShapeTypeBtns.forEach(x=>x.classList.toggle('active', x===b));
+    });
+  });
+  document.addEventListener('pointerdown', e=>{
+    if(!e.target.closest('#vbShape') && !e.target.closest('#vbShapeTypeGrp')) vbShapeTypeGrp.classList.remove('open');
   });
 
   function vbStabilizePoint(raw){
@@ -6152,6 +6456,93 @@ window.OcrEngine = (function(){
     }
     const p=a[a.length-1]; d+=` T ${p.x} ${p.y}`;
     return d;
+  }
+  // ---------- Formas: helpers geométricos (equivalentes SVG de los que usa
+  // el cuaderno viejo basado en canvas) ----------
+  // Para círculo/cuadrado forzamos que el cuadro delimitador sea parejo
+  // (mismo ancho que alto), tomando el lado mayor y respetando la dirección
+  // en la que se arrastró el dedo/lapicera desde el punto inicial.
+  function vbEvenBBoxFrom(x0,y0,x1,y1){
+    const dx=x1-x0, dy=y1-y0;
+    const side=Math.max(Math.abs(dx),Math.abs(dy));
+    const sx=dx<0?-side:side, sy=dy<0?-side:side;
+    return {x0,y0,x1:x0+sx,y1:y0+sy};
+  }
+  function vbCloudPathD(x0,y0,x1,y1){
+    const cx=(x0+x1)/2, cy=(y0+y1)/2;
+    const rx=Math.max(Math.abs(x1-x0)/2,10), ry=Math.max(Math.abs(y1-y0)/2,10);
+    const bumps=Math.max(8,Math.round((rx+ry)/16));
+    let d='';
+    for(let i=0;i<bumps;i++){
+      const a0=(i/bumps)*Math.PI*2, a1=((i+1)/bumps)*Math.PI*2;
+      if(i===0) d+=`M ${cx+Math.cos(a0)*rx} ${cy+Math.sin(a0)*ry}`;
+      const aMid=(a0+a1)/2;
+      const mx=cx+Math.cos(aMid)*rx*1.15, my=cy+Math.sin(aMid)*ry*1.15;
+      const ex=cx+Math.cos(a1)*rx, ey=cy+Math.sin(a1)*ry;
+      d+=` Q ${mx} ${my} ${ex} ${ey}`;
+    }
+    return d+' Z';
+  }
+  function vbArrowPathD(x0,y0,x1,y1,w){
+    const angle=Math.atan2(y1-y0,x1-x0);
+    const headLen=Math.max(11,(w||3)*4.5);
+    const spread=Math.PI/7.5;
+    const hx1=x1-headLen*Math.cos(angle-spread), hy1=y1-headLen*Math.sin(angle-spread);
+    const hx2=x1-headLen*Math.cos(angle+spread), hy2=y1-headLen*Math.sin(angle+spread);
+    return `M ${x0} ${y0} L ${x1} ${y1} M ${x1} ${y1} L ${hx1} ${hy1} L ${hx2} ${hy2} Z`;
+  }
+  // Crea el elemento SVG para el tipo de forma elegido (line/rect/oval/etc.)
+  function vbNewShapeEl(type){
+    const tagMap={rect:'rect', square:'rect', oval:'ellipse', circle:'ellipse', line:'line'};
+    const tag=tagMap[type]||'path'; // arrow y cloud se dibujan como <path>
+    const el=document.createElementNS(NS,tag);
+    el.setAttribute('stroke', vbColor.value);
+    el.setAttribute('stroke-width', Math.max(.4, +vbSize.value));
+    el.setAttribute('stroke-linecap','round');
+    el.setAttribute('stroke-linejoin','round');
+    el.setAttribute('fill', type==='arrow' ? vbColor.value : 'none');
+    el.setAttribute('vector-effect','non-scaling-stroke');
+    el.dataset.obj='shape';
+    el.dataset.tool='shape';
+    el.dataset.shapeType=type;
+    return el;
+  }
+  // Actualiza la geometría del elemento a medida que se arrastra
+  function vbUpdateShapeGeom(el, type, x0,y0,x1,y1){
+    switch(type){
+      case 'rect': {
+        const rx=Math.min(x0,x1), ry=Math.min(y0,y1);
+        el.setAttribute('x',rx); el.setAttribute('y',ry);
+        el.setAttribute('width',Math.abs(x1-x0)); el.setAttribute('height',Math.abs(y1-y0));
+        break;
+      }
+      case 'square': {
+        const b=vbEvenBBoxFrom(x0,y0,x1,y1);
+        const rx=Math.min(b.x0,b.x1), ry=Math.min(b.y0,b.y1), side=Math.abs(b.x1-b.x0);
+        el.setAttribute('x',rx); el.setAttribute('y',ry);
+        el.setAttribute('width',side); el.setAttribute('height',side);
+        break;
+      }
+      case 'oval': {
+        const cx=(x0+x1)/2, cy=(y0+y1)/2;
+        el.setAttribute('cx',cx); el.setAttribute('cy',cy);
+        el.setAttribute('rx',Math.max(Math.abs(x1-x0)/2,.5));
+        el.setAttribute('ry',Math.max(Math.abs(y1-y0)/2,.5));
+        break;
+      }
+      case 'circle': {
+        const b=vbEvenBBoxFrom(x0,y0,x1,y1);
+        const cx=(b.x0+b.x1)/2, cy=(b.y0+b.y1)/2, r=Math.max(Math.abs(b.x1-b.x0)/2,.5);
+        el.setAttribute('cx',cx); el.setAttribute('cy',cy);
+        el.setAttribute('rx',r); el.setAttribute('ry',r);
+        break;
+      }
+      case 'cloud': el.setAttribute('d', vbCloudPathD(x0,y0,x1,y1)); break;
+      case 'arrow': el.setAttribute('d', vbArrowPathD(x0,y0,x1,y1, +el.getAttribute('stroke-width'))); break;
+      default: // line
+        el.setAttribute('x1',x0); el.setAttribute('y1',y0);
+        el.setAttribute('x2',x1); el.setAttribute('y2',y1);
+    }
   }
   function vbNewStroke(){
     vStroke=document.createElementNS(NS,'path');
@@ -6266,6 +6657,10 @@ window.OcrEngine = (function(){
   vbBoard.addEventListener('pointerdown', e=>{
     if(vbView.style.display==='none') return;
     if(e.pointerType==='mouse' && e.button!==0) return;
+    // Rechazo de palma real: con "Ignorar dedos" activo, un dedo no puede
+    // dibujar, borrar, seleccionar ni escribir texto; sólo mover el lienzo
+    // con la herramienta "mano" sigue andando con el dedo.
+    if(vPenOnly && e.pointerType==='touch' && !(vSpace || vTool==='hand')) return;
     vbBoard.setPointerCapture(e.pointerId);
     const p=vbClientWorldPoint(e.clientX, e.clientY);
     if(vSpace || vTool==='hand'){ vGesture={sx:e.clientX, sy:e.clientY, tx:vTx, ty:vTy}; return; }
@@ -6283,6 +6678,13 @@ window.OcrEngine = (function(){
       vbTextBox.value=''; vbTextBox.dataset.x=p.x; vbTextBox.dataset.y=p.y;
       vbTextBox.style.left=e.clientX+'px'; vbTextBox.style.top=e.clientY+'px'; vbTextBox.style.display='block'; vbTextBox.focus(); return;
     }
+    if(vTool==='shape'){
+      vShapeStart=p; vShapeEl=vbNewShapeEl(vShapeType);
+      vbUpdateShapeGeom(vShapeEl, vShapeType, p.x, p.y, p.x, p.y);
+      vbObjects.appendChild(vShapeEl);
+      vGesture={shape:true};
+      return;
+    }
     if(vTool==='pen' || vTool==='highlighter'){ vPoints=[p]; vbNewStroke(); vGesture={draw:true}; }
   });
   vbBoard.addEventListener('pointermove', e=>{
@@ -6295,6 +6697,9 @@ window.OcrEngine = (function(){
       if(Math.hypot(p.x-q.x, p.y-q.y) > .25/Math.max(vScale,.1)){ vPoints.push(p); vStroke.setAttribute('d', vbSmoothPath(vPoints)); }
     } else if(vGesture.erase){
       vbEraseCircleAt(e.clientX, e.clientY);
+    } else if(vGesture.shape){
+      const p=vbClientWorldPoint(e.clientX, e.clientY);
+      vbUpdateShapeGeom(vShapeEl, vShapeType, vShapeStart.x, vShapeStart.y, p.x, p.y);
     } else if(vGesture.select && vSelected){
       const dx=(e.clientX-vGesture.sx)/Math.max(vScale,.01), dy=(e.clientY-vGesture.sy)/Math.max(vScale,.01);
       vSelected.setAttribute('transform','translate('+dx+' '+dy+')');
@@ -6302,17 +6707,29 @@ window.OcrEngine = (function(){
       vTx=vGesture.tx+(e.clientX-vGesture.sx); vTy=vGesture.ty+(e.clientY-vGesture.sy); vbTransform();
     }
   });
-  vbBoard.addEventListener('pointerup', ()=>{
+  vbBoard.addEventListener('pointerup', e=>{
     if(!vGesture) return;
     if(vGesture.draw){
       if(vPoints.length<2) vStroke.remove();
       else { vStroke.dataset.pts = JSON.stringify(vPoints); vbCommit(); vbScheduleLiveRecognition(); }
     }
     if(vGesture.erase && vEraseDirty){ vbCommit(); vEraseDirty=false; }
+    if(vGesture.shape){
+      // Un toque sin arrastre no cuenta como forma: la descartamos para no
+      // dejar puntitos accidentales en la hoja.
+      const p=vbClientWorldPoint(e.clientX, e.clientY);
+      const tooSmall = Math.hypot(p.x-vShapeStart.x, p.y-vShapeStart.y) < 4/Math.max(vScale,.1);
+      if(tooSmall) vShapeEl.remove();
+      else vbCommit();
+      vShapeEl=null; vShapeStart=null;
+    }
     if(vGesture.select && vSelected){ vbCommit(); }
     vGesture=null; vStroke=null; vPoints=[];
   });
-  vbBoard.addEventListener('pointercancel', ()=>{ vGesture=null; vStroke=null; vPoints=[]; });
+  vbBoard.addEventListener('pointercancel', ()=>{
+    if(vGesture && vGesture.shape && vShapeEl) vShapeEl.remove();
+    vGesture=null; vStroke=null; vPoints=[]; vShapeEl=null; vShapeStart=null;
+  });
   vbBoard.addEventListener('pointerleave', ()=>{ vbEraserCursor.style.display = (vTool==='eraser' && vbView.style.display!=='none') ? 'block' : 'none'; });
   vbBoard.addEventListener('pointerenter', ()=>{ if(vTool==='eraser') vbEraserCursor.style.display='block'; });
 
@@ -6354,11 +6771,94 @@ window.OcrEngine = (function(){
     vbLiveRecognition.style.top=Math.round(Math.max(8,y-vbLiveRecognition.offsetHeight-8))+'px';
   }
   // Solo trazos de lápiz/lapicera (no marcador, que ensucia el OCR con manchas
-  // translúcidas anchas) y que tengan puntos crudos guardados.
+  // translúcidas anchas) y que tengan puntos crudos guardados. Antes esto
+  // devolvía "los últimos 12 trazos" a lo bruto, sin importar si pertenecían
+  // a la misma palabra: si el usuario venía de escribir otra palabra cerca,
+  // o retocaba una letra vieja, esos trazos ajenos se colaban en la imagen
+  // y confundían al reconocedor. Ahora agrupa en renglones y palabras con el
+  // mismo criterio adaptativo que usa el cuaderno, y aísla solo la palabra
+  // que contiene el trazo recién dibujado.
+  function vbStrokeBoxes(paths){
+    return paths.map(p=>{
+      let pts; try{ pts=JSON.parse(p.dataset.pts); }catch(e){ pts=null; }
+      if(!pts || !pts.length) return null;
+      const width=Math.max(2.5, parseFloat(p.getAttribute('stroke-width'))||3);
+      let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+      pts.forEach(pt=>{
+        const r=width/2+1.5;
+        minX=Math.min(minX,pt.x-r); maxX=Math.max(maxX,pt.x+r);
+        minY=Math.min(minY,pt.y-r); maxY=Math.max(maxY,pt.y+r);
+      });
+      return {path:p, minX, minY, maxX, maxY, h:maxY-minY};
+    }).filter(Boolean);
+  }
+  function vbGroupIntoLines(boxes, medianH){
+    const sorted=[...boxes].sort((a,b)=>a.minY-b.minY);
+    const lineGap=Math.max(10, medianH*0.55);
+    const lines=[]; let current=null;
+    sorted.forEach(b=>{
+      if(current && b.minY<=current.maxY+lineGap){
+        current.boxes.push(b);
+        current.minY=Math.min(current.minY,b.minY);
+        current.maxY=Math.max(current.maxY,b.maxY);
+      }else{
+        current={boxes:[b],minY:b.minY,maxY:b.maxY};
+        lines.push(current);
+      }
+    });
+    return lines;
+  }
+  function vbGroupLineIntoWords(line, medianH){
+    const sorted=[...line.boxes].sort((a,b)=>a.minX-b.minX);
+    const gaps=[];
+    for(let i=1;i<sorted.length;i++){
+      const g=sorted[i].minX-sorted[i-1].maxX;
+      if(g>-medianH) gaps.push(g);
+    }
+    const fallbackGap=Math.max(12, medianH*0.65);
+    let wordGap=fallbackGap;
+    if(gaps.length>=2){
+      const sortedGaps=[...gaps].sort((a,b)=>a-b);
+      const lowerHalf=sortedGaps.slice(0, Math.max(1, Math.ceil(sortedGaps.length/2)));
+      const letterGap=lowerHalf[Math.floor(lowerHalf.length/2)];
+      const adaptive=Math.max(letterGap*2.4, 8);
+      wordGap=Math.min(Math.max(adaptive, medianH*0.35), medianH*1.5);
+      wordGap=Math.max(wordGap, 10);
+    }
+    const words=[]; let current=null;
+    sorted.forEach(b=>{
+      if(current && b.minX-current.maxX<=wordGap){
+        current.boxes.push(b);
+        current.minX=Math.min(current.minX,b.minX);
+        current.maxX=Math.max(current.maxX,b.maxX);
+        current.minY=Math.min(current.minY,b.minY);
+        current.maxY=Math.max(current.maxY,b.maxY);
+      }else{
+        current={boxes:[b],minX:b.minX,maxX:b.maxX,minY:b.minY,maxY:b.maxY};
+        words.push(current);
+      }
+    });
+    return words;
+  }
   function vbRecentPaths(){
-    return [...vbObjects.querySelectorAll('path[data-obj="stroke"]')]
+    // Ventana de trazos recientes (no toda la hoja, por rendimiento); de ahí
+    // se aísla solo la palabra que contiene el último trazo dibujado.
+    const all=[...vbObjects.querySelectorAll('path[data-obj="stroke"]')]
       .filter(p=>p.dataset.tool!=='highlighter' && p.dataset.pts)
-      .slice(-12);
+      .slice(-40);
+    if(!all.length) return [];
+    const lastPath=all[all.length-1];
+    const boxes=vbStrokeBoxes(all);
+    if(!boxes.length) return [];
+    const heights=boxes.map(b=>b.h).filter(h=>h>1).sort((a,b)=>a-b);
+    const medianH=heights.length?heights[Math.floor(heights.length/2)]:30;
+    const lines=vbGroupIntoLines(boxes,medianH);
+    const line=lines.find(l=>l.boxes.some(b=>b.path===lastPath));
+    if(!line) return [lastPath];
+    const words=vbGroupLineIntoWords(line,medianH);
+    const word=words.find(w=>w.boxes.some(b=>b.path===lastPath));
+    if(!word) return [lastPath];
+    return word.boxes.map(b=>b.path);
   }
   // Suavizado leve (promedio móvil), igual criterio que usa "Emprolijar
   // letra" en el cuaderno: saca el microtemblor de la mano sin cambiar la
@@ -6399,8 +6899,11 @@ window.OcrEngine = (function(){
     const w=Math.max(1,maxX-minX), h=Math.max(1,maxY-minY);
 
     // Resolución mínima: si la palabra queda chica, subimos la escala para
-    // que Tesseract tenga suficientes píxeles con los que trabajar.
-    const MIN_PIXEL_H=64, MAX_SCALE=9;
+    // que Tesseract tenga suficientes píxeles con los que trabajar. El piso
+    // se subió de 64 a 96px por la misma razón que en el cuaderno: letra
+    // manuscrita necesita más resolución que letra de imprenta para que el
+    // motor la lea bien.
+    const MIN_PIXEL_H=96, MAX_SCALE=12;
     let scale=3.5;
     if(h>0 && h*scale<MIN_PIXEL_H) scale=Math.min(MAX_SCALE, MIN_PIXEL_H/h);
 
@@ -6409,6 +6912,10 @@ window.OcrEngine = (function(){
     canvas.height=Math.max(1,Math.round(h*scale));
     const ctx=canvas.getContext('2d');
     ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    // Desenfoque muy leve antes de binarizar: suaviza el escalonado del
+    // trazo dibujado a escalas altas, más parecido a tinta real que a un
+    // trazo de canvas perfectamente aliasado (igual criterio que el cuaderno).
+    ctx.filter='blur(0.5px)';
     ctx.scale(scale,scale); ctx.translate(-minX,-minY);
     ctx.strokeStyle='#000000'; ctx.fillStyle='#000000';
     ctx.lineCap='round'; ctx.lineJoin='round';
@@ -6431,6 +6938,7 @@ window.OcrEngine = (function(){
     const imgData=ctx.getImageData(0,0,canvas.width,canvas.height);
     window.OcrEngine.binarizeImageData(imgData);
     ctx.setTransform(1,0,0,1,0,0);
+    ctx.filter='none';
     ctx.putImageData(imgData,0,0);
 
     return {canvas, box:{x:minX,y:minY,r:maxX,b:maxY}};
@@ -6461,10 +6969,20 @@ window.OcrEngine = (function(){
     clearTimeout(vbLiveTimer);
     const paths=vbRecentPaths();
     if(paths.length){
-      const last=paths[paths.length-1].getBBox();
-      vbLiveCandidate={text:'',box:last};
+      let bx=null;
+      paths.forEach(p=>{
+        const r=p.getBBox();
+        if(!bx){ bx={x:r.x,y:r.y,width:r.width,height:r.height}; }
+        else{
+          const x2=Math.max(bx.x+bx.width, r.x+r.width);
+          const y2=Math.max(bx.y+bx.height, r.y+r.height);
+          bx.x=Math.min(bx.x,r.x); bx.y=Math.min(bx.y,r.y);
+          bx.width=x2-bx.x; bx.height=y2-bx.y;
+        }
+      });
+      vbLiveCandidate={text:'',box:bx};
       vbLiveWord.textContent='Reconociendo…';
-      vbPositionLiveRecognition(last);
+      vbPositionLiveRecognition(bx);
     }
     vbLiveTimer=setTimeout(vbRecognizeRecentWord,520);
   }
@@ -6537,13 +7055,13 @@ window.OcrEngine = (function(){
   // ---------- Tipo de hoja ----------
   const VB_PATTERNS = { cuadriculado:'vbPatternGrid', rayado:'vbPatternLined', punteado:'vbPatternDotted' };
   function vbFitToPage(){
-    const margin=48, topReserve=vbSyncHeaderHeight()+16, bottomReserve=90;
-    const availW = Math.max(200, innerWidth - margin*2);
+    const margin=48, topReserve=vbSyncHeaderHeight()+16, bottomReserve=90, leftReserve=vbPdfSplitW;
+    const availW = Math.max(200, innerWidth - leftReserve - margin*2);
     const availH = Math.max(200, innerHeight - topReserve - bottomReserve);
     const page=vbPageSize(vbPaperSel.value);
     const s = Math.max(.1, Math.min(availW/page.w, availH/page.h, 3));
     vScale = s;
-    vTx = (innerWidth - page.w*s)/2;
+    vTx = leftReserve + margin + (availW - page.w*s)/2;
     vTy = topReserve + (availH - page.h*s)/2;
     vbTransform();
   }
@@ -6768,22 +7286,63 @@ window.OcrEngine = (function(){
   // --- Almacenamiento persistente de los PDFs subidos (IndexedDB, por carpeta) ---
   const VB_PDF_DB_NAME = 'cuadernoPdfsDB';
   const VB_PDF_STORE = 'pdfs';
+  const VB_PDF_MARKS_STORE = 'marks';
   let vbPdfDbPromise = null;
   function vbPdfDbOpen(){
     if(vbPdfDbPromise) return vbPdfDbPromise;
     vbPdfDbPromise = new Promise((resolve, reject)=>{
-      const req = indexedDB.open(VB_PDF_DB_NAME, 1);
+      const req = indexedDB.open(VB_PDF_DB_NAME, 2);
       req.onupgradeneeded = ()=>{
         const db = req.result;
         if(!db.objectStoreNames.contains(VB_PDF_STORE)){
           const store = db.createObjectStore(VB_PDF_STORE, { keyPath:'uid' });
           store.createIndex('folderId', 'folderId', { unique:false });
         }
+        // Marcas (resaltado/subrayado por selección de texto + trazos de
+        // lápiz/marcador a mano libre) dibujadas sobre los PDFs de esta
+        // biblioteca. Sirven igual sobre PDFs con texto real que sobre
+        // escaneos/imágenes, porque el dibujo a mano libre no depende de que
+        // haya texto seleccionable.
+        if(!db.objectStoreNames.contains(VB_PDF_MARKS_STORE)){
+          const store = db.createObjectStore(VB_PDF_MARKS_STORE, { keyPath:'id' });
+          store.createIndex('pdfUid', 'pdfUid', { unique:false });
+        }
       };
       req.onsuccess = ()=> resolve(req.result);
       req.onerror = ()=> reject(req.error);
     });
     return vbPdfDbPromise;
+  }
+  async function vpMarkPut(mark){
+    const db = await vbPdfDbOpen();
+    return new Promise((resolve, reject)=>{
+      const tx = db.transaction(VB_PDF_MARKS_STORE, 'readwrite');
+      tx.objectStore(VB_PDF_MARKS_STORE).put(mark);
+      tx.oncomplete = ()=> resolve();
+      tx.onerror = ()=> reject(tx.error);
+    });
+  }
+  async function vpMarkDelete(id){
+    const db = await vbPdfDbOpen();
+    return new Promise((resolve, reject)=>{
+      const tx = db.transaction(VB_PDF_MARKS_STORE, 'readwrite');
+      tx.objectStore(VB_PDF_MARKS_STORE).delete(id);
+      tx.oncomplete = ()=> resolve();
+      tx.onerror = ()=> reject(tx.error);
+    });
+  }
+  async function vpMarksGetByPdf(pdfUid){
+    const db = await vbPdfDbOpen();
+    return new Promise((resolve, reject)=>{
+      const tx = db.transaction(VB_PDF_MARKS_STORE, 'readonly');
+      const req = tx.objectStore(VB_PDF_MARKS_STORE).index('pdfUid').getAll(pdfUid);
+      req.onsuccess = ()=> resolve(req.result || []);
+      req.onerror = ()=> reject(req.error);
+    });
+  }
+  async function vpMarksDeleteByPdf(pdfUid){
+    const list = await vpMarksGetByPdf(pdfUid).catch(()=>[]);
+    for(const m of list) await vpMarkDelete(m.id).catch(()=>{});
   }
   function vbPdfFolderId(){ return vCurrentFolder ? String(vCurrentFolder.id) : 'scratch'; }
   async function vbPdfDbAdd(record){
@@ -6878,6 +7437,8 @@ window.OcrEngine = (function(){
       vbPdfViewerScale = 1;
       vbPdfViewerTitle.textContent = rec.name || 'PDF';
       vbPdfViewer.classList.add('show');
+      currentVpPdfUid = rec.uid;
+      currentVpMarks = await vpMarksGetByPdf(rec.uid).catch(()=>[]);
       await vbPdfRenderPreviewPage();
     }catch(err){ console.error(err); alert('No se pudo mostrar la vista previa del PDF.'); }
   }
@@ -6902,8 +7463,319 @@ window.OcrEngine = (function(){
     vbPdfViewerPage.textContent = vbPdfViewerPageNum + ' / ' + vbPdfViewerDoc.numPages;
     vbPdfViewerPrev.disabled = vbPdfViewerPageNum <= 1;
     vbPdfViewerNext.disabled = vbPdfViewerPageNum >= vbPdfViewerDoc.numPages;
+    // Capa de texto (para poder seleccionar y resaltar/subrayar en PDFs con
+    // texto real), y encima las marcas guardadas + los trazos a mano libre
+    // (estos últimos sirven también sobre PDFs escaneados/de solo imagen).
+    hideVpSelToolbar();
+    if(vpTextLayerTask){ try{ vpTextLayerTask.cancel(); }catch(e){} }
+    vpTextLayerEl.innerHTML = '';
+    vpTextLayerEl.style.setProperty('--scale-factor', viewport.scale);
+    try{
+      const textContent = await page.getTextContent();
+      const tlTask = pdfjsLib.renderTextLayer({ textContentSource: textContent, container: vpTextLayerEl, viewport });
+      vpTextLayerTask = tlTask;
+      await tlTask.promise;
+    }catch(e){ if(!(e && e.name === 'RenderingCancelledException')) console.error(e); }
+    if(vpTextLayerTask) vpTextLayerTask = null;
+    renderVpMarksLayer();
+    renderVpInkLayer();
   }
-  vbPdfViewerClose.addEventListener('click', ()=>{ vbPdfViewer.classList.remove('show'); vbPdfViewerDoc = null; });
+  vbPdfViewerClose.addEventListener('click', ()=>{
+    vbPdfViewer.classList.remove('show');
+    vbPdfViewerDoc = null;
+    currentVpPdfUid = null; currentVpMarks = [];
+    if(vpTextLayerEl) vpTextLayerEl.innerHTML = '';
+    if(vpMarksLayerEl) vpMarksLayerEl.innerHTML = '';
+    if(vpInkCanvasEl){ const ic=vpInkCanvasEl.getContext('2d'); ic.setTransform(1,0,0,1,0,0); ic.clearRect(0,0,vpInkCanvasEl.width,vpInkCanvasEl.height); }
+    hideVpSelToolbar();
+  });
+
+  // ---------- Dibujo (lápiz/marcador/borrador) y resaltado/subrayado sobre
+  // el PDF de la biblioteca. Los trazos a mano libre se guardan igual que el
+  // resaltado por selección (una "marca" más) pero con type:'ink', en
+  // fracción del tamaño visible del PDF; por eso sirven tanto sobre PDFs con
+  // texto real como sobre escaneos/imágenes, donde no hay texto que marcar.
+  const vpPageStackEl = document.getElementById('vpPageStack');
+  const vpTextLayerEl = document.getElementById('vpTextLayer');
+  const vpMarksLayerEl = document.getElementById('vpMarksLayer');
+  const vpInkCanvasEl = document.getElementById('vpInkCanvas');
+  const vpDrawDotsEl = document.getElementById('vpDrawDots');
+  const vpToolSelectBtn = document.getElementById('vpToolSelect');
+  const vpToolPenBtn = document.getElementById('vpToolPen');
+  const vpToolMarkerBtn = document.getElementById('vpToolMarker');
+  const vpToolEraserBtn = document.getElementById('vpToolEraser');
+  const vpSelToolbarEl = document.getElementById('vpSelToolbar');
+  const vpSelHighlightBtn = document.getElementById('vpSelHighlightBtn');
+  const vpSelUnderlineBtn = document.getElementById('vpSelUnderlineBtn');
+  const vpSelDotsEl = document.getElementById('vpSelDots');
+
+  let currentVpPdfUid = null, currentVpMarks = [];
+  let vpTextLayerTask = null;
+  let vpDrawTool = 'select'; // 'select' | 'pen' | 'marker' | 'eraser'
+  let vpDrawColor = MARK_COLORS[8].hex; // rojo por defecto para el lápiz
+  let vpMarkColor = MARK_COLORS[0].hex; // color para resaltar/subrayar por selección
+  let vpDrawing = false, vpCurrentStroke = null, vpDrawPointerId = null;
+
+  function renderVpDrawDots(){
+    vpDrawDotsEl.innerHTML = '';
+    MARK_COLORS.forEach(c=>{
+      const dot = document.createElement('div');
+      dot.className = 'vpDot' + (c.hex.toLowerCase()===vpDrawColor.toLowerCase() ? ' active' : '');
+      dot.style.background = c.hex;
+      dot.title = c.name;
+      dot.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        vpDrawColor = c.hex;
+        vpDrawDotsEl.querySelectorAll('.vpDot').forEach(d=> d.classList.remove('active'));
+        dot.classList.add('active');
+      });
+      vpDrawDotsEl.appendChild(dot);
+    });
+  }
+  renderVpDrawDots();
+  function renderVpSelDots(){
+    vpSelDotsEl.innerHTML = '';
+    MARK_COLORS.slice(0,6).forEach(c=>{
+      const dot = document.createElement('div');
+      dot.className = 'vpDot' + (c.hex.toLowerCase()===vpMarkColor.toLowerCase() ? ' active' : '');
+      dot.style.background = c.hex;
+      dot.title = c.name;
+      dot.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        vpMarkColor = c.hex;
+        vpSelDotsEl.querySelectorAll('.vpDot').forEach(d=> d.classList.remove('active'));
+        dot.classList.add('active');
+      });
+      vpSelDotsEl.appendChild(dot);
+    });
+  }
+  renderVpSelDots();
+
+  function setVpTool(tool){
+    vpDrawTool = tool;
+    const map = { select:vpToolSelectBtn, pen:vpToolPenBtn, marker:vpToolMarkerBtn, eraser:vpToolEraserBtn };
+    Object.values(map).forEach(b=> b.classList.remove('active'));
+    map[tool].classList.add('active');
+    // En modo dibujo, la capa de tinta captura el puntero para poder trazar;
+    // en modo "seleccionar" queda transparente para no tapar la selección de
+    // texto ni el scroll/pellizco del panel.
+    vpInkCanvasEl.classList.toggle('drawing', tool !== 'select');
+    vpTextLayerEl.classList.toggle('vp-selectable', tool === 'select');
+    if(tool !== 'select') hideVpSelToolbar();
+  }
+  vpToolSelectBtn.addEventListener('click', ()=> setVpTool('select'));
+  vpToolPenBtn.addEventListener('click', ()=> setVpTool('pen'));
+  vpToolMarkerBtn.addEventListener('click', ()=> setVpTool('marker'));
+  vpToolEraserBtn.addEventListener('click', ()=> setVpTool('eraser'));
+  setVpTool('select');
+
+  function vpInkStrokeFromMark(mark, w, h){
+    return {
+      tool: mark.tool, color: mark.color, width: mark.width, penStyle: mark.penStyle, markStyle: mark.markStyle,
+      points: mark.points.map(p=> ({ x:p.xFrac*w, y:p.yFrac*h, p:p.p })),
+    };
+  }
+  function renderVpInkLayer(){
+    const w = vbPdfViewerCanvas.clientWidth, h = vbPdfViewerCanvas.clientHeight;
+    if(!w || !h) return;
+    const outputScale = window.devicePixelRatio || 1;
+    vpInkCanvasEl.width = Math.max(1, Math.floor(w*outputScale));
+    vpInkCanvasEl.height = Math.max(1, Math.floor(h*outputScale));
+    vpInkCanvasEl.style.width = w + 'px';
+    vpInkCanvasEl.style.height = h + 'px';
+    const ictx = vpInkCanvasEl.getContext('2d');
+    ictx.setTransform(outputScale,0,0,outputScale,0,0);
+    ictx.clearRect(0,0,w,h);
+    if(!currentVpPdfUid) return;
+    const strokesForPage = currentVpMarks
+      .filter(m=> m.page===vbPdfViewerPageNum && m.type==='ink' && m.points && m.points.length)
+      .sort((a,b)=> a.createdAt - b.createdAt);
+    for(const m of strokesForPage){
+      const stroke = vpInkStrokeFromMark(m, w, h);
+      drawFreehandSmooth(ictx, stroke, styleFor(stroke.tool));
+    }
+  }
+  function renderVpMarksLayer(){
+    vpMarksLayerEl.innerHTML = '';
+    if(!currentVpPdfUid) return;
+    const w = vbPdfViewerCanvas.clientWidth, h = vbPdfViewerCanvas.clientHeight;
+    if(!w || !h) return;
+    currentVpMarks
+      .filter(m=> m.page === vbPdfViewerPageNum && (m.type==='highlight' || m.type==='underline'))
+      .forEach(m=>{
+        (m.rects||[]).forEach(r=>{
+          const div = document.createElement('div');
+          div.className = 'pdfMark ' + m.type;
+          div.title = 'Tocá para borrar esta marca';
+          if(m.type === 'highlight'){
+            div.style.left = (r.xFrac*w) + 'px'; div.style.top = (r.yFrac*h) + 'px';
+            div.style.width = (r.wFrac*w) + 'px'; div.style.height = (r.hFrac*h) + 'px';
+            div.style.background = m.color; div.style.opacity = '0.42';
+          } else {
+            const lineH = Math.max(1.5, r.hFrac*h*0.08);
+            div.style.left = (r.xFrac*w) + 'px'; div.style.top = (r.yFrac*h + r.hFrac*h - lineH) + 'px';
+            div.style.width = (r.wFrac*w) + 'px'; div.style.height = lineH + 'px';
+            div.style.background = m.color;
+          }
+          div.addEventListener('click', async (e)=>{
+            e.stopPropagation();
+            if(!confirm('¿Borrar esta marca?')) return;
+            await vpMarkDelete(m.id).catch(()=>{});
+            currentVpMarks = currentVpMarks.filter(x=> x.id !== m.id);
+            renderVpMarksLayer();
+          });
+          vpMarksLayerEl.appendChild(div);
+        });
+      });
+  }
+
+  function vpDistToSegment(p, a, b){
+    const dx=b.x-a.x, dy=b.y-a.y;
+    const len2 = dx*dx + dy*dy;
+    if(len2 === 0) return Math.hypot(p.x-a.x, p.y-a.y);
+    let t = ((p.x-a.x)*dx + (p.y-a.y)*dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(p.x - (a.x+t*dx), p.y - (a.y+t*dy));
+  }
+  function vpEraseAt(pt){
+    const w = vbPdfViewerCanvas.clientWidth, h = vbPdfViewerCanvas.clientHeight;
+    if(!w || !h) return;
+    const radius = PDF_ERASER_WIDTH/2;
+    const toRemove = [];
+    for(const m of currentVpMarks){
+      if(m.page !== vbPdfViewerPageNum || m.type !== 'ink' || !m.points || !m.points.length) continue;
+      const pts = m.points.map(p=> ({x:p.xFrac*w, y:p.yFrac*h}));
+      let hit = pts.length === 1 ? Math.hypot(pt.x-pts[0].x, pt.y-pts[0].y) <= radius : false;
+      for(let i=1; i<pts.length && !hit; i++){
+        if(vpDistToSegment(pt, pts[i-1], pts[i]) <= radius) hit = true;
+      }
+      if(hit) toRemove.push(m);
+    }
+    if(!toRemove.length) return;
+    const ids = new Set(toRemove.map(m=>m.id));
+    currentVpMarks = currentVpMarks.filter(m=> !ids.has(m.id));
+    toRemove.forEach(m=> vpMarkDelete(m.id).catch(()=>{}));
+    renderVpInkLayer();
+  }
+  vpInkCanvasEl.addEventListener('pointerdown', (e)=>{
+    if(vpDrawTool === 'select' || !currentVpPdfUid) return;
+    e.preventDefault();
+    try{ vpInkCanvasEl.setPointerCapture(e.pointerId); }catch(err){}
+    vpDrawPointerId = e.pointerId;
+    vpDrawing = true;
+    const rect = vpInkCanvasEl.getBoundingClientRect();
+    const pt = { x:e.clientX-rect.left, y:e.clientY-rect.top, p: e.pressure && e.pressure>0 ? e.pressure : 0.5 };
+    if(vpDrawTool === 'eraser'){ vpEraseAt(pt); return; }
+    const toolName = vpDrawTool === 'marker' ? 'highlighter' : 'pen';
+    vpCurrentStroke = {
+      tool: toolName, markStyle: toolName === 'highlighter' ? window.currentMarkStyle : undefined, color: vpDrawColor,
+      width: toolName === 'pen' ? PDF_PEN_WIDTH : PDF_MARKER_WIDTH,
+      penStyle: toolName === 'pen' ? 'estandar' : undefined,
+      points: [pt],
+    };
+    dotTo(vpInkCanvasEl.getContext('2d'), vpCurrentStroke, styleFor(toolName));
+  });
+  vpInkCanvasEl.addEventListener('pointermove', (e)=>{
+    if(!vpDrawing || e.pointerId !== vpDrawPointerId) return;
+    const rect = vpInkCanvasEl.getBoundingClientRect();
+    const pt = { x:e.clientX-rect.left, y:e.clientY-rect.top, p: e.pressure && e.pressure>0 ? e.pressure : 0.5 };
+    if(vpDrawTool === 'eraser'){ vpEraseAt(pt); return; }
+    if(!vpCurrentStroke) return;
+    const pts = vpCurrentStroke.points;
+    const last = pts[pts.length-1];
+    if(Math.hypot(pt.x-last.x, pt.y-last.y) < 0.8) return;
+    pts.push(pt);
+    drawFreehandIncrement(vpInkCanvasEl.getContext('2d'), vpCurrentStroke, styleFor(vpCurrentStroke.tool));
+  });
+  function endVpDraw(e){
+    if(!vpDrawing || (e && e.pointerId !== vpDrawPointerId)) return;
+    vpDrawing = false;
+    vpDrawPointerId = null;
+    if(vpDrawTool === 'eraser'){ vpCurrentStroke = null; return; }
+    const stroke = vpCurrentStroke;
+    vpCurrentStroke = null;
+    if(!stroke || !stroke.points.length) return;
+    if(stroke.points.length > 1) drawFreehandTail(vpInkCanvasEl.getContext('2d'), stroke, styleFor(stroke.tool));
+    const w = vbPdfViewerCanvas.clientWidth, h = vbPdfViewerCanvas.clientHeight;
+    if(!w || !h || !currentVpPdfUid) return;
+    const mark = {
+      id: 'vpmark_' + uid(),
+      pdfUid: currentVpPdfUid,
+      page: vbPdfViewerPageNum,
+      type: 'ink',
+      tool: stroke.tool, color: stroke.color, width: stroke.width, penStyle: stroke.penStyle, markStyle: stroke.markStyle,
+      points: stroke.points.map(p=> ({ xFrac:p.x/w, yFrac:p.y/h, p:p.p })),
+      createdAt: Date.now(),
+    };
+    currentVpMarks.push(mark);
+    vpMarkPut(mark).catch(()=>{ alert('No se pudo guardar el trazo.'); });
+  }
+  vpInkCanvasEl.addEventListener('pointerup', endVpDraw);
+  vpInkCanvasEl.addEventListener('pointercancel', endVpDraw);
+
+  // ---- Resaltado/subrayado por selección de texto (PDFs con texto real) ----
+  function hideVpSelToolbar(){ vpSelToolbarEl.classList.remove('show'); }
+  function getVpSelectionRects(){
+    const sel = window.getSelection();
+    if(!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+    const range = sel.getRangeAt(0);
+    if(!vpTextLayerEl.contains(range.commonAncestorContainer)) return null;
+    const w = vbPdfViewerCanvas.clientWidth, h = vbPdfViewerCanvas.clientHeight;
+    if(!w || !h) return null;
+    const stackRect = vpPageStackEl.getBoundingClientRect();
+    const rects = Array.from(range.getClientRects())
+      .filter(r=> r.width > 0.5 && r.height > 0.5)
+      .map(r=> ({ xFrac:(r.left-stackRect.left)/w, yFrac:(r.top-stackRect.top)/h, wFrac:r.width/w, hFrac:r.height/h }));
+    return rects.length ? { rects, text: sel.toString() } : null;
+  }
+  async function addVpMark(type){
+    const info = getVpSelectionRects();
+    if(!info || !currentVpPdfUid) return;
+    const mark = {
+      id: 'vpmark_' + uid(), pdfUid: currentVpPdfUid, page: vbPdfViewerPageNum,
+      type, color: vpMarkColor, rects: info.rects, createdAt: Date.now(),
+    };
+    currentVpMarks.push(mark);
+    renderVpMarksLayer();
+    window.getSelection().removeAllRanges();
+    hideVpSelToolbar();
+    await vpMarkPut(mark).catch(()=>{ alert('No se pudo guardar la marca.'); });
+  }
+  vpSelHighlightBtn.addEventListener('click', ()=> addVpMark('highlight'));
+  vpSelUnderlineBtn.addEventListener('click', ()=> addVpMark('underline'));
+  function positionVpSelToolbar(){
+    const sel = window.getSelection();
+    if(!sel || sel.rangeCount === 0 || sel.isCollapsed){ hideVpSelToolbar(); return; }
+    const range = sel.getRangeAt(0);
+    if(!vpTextLayerEl.contains(range.commonAncestorContainer)){ hideVpSelToolbar(); return; }
+    const rect = range.getBoundingClientRect();
+    if(!rect || (!rect.width && !rect.height)){ hideVpSelToolbar(); return; }
+    vpSelToolbarEl.classList.add('show');
+    const tbRect = vpSelToolbarEl.getBoundingClientRect();
+    let left = rect.left + rect.width/2 - tbRect.width/2;
+    left = Math.max(6, Math.min(left, window.innerWidth - tbRect.width - 6));
+    let top = rect.top - tbRect.height - 8;
+    if(top < 6) top = rect.bottom + 8;
+    vpSelToolbarEl.style.left = left + 'px';
+    vpSelToolbarEl.style.top = top + 'px';
+  }
+  document.addEventListener('selectionchange', ()=>{
+    if(vpDrawTool !== 'select') return;
+    const sel = window.getSelection();
+    if(sel && sel.rangeCount && !sel.isCollapsed && vpTextLayerEl.contains(sel.getRangeAt(0).commonAncestorContainer)){
+      positionVpSelToolbar();
+    } else {
+      hideVpSelToolbar();
+    }
+  });
+  document.getElementById('vbPdfViewerCanvasWrap').addEventListener('scroll', ()=>{
+    if(vpSelToolbarEl.classList.contains('show')) positionVpSelToolbar();
+  });
+  document.addEventListener('pointerdown', (e)=>{
+    if(vpSelToolbarEl.classList.contains('show') && !vpSelToolbarEl.contains(e.target) && !vpTextLayerEl.contains(e.target)){
+      hideVpSelToolbar();
+    }
+  });
   vbPdfViewerPrev.addEventListener('click', async ()=>{ if(vbPdfViewerDoc && vbPdfViewerPageNum>1){ vbPdfViewerPageNum--; await vbPdfRenderPreviewPage(); } });
   vbPdfViewerNext.addEventListener('click', async ()=>{ if(vbPdfViewerDoc && vbPdfViewerPageNum<vbPdfViewerDoc.numPages){ vbPdfViewerPageNum++; await vbPdfRenderPreviewPage(); } });
   vbPdfViewerZoomOut.addEventListener('click', async ()=>{
@@ -6940,6 +7812,8 @@ window.OcrEngine = (function(){
       item.dataset.busy = '1';
       try{
         await vbPdfDbDelete(uid);
+        await vpMarksDeleteByPdf(uid).catch(()=>{});
+        if(currentVpPdfUid === uid){ currentVpPdfUid = null; currentVpMarks = []; }
         await vbPdfRenderList();
       }catch(err){ console.error(err); }
     }
@@ -7007,8 +7881,9 @@ window.OcrEngine = (function(){
       const latest = all[all.length-1];
       if(latest) await vbPdfShowPreview(latest, 1);
     }
+    vbUpdatePdfSplitLayout();
   }
-  function vbClosePdfPanel(){ vbPdfPanel.classList.remove('open'); }
+  function vbClosePdfPanel(){ vbPdfPanel.classList.remove('open'); vbUpdatePdfSplitLayout(); }
 
   if(vbUploadPdfBtn) vbUploadPdfBtn.onclick = ()=>{ vbOpenPdfPanel().catch(err=>console.error('No se pudo abrir la biblioteca PDF:',err)); };
   if(vbPdfPanelClose) vbPdfPanelClose.onclick = vbClosePdfPanel;
@@ -7045,11 +7920,21 @@ window.OcrEngine = (function(){
     vbSettingsBackdrop.addEventListener('click', vbCloseSettings);
   }
 
+  // ---- Rechazo de mano (solo lapicera/stylus): preferencia global, igual
+  // que en el cuaderno viejo, no depende de la carpeta abierta ----
+  const vbPenOnlyChk = document.getElementById('vbPenOnly');
+  if(vbPenOnlyChk){
+    try{ vPenOnly = localStorage.getItem('cuaderno:vectorPenOnly') === '1'; }catch(e){ vPenOnly=false; }
+    vbPenOnlyChk.checked = vPenOnly;
+    vbPenOnlyChk.addEventListener('change', ()=>{
+      vPenOnly = vbPenOnlyChk.checked;
+      try{ localStorage.setItem('cuaderno:vectorPenOnly', vPenOnly ? '1' : '0'); }catch(e){}
+    });
+  }
+
   window.addEventListener('resize', ()=>{
-    vbSyncHeaderHeight();
-    if(vbPaperSel.value==='a4' || vbPaperSel.value==='oficio'){ vbFitToPage(); return; }
-    if(vScale===1){ vTx=innerWidth/2; vTy=(vbSyncHeaderHeight()+innerHeight)/2; }
-    vbTransform();
+    vbUpdatePdfSplitLayout();
+    vbRecenterAfterLayoutChange();
   });
 
   // ---- Páginas generales dentro de cada carpeta ----
@@ -7114,6 +7999,10 @@ window.OcrEngine = (function(){
     let penSt = 'estandar';
     try{ penSt = localStorage.getItem(vbPenStyleKey()) || 'estandar'; }catch(e){}
     vPenStyle = penSt; vbPenStyleSel.value = penSt;
+
+    let markSt = 'translucido';
+    try{ markSt = localStorage.getItem(vbMarkStyleKey()) || 'translucido'; }catch(e){}
+    vMarkStyle = markSt; if(vbMarkStyleSel) vbMarkStyleSel.value = markSt;
 
     const paperState=vbLoadPaperState();
     const paper=paperState.format, style=paperState.style;
