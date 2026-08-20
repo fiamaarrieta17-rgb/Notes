@@ -40,6 +40,15 @@
 // explícitamente iguales (ambas @5), y sin langPath propio: a partir de la
 // v5, tesseract.js baja el diccionario desde jsdelivr por defecto, que es
 // más confiable que el mirror que usábamos antes.
+//
+// IMPORTANTE — se sacó tessedit_char_whitelist: es un parámetro roto en el
+// motor LSTM (el único que usa tesseract.js moderno; el legado ya no se
+// mantiene). Según reportes del propio repo de Tesseract, con oem=LSTM_ONLY
+// el whitelist se ignora en el mejor caso, y en el peor rompe la detección
+// de espacios entre palabras — degradando la precisión incluso en letra de
+// imprenta prolija, en vez de mejorarla. Se estaba usando acá pensando que
+// ayudaba a evitar símbolos raros, pero probablemente era la causa principal
+// de que el reconocimiento anduviera mal "en general" y no solo en cursiva.
 window.OcrEngine = (function(){
   const TESS_VERSION = '5.1.1';
   const WORKER_OPTIONS = {
@@ -64,118 +73,6 @@ window.OcrEngine = (function(){
   const MIN_CONFIDENCE=55;
   const REJECT_CONFIDENCE=22;
   const TIMEOUT_MS=25000;
-  // Restringe el alfabeto a lo que razonablemente puede aparecer en una
-  // nota manuscrita en español. Sin esto, Tesseract confunde trazos sueltos
-  // con símbolos raros (¤, §, ~, etc.) que nunca vas a haber escrito, y esas
-  // confusiones bajan la precisión general.
-  const CHAR_WHITELIST = 'AÁBCDEÉFGHIÍJKLMNÑOÓPQRSTUÚÜVWXYZaábcdeéfghiíjklmnñoópqrstuúüvwxyz0123456789.,;:¿?¡!\'-()"';
-  // Para UNA sola palabra (que es el caso de "OCR en vivo") achicamos el
-  // alfabeto todavía más: sin puntuación. Dejar signos como : ; ¿ ¡ " ( ) ,
-  // disponibles para una imagen que sólo tiene una palabra le da a Tesseract
-  // "opciones" extra para confundir una letra con un signo parecido (una "l"
-  // con un "!", un trazo suelto con una ","), que es una de las causas más
-  // comunes de que adivine mal la letra. Sólo dejamos guion y apóstrofo,
-  // que sí aparecen dentro de palabras reales.
-  const WORD_CHAR_WHITELIST = "AÁBCDEÉFGHIÍJKLMNÑOÓPQRSTUÚÜVWXYZaábcdeéfghiíjklmnñoópqrstuúüvwxyz0123456789-'";
-
-  // ---------- Red de seguridad por diccionario ----------
-  // Tesseract no tiene forma de "saber" qué es una palabra real en español;
-  // cuando duda entre dos letras parecidas (m/n, e/c, u/n, etc.) puede
-  // devolver algo que se parece mucho a una palabra común pero con UNA letra
-  // cambiada. Guardamos una lista compacta de palabras muy frecuentes
-  // (las típicas de una nota/apunte) y, si lo que reconoció no es ninguna de
-  // ellas pero hay una sola que está a 1 letra de distancia, corregimos hacia
-  // esa. Es conservador a propósito: si hay más de una candidata a la misma
-  // distancia, o si la palabra reconocida ya es válida, no tocamos nada, para
-  // no "corregir" nombres propios o palabras poco comunes que sí escribiste.
-  const COMMON_WORDS = new Set(`
-    el la los las un una unos unas de del al a en con por para sin sobre entre
-    desde hasta hacia según durante mediante contra tras
-    que quien quienes cual cuales cuyo cuya donde cuando como porque pero mas
-    aunque si no ni o u y e también tampoco solo sólo muy más menos tan tanto
-    este esta estos estas ese esa esos esas aquel aquella aquellos aquellas
-    esto eso aquello mi mis tu tus su sus nuestro nuestra nuestros nuestras
-    yo tú vos él ella usted nosotros nosotras ustedes ellos ellas me te se
-    nos les lo la le
-    es son fue fueron era eran ser estar está están estaba estaban estoy
-    estas somos soy eres sos hay habia había había tiene tienen tenía tenía
-    tengo tenes tenés puede pueden podía puedo debe deben debía debo va van
-    iba voy vas vamos viene vienen venia venía hace hacen hacia hacía hago
-    dice dicen decía digo dijo dijeron sabe saben sabia sabía se ve ven veo
-    quiere quieren queria quería quiero cree creen creia creía hizo hacer
-    tener haber decir poder saber querer creer ver dar ir venir llegar pasar
-    deber poner parecer quedar seguir encontrar llevar dejar llamar pensar
-    salir volver tomar conocer vivir sentir tratar mirar contar empezar
-    esperar buscar existir entrar trabajar escribir perder producir ocurrir
-    entender pedir recibir recordar terminar permitir aparecer conseguir
-    comenzar servir sacar necesitar mantener resultar leer caer cambiar
-    presentar crear abrir considerar oir oír poner
-    día días hoy ayer mañana ahora antes despues después luego siempre nunca
-    tiempo vez veces año años mes meses semana semanas hora horas minuto
-    minutos
-    casa trabajo clase clases escuela colegio universidad facultad curso
-    profesor profesora maestro maestra alumno alumna estudiante examen
-    tarea tareas apunte apuntes nota notas cuaderno libro libros pagina
-    página capitulo capítulo tema temas ejercicio ejercicios pregunta
-    preguntas respuesta respuestas resumen resúmen problema problemas
-    materia materias historia matematica matemática matematicas matemáticas
-    fisica física quimica química lengua idioma
-    persona personas gente hombre hombres mujer mujeres nino niño nina niña
-    ninos niños ninas niñas familia amigo amiga amigos amigas padre madre
-    padres hijo hija hijos hijas hermano hermana
-    lugar lugares ciudad pais país mundo parte cosa cosas manera forma
-    momento razon razón motivo ejemplo caso resultado idea ideas plan
-    proyecto grupo equipo numero número precio dinero
-    bien mal bueno buena buenos buenas mejor peor grande pequeño pequeña
-    nuevo nueva nuevos nuevas mismo misma mismos mismas otro otra otros
-    otras todo toda todos todas cada algo alguien algun algún alguna
-    algunos algunas ningun ningún ninguna nada nadie mucho mucha muchos
-    muchas poco poca pocos pocas primero primera primeros primeras ultimo
-    último ultima última siguiente proximo próximo
-    hola chau gracias favor perdon perdón disculpa saludos abrazo beso
-    si sí no ok dale bueno listo claro exacto obvio
-  `.trim().split(/\s+/));
-
-  function levenshteinAtMost1(a,b){
-    if(a===b) return 0;
-    const la=a.length, lb=b.length;
-    if(Math.abs(la-lb) > 1) return 2; // no puede estar a distancia <=1
-    // Caso longitudes iguales: contar sustituciones.
-    if(la===lb){
-      let diff=0;
-      for(let i=0;i<la;i++){ if(a[i]!==b[i]){ diff++; if(diff>1) return 2; } }
-      return diff;
-    }
-    // Longitudes difieren en 1: buscar una inserción/borrado que las alinee.
-    const [shortS, longS] = la<lb ? [a,b] : [b,a];
-    let i=0, j=0, skipped=false;
-    while(i<shortS.length && j<longS.length){
-      if(shortS[i]===longS[j]){ i++; j++; continue; }
-      if(skipped) return 2;
-      skipped=true; j++;
-    }
-    return 1;
-  }
-  // Si "word" no es una palabra común pero hay EXACTAMENTE una palabra común
-  // a distancia 1 (una letra cambiada, agregada o de menos), corrige hacia
-  // ella. Case-insensitive; conserva la mayúscula inicial si el original la
-  // tenía (para no des-capitalizar nombres al arranque de una oración).
-  function correctWithDictionary(word){
-    if(!word) return word;
-    const lower=word.toLowerCase();
-    if(COMMON_WORDS.has(lower)) return word;
-    if(lower.length<3) return word; // muy corta: demasiado ambiguo corregir
-    let match=null, matches=0;
-    for(const w of COMMON_WORDS){
-      if(Math.abs(w.length-lower.length)>1) continue;
-      if(levenshteinAtMost1(lower,w)===1){ match=w; matches++; if(matches>1) break; }
-    }
-    if(matches!==1) return word; // ambiguo o sin candidatos: no tocar
-    if(word[0] && word[0]===word[0].toUpperCase() && word[0]!==word[0].toLowerCase()){
-      return match[0].toUpperCase()+match.slice(1);
-    }
-    return match;
-  }
 
   let scriptPromise=null, workerPromise=null;
 
@@ -187,27 +84,53 @@ window.OcrEngine = (function(){
     ]);
   }
 
+  // Reintenta una operación de red un par de veces con espera creciente
+  // antes de darla por perdida. El primer intento fallido de bajar la
+  // librería o el worker suele ser un corte de wifi momentáneo, no un
+  // problema real — reintentar solo es mejor experiencia que obligar al
+  // usuario a notar el error y tocar el botón de nuevo a mano.
+  async function withRetries(fn, attempts, delayMs){
+    let lastErr;
+    for(let i=0; i<=attempts; i++){
+      try{ return await fn(); }
+      catch(err){
+        lastErr = err;
+        if(i<attempts) await new Promise(r=>setTimeout(r, delayMs*(i+1)));
+      }
+    }
+    throw lastErr;
+  }
+
   function ensureScriptLoaded(){
     if(window.Tesseract) return Promise.resolve();
     if(scriptPromise) return scriptPromise;
-    scriptPromise = withTimeout(new Promise((resolve,reject)=>{
+    scriptPromise = withRetries(()=> withTimeout(new Promise((resolve,reject)=>{
       const s=document.createElement('script');
       s.src=SCRIPT_URL; s.crossOrigin='anonymous';
       s.onload=()=>resolve();
-      s.onerror=()=>reject(new Error('No se pudo cargar la librería de OCR'));
+      s.onerror=()=>{ s.remove(); reject(new Error('No se pudo cargar la librería de OCR')); };
       document.head.appendChild(s);
-    }), TIMEOUT_MS, 'carga de la librería').catch(err=>{ scriptPromise=null; throw err; });
+    }), TIMEOUT_MS, 'carga de la librería'), 2, 900).catch(err=>{ scriptPromise=null; throw err; });
     return scriptPromise;
   }
 
   function getWorker(){
     if(!workerPromise){
       workerPromise = ensureScriptLoaded()
-        .then(()=> withTimeout(Tesseract.createWorker('spa', 1, WORKER_OPTIONS), TIMEOUT_MS, 'inicio del motor de OCR'))
-        .then(async worker=>{ await worker.setParameters({ tessedit_char_whitelist: CHAR_WHITELIST }); return worker; })
+        .then(()=> withRetries(()=> withTimeout(Tesseract.createWorker('spa', 1, WORKER_OPTIONS), TIMEOUT_MS, 'inicio del motor de OCR'), 2, 900))
+        .then(async worker=>{ await worker.setParameters({ preserve_interword_spaces: '1' }); return worker; })
         .catch(err=>{ workerPromise=null; throw err; });
     }
     return workerPromise;
+  }
+
+  // Precarga silenciosa: baja la librería e inicializa el worker sin que el
+  // usuario tenga que esperar la primera vez que use el OCR. Si falla (por
+  // ejemplo sin conexión), no hace nada visible: la próxima vez que se llame
+  // a recognizeWord/recognizeAuto de verdad, se reintenta solo, con su error
+  // normal si corresponde.
+  function preload(){
+    return getWorker().catch(()=>{});
   }
 
   // Umbral de binarización adaptativo (método de Otsu) en vez de un número
@@ -237,19 +160,14 @@ window.OcrEngine = (function(){
     return imgData;
   }
 
-  // Reconoce una imagen de UNA palabra, con reintentos progresivos: primero
-  // como palabra suelta, después como línea (ayuda cuando el trazo cursiva
-  // "pega" letras entre sí) y por último, sólo si todavía hace falta, como
+  // Reconoce una imagen de UNA palabra, con reintentos progresivos si la
+  // confianza queda baja: primero como palabra suelta, después como línea
+  // (ayuda cuando el trazo cursiva "pega" letras entre sí) y por último como
   // "línea cruda" sin análisis de layout (ayuda cuando la forma es rara y
-  // Tesseract ni siquiera encuentra dónde "empieza" el texto). Los primeros
-  // dos intentos SIEMPRE se corren los dos (no sólo si el primero da baja
-  // confianza): para letra manuscrita la confianza que informa Tesseract no
-  // es muy confiable como señal de acierto, así que un primer intento
-  // "seguro pero mal" puede tapar a un segundo intento mejor si sólo
-  // comparáramos por confianza cuando ya se descartó seguir probando.
+  // Tesseract ni siquiera encuentra dónde "empieza" el texto, que es lo que
+  // suele pasar con letra manuscrita muy suelta o con trazos separados).
   async function recognizeWord(img){
     const worker=await getWorker();
-    await worker.setParameters({ tessedit_char_whitelist: WORD_CHAR_WHITELIST });
     let best='', bestConf=-1;
     async function attempt(psm){
       await worker.setParameters({ tessedit_pageseg_mode: psm, user_defined_dpi: '300' });
@@ -261,18 +179,14 @@ window.OcrEngine = (function(){
       }catch(err){ /* seguimos al siguiente intento */ }
     }
     await attempt(PSM_SINGLE_WORD);
-    await attempt(PSM_SINGLE_LINE);
+    if(!best || bestConf<MIN_CONFIDENCE) await attempt(PSM_SINGLE_LINE);
     if(!best || bestConf<MIN_CONFIDENCE) await attempt(PSM_RAW_LINE);
-    await worker.setParameters({ tessedit_pageseg_mode: PSM_SINGLE_WORD, user_defined_dpi: '300', tessedit_char_whitelist: CHAR_WHITELIST });
-    // Si ni con los intentos se llega a una confianza mínima razonable,
+    await worker.setParameters({ tessedit_pageseg_mode: PSM_SINGLE_WORD, user_defined_dpi: '300' });
+    // Si ni con los tres intentos se llega a una confianza mínima razonable,
     // mejor no devolver nada: una palabra inventada obliga a corregir igual,
     // pero además engaña porque parece "reconocida".
     if(best && bestConf<REJECT_CONFIDENCE) return '';
-    if(!best) return '';
-    // Red de seguridad: si lo reconocido no es una palabra común pero hay
-    // una sola candidata a un cambio de letra de distancia, preferimos esa
-    // — es el error más típico de OCR en letra manuscrita.
-    return correctWithDictionary(best);
+    return best;
   }
 
   // Reconoce una imagen con varias palabras/renglones (red de seguridad
@@ -285,7 +199,7 @@ window.OcrEngine = (function(){
     return (data && data.text) || '';
   }
 
-  return { recognizeWord, recognizeAuto, binarizeImageData };
+  return { recognizeWord, recognizeAuto, binarizeImageData, preload };
 })();
 </script>
 <style>
@@ -708,9 +622,7 @@ window.OcrEngine = (function(){
   #pdfPanel{
     display:none;flex-direction:column;width:42%;min-width:230px;max-width:78%;
     background:var(--panel);border-right:1px solid var(--panel-edge);flex-shrink:0;
-    transition:width .18s ease;
   }
-  #pdfPanel.dragging-resize{transition:none;}
   #pdfPanel.open{display:flex;}
   #pdfResizeHandle{
     width:6px;flex-shrink:0;cursor:col-resize;background:var(--panel-edge);display:none;
@@ -1100,7 +1012,6 @@ window.OcrEngine = (function(){
   }
   #micStatus{font-size:12px;color:var(--cream-dim);flex:1;}
   #micToggleBtn.listening + #micStatus{color:var(--cream);}
-  #micUnsupportedHint{font-size:11px;color:var(--cream-dim);margin-top:6px;line-height:1.4;}
 
   /* ---------- Herramienta Formas (cuadros conceptuales) ---------- */
   .shapeType svg{width:19px;height:19px;}
@@ -1228,7 +1139,7 @@ window.OcrEngine = (function(){
     --vb-ui:#1B1D24;--vb-ui-2:#20222B;--vb-ink:#EEF0F5;--vb-muted:#9799A6;--vb-line:#2C2F38;--vb-accent:#4F7CFF;
     font-family:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
   }
-  #vectorPanelView #vbBoard{position:fixed;left:var(--vb-board-left,0);right:0;bottom:0;top:var(--vb-board-top,var(--vb-header-h,108px));background:#fff;touch-action:none;cursor:crosshair;transition:left .16s ease;}
+  #vectorPanelView #vbBoard{position:fixed;left:0;right:0;bottom:0;top:var(--vb-board-top,var(--vb-header-h,108px));background:#fff;touch-action:none;cursor:crosshair;}
   #vectorPanelView #vbSvg{position:absolute;inset:0;width:100%;height:100%;display:block;}
   #vectorPanelView #vbGrid{pointer-events:none;}
   #vectorPanelView #vbPageRect{pointer-events:none;}
@@ -1364,11 +1275,8 @@ window.OcrEngine = (function(){
   #vectorPanelView #vbToolThicknessPresets{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;}
   #vectorPanelView .vbChoiceThickOpt{border:1px solid var(--vb-line);background:var(--vb-ui-2);color:#fff;border-radius:7px;min-width:30px;height:28px;cursor:pointer;font-size:11px;}
   #vectorPanelView .vbChoiceThickOpt.active{background:var(--vb-accent);border-color:var(--vb-accent);}
-  #vectorPanelView .vbChoiceOpt{border:1px solid var(--vb-line);background:var(--vb-ui-2);color:#fff;border-radius:8px;padding:8px 10px;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;}
+  #vectorPanelView .vbChoiceOpt{border:1px solid var(--vb-line);background:var(--vb-ui-2);color:#fff;border-radius:8px;padding:8px 10px;cursor:pointer;white-space:nowrap;}
   #vectorPanelView .vbChoiceOpt.active{background:var(--vb-accent);border-color:var(--vb-accent);}
-  #vectorPanelView .vbChoiceOpt svg{width:18px;height:18px;flex-shrink:0;display:block;}
-  #vectorPanelView #vbShapeTypeGrp{display:none;}
-  #vectorPanelView #vbShapeTypeGrp.open{display:block;}
   #vectorPanelView #vbZoom{display:none !important;}
   #vectorPanelView #vbLiveRecognition{
     position:fixed;z-index:25;top:calc(var(--vb-header-h,108px) + 8px);left:50%;transform:translateX(-50%);display:none;
@@ -1544,17 +1452,14 @@ window.OcrEngine = (function(){
   #vectorPanelView .vbPdfFolderGroup{margin:10px 0 8px;color:var(--vb-muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;}
   #vectorPanelView .vbPdfFolderGroup:first-child{margin-top:0;}
   @media (max-width:760px){
-    /* En mobile el panel se acopla al costado izquierdo, ocupando el mismo
-       alto que la hoja (desde el header hasta abajo) y la mitad del ancho,
-       en vez de taparla por arriba: hoja y PDF quedan uno al lado del otro,
-       en paralelo, sin sobreponerse (split real, no una ventana flotante
-       encima de todo). */
+    /* En mobile el panel se acopla arriba, en vez de tapar toda la pantalla:
+       deja el resto de la altura visible para la hoja de apuntes (split real,
+       no una ventana flotante encima de todo). */
     #vectorPanelView #vbPdfPanel{
-      top:var(--vb-header-h,100px);left:0;right:auto;bottom:0;
-      width:50%;max-width:50%;height:auto;max-height:none;min-height:0;
-      border-radius:0;border-top:none;border-bottom:none;border-left:none;
+      top:calc(var(--vb-header-h,100px) + 6px);left:8px;right:8px;bottom:auto;
+      width:auto;max-width:none;height:44vh;max-height:420px;min-height:230px;
     }
-    #vectorPanelView #vbPdfViewerCanvasWrap{max-height:none;flex:1;min-height:0;}
+    #vectorPanelView #vbPdfViewerCanvasWrap{max-height:22vh;}
   }
 </style>
 </head>
@@ -1703,26 +1608,20 @@ window.OcrEngine = (function(){
    </div>
 
     <div class="floatDrop" id="shapeTypeGrp">
-      <button type="button" class="tool shapeType" data-shape="oval" title="Óvalo">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="12" rx="9" ry="6.5"/></svg>
-      </button>
-      <button type="button" class="tool shapeType" data-shape="circle" title="Círculo">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/></svg>
-      </button>
-      <button type="button" class="tool shapeType" data-shape="square" title="Cuadrado">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4.5" y="4.5" width="15" height="15" rx="1.5"/></svg>
-      </button>
-      <button type="button" class="tool shapeType" data-shape="rect" title="Rectángulo">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="1.5"/></svg>
-      </button>
-      <button type="button" class="tool shapeType" data-shape="cloud" title="Nube">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17a4 4 0 01-.5-7.97A5 5 0 0116 8a4 4 0 011 7.87"/><path d="M7 17h10"/></svg>
+      <button type="button" class="tool shapeType active" data-shape="line" title="Línea">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="20" x2="20" y2="4"/></svg>
       </button>
       <button type="button" class="tool shapeType" data-shape="arrow" title="Flecha">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="20" x2="20" y2="4"/><polyline points="10 4 20 4 20 14"/></svg>
       </button>
-      <button type="button" class="tool shapeType active" data-shape="line" title="Línea">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="20" x2="20" y2="4"/></svg>
+      <button type="button" class="tool shapeType" data-shape="rect" title="Rectángulo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="6" width="16" height="12" rx="1.5"/></svg>
+      </button>
+      <button type="button" class="tool shapeType" data-shape="oval" title="Óvalo / círculo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="12" rx="9" ry="6.5"/></svg>
+      </button>
+      <button type="button" class="tool shapeType" data-shape="cloud" title="Nube">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17a4 4 0 01-.5-7.97A5 5 0 0116 8a4 4 0 011 7.87"/><path d="M7 17h10"/></svg>
       </button>
     </div>
     <div class="floatDrop" id="penStyleDrop"></div>
@@ -1765,7 +1664,7 @@ window.OcrEngine = (function(){
           <label class="chk-label"><input type="checkbox" id="tidyMode" checked autocomplete="off"> Suavizar el trazo al escribir</label>
         </div>
         <div class="row">
-          <label class="chk-label"><input type="checkbox" id="penOnly" autocomplete="off"> Rechazo de mano (solo lapicera/stylus)</label>
+          <label class="chk-label"><input type="checkbox" id="penOnly" autocomplete="off"> Ignorar dedos</label>
         </div>
         <div class="row">
           <button class="action" id="clearBtn">Vaciar página</button>
@@ -1991,7 +1890,7 @@ window.OcrEngine = (function(){
   </div>
   </div>
   <div id="tidyUndoToast">
-    <span>Letra emprolijada</span>
+    <span id="tidyUndoLabel">Letra emprolijada</span>
     <button type="button" id="tidyUndoBtn">Deshacer</button>
     <button type="button" id="tidyUndoDismissBtn" title="Descartar">✕</button>
   </div>
@@ -2075,35 +1974,6 @@ window.OcrEngine = (function(){
     <button id="vbHighlighter" title="Marcador">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21l1.5-4.5L15 6l3 3-10.5 10.5z"/><path d="M12 9l3 3"/><path d="M15 6l3-3 3 3-3 3"/></svg>
     </button>
-    <button id="vbShape" title="Formas (para cuadros conceptuales)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1"/><circle cx="17" cy="17" r="4"/><line x1="11" y1="7" x2="17" y2="13"/></svg>
-    </button>
-    <div id="vbShapeTypeGrp" class="vbChoicePanel">
-      <div class="vbChoiceTitle">Forma</div>
-      <div class="vbChoiceOptions">
-        <button type="button" class="vbChoiceOpt" data-shape="oval" title="Óvalo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="12" rx="9" ry="6.5"/></svg>
-        </button>
-        <button type="button" class="vbChoiceOpt" data-shape="circle" title="Círculo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/></svg>
-        </button>
-        <button type="button" class="vbChoiceOpt" data-shape="square" title="Cuadrado">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4.5" y="4.5" width="15" height="15" rx="1.5"/></svg>
-        </button>
-        <button type="button" class="vbChoiceOpt" data-shape="rect" title="Rectángulo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="1.5"/></svg>
-        </button>
-        <button type="button" class="vbChoiceOpt" data-shape="cloud" title="Nube">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17a4 4 0 01-.5-7.97A5 5 0 0116 8a4 4 0 011 7.87"/><path d="M7 17h10"/></svg>
-        </button>
-        <button type="button" class="vbChoiceOpt" data-shape="arrow" title="Flecha">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="20" x2="20" y2="4"/><polyline points="10 4 20 4 20 14"/></svg>
-        </button>
-        <button type="button" class="vbChoiceOpt active" data-shape="line" title="Línea">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="20" x2="20" y2="4"/></svg>
-        </button>
-      </div>
-    </div>
     <button id="vbEraser" title="Borrador">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13l-6.5 6.5a2 2 0 0 1-2.83 0l-4.17-4.17a2 2 0 0 1 0-2.83L11 6l7 7z"/><path d="M8 21h11"/></svg>
     </button>
@@ -2168,11 +2038,6 @@ window.OcrEngine = (function(){
         <option value="cuadriculado" selected>Cuadriculada</option>
         <option value="punteado">Punteada</option>
       </select>
-    </div>
-    <div class="vbs-row">
-      <label class="vbs-label" for="vbPenOnly" style="display:flex;align-items:center;gap:7px;cursor:pointer;">
-        <input type="checkbox" id="vbPenOnly" autocomplete="off"> Rechazo de mano (solo lapicera/stylus)
-      </label>
     </div>
     <div class="vbs-row">
       <button id="vbExportPdf" class="vbs-action" title="Guardar como PDF">
@@ -2431,16 +2296,6 @@ window.OcrEngine = (function(){
     }
     targetCtx.closePath();
   }
-  // Para círculo/cuadrado forzamos que el cuadro delimitador sea parejo
-  // (mismo ancho que alto), tomando el lado mayor y respetando la dirección
-  // en la que se arrastró el dedo/lapicera desde el punto inicial.
-  function evenBBoxFrom(x0,y0,x1,y1){
-    const dx = x1-x0, dy = y1-y0;
-    const side = Math.max(Math.abs(dx), Math.abs(dy));
-    const sx = dx < 0 ? -side : side;
-    const sy = dy < 0 ? -side : side;
-    return { x0, y0, x1: x0+sx, y1: y0+sy };
-  }
   function drawShapeStroke(targetCtx, s){
     const x0=s.x0, y0=s.y0, x1=s.x1, y1=s.y1;
     targetCtx.save();
@@ -2473,26 +2328,11 @@ window.OcrEngine = (function(){
         targetCtx.strokeRect(rx, ry, rw, rh);
         break;
       }
-      case 'square': {
-        const b = evenBBoxFrom(x0,y0,x1,y1);
-        const rx = Math.min(b.x0,b.x1), ry = Math.min(b.y0,b.y1), side = Math.abs(b.x1-b.x0);
-        targetCtx.strokeRect(rx, ry, side, side);
-        break;
-      }
       case 'oval': {
         const cx = (x0+x1)/2, cy = (y0+y1)/2;
         const rx = Math.max(Math.abs(x1-x0)/2, 0.5), ry = Math.max(Math.abs(y1-y0)/2, 0.5);
         targetCtx.beginPath();
         targetCtx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI*2);
-        targetCtx.stroke();
-        break;
-      }
-      case 'circle': {
-        const b = evenBBoxFrom(x0,y0,x1,y1);
-        const cx = (b.x0+b.x1)/2, cy = (b.y0+b.y1)/2;
-        const r = Math.max(Math.abs(b.x1-b.x0)/2, 0.5);
-        targetCtx.beginPath();
-        targetCtx.ellipse(cx, cy, r, r, 0, 0, Math.PI*2);
         targetCtx.stroke();
         break;
       }
@@ -2619,9 +2459,6 @@ window.OcrEngine = (function(){
     if(window.crypto && crypto.randomUUID) return crypto.randomUUID();
     return 'p_' + Date.now() + '_' + Math.random().toString(16).slice(2);
   }
-  // Se expone en window: el panel de PDFs (otra IIFE, más abajo) también
-  // genera ids para las marcas/trazos que guarda y usa este mismo generador.
-  window.uid = uid;
 
   const PAPER_DOT = {blanco:"#B8B3A8", rayado:"#AFC4DA", cuadriculado:"#DCD3C0", punteado:"#C7BCA5"};
   const INK_COLORS = [
@@ -2636,13 +2473,6 @@ window.OcrEngine = (function(){
     {name:"Azul", hex:"#7A9CF0"}, {name:"Naranja", hex:"#F5A25D"}, {name:"Rojo", hex:"#F0776E"},
     {name:"Lila", hex:"#B79CF0"},
   ];
-  // Se exponen en window porque el bloque <script> del panel de carpetas
-  // (más abajo en el archivo) es una IIFE separada y necesita estos mismos
-  // colores; sin esto, ese script tira "MARK_COLORS is not defined" y se
-  // corta antes de definir openVectorPanelForFolder, dejando las carpetas
-  // sin poder abrirse.
-  window.INK_COLORS = INK_COLORS;
-  window.MARK_COLORS = MARK_COLORS;
   const FOLDER_COLORS = [
     "#3448C5", "#2E5EAA", "#3E5C76", "#3E6259", "#6B7A3A", "#6E5AA8",
     "#C43D3D", "#B5502E", "#C99A3C", "#7A5230", "#8A8580", "#2B2A28",
@@ -2678,11 +2508,6 @@ window.OcrEngine = (function(){
   let currentPenStyle = 'estandar';
   let currentShapeType = 'line';
   let currentMarkStyle = 'translucido';
-  // Igual que con PDF_PEN_WIDTH: el panel de PDFs (otra IIFE) necesita leer
-  // el estilo de marcador actual para dibujar con el mismo aspecto. Como
-  // esta variable cambia en tiempo de ejecución, se sincroniza a window en
-  // cada reasignación (ver más abajo) en vez de copiarla una sola vez.
-  window.currentMarkStyle = currentMarkStyle;
   let tidyMode = true;
   let textInsertPt = null, textStyle = 'cursiva';
   let pendingTidy = null; // strokes a mano que se reemplazan al confirmar el texto reconocido por OCR
@@ -2780,6 +2605,7 @@ window.OcrEngine = (function(){
   const tidyShapeBtn = document.getElementById('tidyShapeBtn');
   const ocrHintRow = document.getElementById('ocrHintRow');
   const tidyUndoToast = document.getElementById('tidyUndoToast');
+  const tidyUndoLabel = document.getElementById('tidyUndoLabel');
   const tidyUndoBtn = document.getElementById('tidyUndoBtn');
   const tidyUndoDismissBtn = document.getElementById('tidyUndoDismissBtn');
   const liveRecognition = document.getElementById('liveRecognition');
@@ -2853,7 +2679,6 @@ window.OcrEngine = (function(){
   const pdfSelDotsEl = document.getElementById('pdfSelDots');
   const pdfSelCopiedHintEl = document.getElementById('pdfSelCopiedHint');
   const pdfInkCanvasEl = document.getElementById('pdfInkCanvas');
-  const pdfDrawToolbarEl = document.getElementById('pdfDrawToolbar');
   const pdfToolSelectBtn = document.getElementById('pdfToolSelect');
   const pdfToolPenBtn = document.getElementById('pdfToolPen');
   const pdfToolMarkerBtn = document.getElementById('pdfToolMarker');
@@ -2870,13 +2695,6 @@ window.OcrEngine = (function(){
   let pdfDrawColor = MARK_COLORS[8].hex; // rojo por defecto para el lápiz
   let pdfDrawing = false, pdfCurrentStroke = null, pdfDrawPointerId = null;
   const PDF_PEN_WIDTH = 3, PDF_MARKER_WIDTH = 16, PDF_ERASER_WIDTH = 18;
-  // Se exponen en window porque el panel de PDFs del bloque <script> de más
-  // abajo (otra IIFE separada) también dibuja lápiz/marcador sobre el PDF y
-  // necesita estos mismos anchos; sin esto, ese bloque tira "PDF_PEN_WIDTH
-  // is not defined" al primer trazo y no dibuja nada.
-  window.PDF_PEN_WIDTH = PDF_PEN_WIDTH;
-  window.PDF_MARKER_WIDTH = PDF_MARKER_WIDTH;
-  window.PDF_ERASER_WIDTH = PDF_ERASER_WIDTH;
 
   pageEl.style.width = BASE_W + 'px';
   pageEl.style.height = BASE_H + 'px';
@@ -3136,23 +2954,6 @@ window.OcrEngine = (function(){
   pdfLibraryCloseBtn.addEventListener('click', closePdfLibraryModal);
   pdfLibraryBtn.addEventListener('click', openPdfLibraryModal);
 
-  // El panel de PDF se ancha o achica según el ancho real que necesita la
-  // página renderizada, para que se vea completa sin recortes ni espacio
-  // sobrante: lo que no usa el PDF queda para la hoja de apuntes.
-  let pdfPanelManualWidth = false;
-  function autoFitPdfPanelWidth(baseViewport){
-    if(pdfPanelManualWidth) return;
-    if(!pdfPanelEl.classList.contains('open')) return;
-    if(window.innerWidth <= 700) return; // en mobile el panel usa 100% de ancho
-    const wrapPadding = 24; // padding:12px a cada lado de #pdfCanvasWrap
-    const areaWidth = workArea.getBoundingClientRect().width;
-    const minW = 230;
-    const maxW = areaWidth * 0.78;
-    let desired = Math.ceil(baseViewport.width) + wrapPadding;
-    desired = Math.max(minW, Math.min(maxW, desired));
-    pdfPanelEl.style.width = desired + 'px';
-  }
-
   async function renderCurrentPdfPage(){
     if(!currentPdfDoc) return;
     pdfCanvasEl.style.display = '';
@@ -3178,7 +2979,6 @@ window.OcrEngine = (function(){
     if(pdfRenderTask === task) pdfRenderTask = null;
     pdfPageLabelEl.textContent = currentPdfPageNum + ' / ' + currentPdfDoc.numPages;
     pdfZoomLabelEl.textContent = Math.round(pdfZoom*100) + '%';
-    autoFitPdfPanelWidth(baseViewport);
     if(currentPdfMeta){
       currentPdfMeta.lastPage = currentPdfPageNum;
       currentPdfMeta.zoom = pdfZoom;
@@ -3535,7 +3335,6 @@ window.OcrEngine = (function(){
       const buf = await blob.arrayBuffer();
       currentPdfDoc = await pdfjsLib.getDocument({ data: buf }).promise;
       currentPdfMeta = meta;
-      pdfPanelManualWidth = false; // nuevo PDF: recalcular el ancho ideal
       currentPdfPageNum = Math.min(Math.max(1, meta.lastPage || 1), currentPdfDoc.numPages);
       pdfZoom = meta.zoom || 1;
       currentPdfMarks = await pdfMarksGetByPdf(id).catch(()=>[]);
@@ -3672,11 +3471,9 @@ window.OcrEngine = (function(){
     pdfResizeHandleEl.addEventListener('pointerdown', (e)=>{
       if(!pdfPanelEl.classList.contains('open')) return;
       dragging = true;
-      pdfPanelManualWidth = true; // el usuario toma el control del ancho
       startX = e.clientX;
       startWidth = pdfPanelEl.getBoundingClientRect().width;
       pdfResizeHandleEl.classList.add('dragging');
-      pdfPanelEl.classList.add('dragging-resize');
       try{ pdfResizeHandleEl.setPointerCapture(e.pointerId); }catch(err){}
       e.preventDefault();
     });
@@ -3691,7 +3488,6 @@ window.OcrEngine = (function(){
       if(!dragging) return;
       dragging = false;
       pdfResizeHandleEl.classList.remove('dragging');
-      pdfPanelEl.classList.remove('dragging-resize');
     }
     pdfResizeHandleEl.addEventListener('pointerup', endDrag);
     pdfResizeHandleEl.addEventListener('pointercancel', endDrag);
@@ -3822,13 +3618,6 @@ window.OcrEngine = (function(){
   }, true);
   document.getElementById('toolbarScroll').addEventListener('scroll', closeAllDropdowns);
   window.addEventListener('resize', closeAllDropdowns);
-  window.addEventListener('resize', ()=>{
-    if(currentPdfDoc && pdfPanelEl.classList.contains('open')){
-      currentPdfDoc.getPage(currentPdfPageNum).then(page=>{
-        autoFitPdfPanelWidth(page.getViewport({ scale: pdfZoom * 1.3 }));
-      }).catch(()=>{});
-    }
-  });
 
   function renderPenStyleDrop(){
     penStyleDrop.innerHTML = '';
@@ -3853,7 +3642,7 @@ window.OcrEngine = (function(){
     Object.keys(MARK_STYLES).forEach(key=>{
       const b=document.createElement('button'); b.type='button'; b.className='markStyleOpt'+(key===currentMarkStyle?' active':'');
       b.textContent=MARK_STYLES[key].name; b.dataset.markStyle=key;
-      b.addEventListener('click',()=>{ currentMarkStyle=key; window.currentMarkStyle=key; renderMarkStyleDrop(); closeAllDropdowns(); });
+      b.addEventListener('click',()=>{ currentMarkStyle=key; renderMarkStyleDrop(); closeAllDropdowns(); });
       markStyleDrop.appendChild(b);
     });
   }
@@ -4453,12 +4242,7 @@ window.OcrEngine = (function(){
     fino:        {name:'Subrayador fino',       alpha:.72, composite:'multiply', widthMul:.42, linecap:'round'},
     doble:       {name:'Subrayador doble',      alpha:.62, composite:'multiply', widthMul:.58, linecap:'butt'}
   };
-  // Robusto ante stroke=undefined: varios llamadores de styleFor() (incluido
-  // el panel de PDFs) pasan solo el nombre de la herramienta al dibujar el
-  // primer punto de un trazo, sin el objeto stroke todavía armado; sin este
-  // resguardo tira "Cannot read properties of undefined (reading 'markStyle')"
-  // y corta el dibujo con marcador en seco.
-  function markStyleFor(stroke){ const key = (stroke && stroke.markStyle) || currentMarkStyle; return MARK_STYLES[key] || MARK_STYLES.translucido; }
+  function markStyleFor(stroke){ return MARK_STYLES[stroke.markStyle||currentMarkStyle] || MARK_STYLES.translucido; }
   renderMarkStyleDrop();
   function styleFor(t, stroke){
     switch(t){
@@ -4570,15 +4354,6 @@ window.OcrEngine = (function(){
     drawFreehandTail(targetCtx, stroke, style);
     targetCtx.globalAlpha = 1; targetCtx.globalCompositeOperation = 'source-over';
   }
-  // Se exponen en window: el panel de PDFs (otra IIFE, más abajo en el
-  // archivo) dibuja lápiz/marcador sobre el PDF con estas mismas funciones;
-  // sin esto tira "styleFor/dotTo/... is not defined" en el primer trazo y
-  // no dibuja nada.
-  window.styleFor = styleFor;
-  window.dotTo = dotTo;
-  window.drawFreehandIncrement = drawFreehandIncrement;
-  window.drawFreehandTail = drawFreehandTail;
-  window.drawFreehandSmooth = drawFreehandSmooth;
   function lineSegmentTo(targetCtx, stroke, style){
     targetCtx.globalAlpha = style.alpha; targetCtx.globalCompositeOperation = style.composite;
     targetCtx.strokeStyle = stroke.color;
@@ -4847,7 +4622,10 @@ window.OcrEngine = (function(){
     updateHistoryButtons();
     scheduleSave();
     if(t === 'pen' && finishedStroke && finishedStroke.points && finishedStroke.points.length){
-      scheduleLiveRecognition(finishedStroke);
+      // Primero probamos si es un gesto de "tachar para borrar" (estilo
+      // Nebo): si lo es, ya borró lo que tenía que borrar y no tiene
+      // sentido además mandarlo a reconocer como si fuera una palabra nueva.
+      if(!tryStrikeThroughGesture(finishedStroke)) scheduleLiveRecognition(finishedStroke);
     }
   }
 
@@ -5456,49 +5234,8 @@ window.OcrEngine = (function(){
   }
 
   async function openFolder(folder){
-    // El cuaderno de páginas (canvas) quedó reemplazado por el panel
-    // vectorial como vista de contenido de una carpeta. La función
-    // openFolderCanvas (más abajo) conserva la lógica original por si se
-    // quiere volver a habilitar en el futuro.
-    if(window.openVectorPanelForFolder) window.openVectorPanelForFolder(folder);
-  }
-
-  async function openFolderCanvas(id){
-    currentFolderId = id;
     resetPdfPanelForFolder();
-    let savedIndex = await storageGet(pagesKey(id));
-    if(savedIndex && Array.isArray(savedIndex) && savedIndex.length){
-      pages = savedIndex;
-    } else {
-      pages = [{ id: uid(), name: 'Página 1', paperType: 'rayado', sizeType:'a4', sizeH:BASE_H }];
-      await savePagesIndex();
-    }
-    pages.forEach(normalizePage);
-    currentPageId = pages[0].id;
-    applyPaperClass(pages[0].paperType);
-    sizeSelect.value = pages[0].sizeType;
-    updateViewportBg();
-    PAGE_W = pages[0].sizeType === 'infinite' ? pages[0].sizeW : BASE_W;
-    PAGE_H = pages[0].sizeType === 'infinite' ? pages[0].sizeH : BASE_H;
-    setupCanvasResolution();
-    strokes = await loadPageStrokes(currentPageId);
-    redoStack = [];
-    renderTabs(); updateHistoryButtons();
-
-    homeView.style.display = 'none';
-    notebookView.style.display = 'flex';
-    hasInteracted = false;
-    requestAnimationFrame(()=>{
-      const page = pages.find(p=>p.id===currentPageId);
-      if(page && page.sizeType === 'infinite'){
-        const target = infiniteTargetSize();
-        const newW = Math.max(PAGE_W, target.w), newH = Math.max(PAGE_H, target.h);
-        if(newW !== PAGE_W || newH !== PAGE_H) resizePageCanvas(newW, newH);
-      }
-      fitToViewport();
-      redrawAll();
-      setTool('pen');
-    });
+    if(window.openVectorPanelForFolder) window.openVectorPanelForFolder(folder);
   }
 
   async function backHome(){
@@ -5680,6 +5417,97 @@ window.OcrEngine = (function(){
   // El motor de OCR en sí (carga de la librería + worker de Tesseract) vive
   // en window.OcrEngine, compartido con el reconocimiento en vivo del
   // lienzo infinito — ver el <script> al principio del <head>.
+
+  // ---------- Gesto "tachar para borrar" (estilo Nebo) ----------
+  // Caja delimitadora aproximada de un trazo de TEXTO ya convertido (no
+  // tiene puntos como el lápiz, así que hay que medirlo con canvas usando
+  // la misma fuente/tamaño con la que se dibuja).
+  const measureCtx = document.createElement('canvas').getContext('2d');
+  function textStrokeBBox(s){
+    const fam = FONT_FAMILY[s.font] || FONT_FAMILY.impMin;
+    const txt = s.font === 'impMay' ? s.text.toUpperCase() : s.font === 'impLow' ? s.text.toLowerCase() : s.text;
+    measureCtx.font = `500 ${s.size}px ${fam}`;
+    const lines = txt.split('\n');
+    let maxW = 0;
+    lines.forEach(line=>{ maxW = Math.max(maxW, measureCtx.measureText(line).width); });
+    const minX = s.x, maxX = s.x + maxW;
+    const minY = s.y - s.size*0.85, maxY = s.y + (lines.length-1)*s.size*1.25 + s.size*0.3;
+    return { stroke:s, minX, minY, maxX, maxY };
+  }
+  // Caja de cualquier trazo "borrable" por gesto: lápiz (con sus puntos) o
+  // texto ya convertido (medido con canvas). El resto de herramientas
+  // (goma, marcador, formas) queda afuera: tachar sobre un marcador no es
+  // una acción que tenga mucho sentido para el usuario.
+  function gestureTargetBBox(s){
+    if(s.tool==='pen' && s.points && s.points.length) return strokeBBoxes([s])[0];
+    if(s.tool==='text') return textStrokeBBox(s);
+    return null;
+  }
+  // Un trazo cuenta como "garabato de tachado" si es bastante más ancho que
+  // alto (gesto horizontal) y va y viene sobre sí mismo (zigzag), en vez de
+  // ser una letra normal. Contamos cuántas veces el trazo cambia de sentido
+  // en X, y comparamos el largo real del camino contra la distancia en
+  // línea recta entre sus puntas: un tachado real recorre mucho más camino
+  // del que "avanza" en línea recta.
+  function strokeGestureShape(stroke){
+    const pts = stroke.points;
+    if(!pts || pts.length < 4) return null;
+    let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity, pathLen=0, reversals=0, dir=0;
+    for(let i=0;i<pts.length;i++){
+      const p=pts[i];
+      minX=Math.min(minX,p.x); maxX=Math.max(maxX,p.x);
+      minY=Math.min(minY,p.y); maxY=Math.max(maxY,p.y);
+      if(i>0){
+        const dx=p.x-pts[i-1].x, dy=p.y-pts[i-1].y;
+        pathLen += Math.hypot(dx,dy);
+        if(Math.abs(dx) > 1.5){
+          const d = dx>0?1:-1;
+          if(dir!==0 && d!==dir) reversals++;
+          dir = d;
+        }
+      }
+    }
+    const w=maxX-minX, h=Math.max(1,maxY-minY);
+    const straight = Math.hypot(pts[pts.length-1].x-pts[0].x, pts[pts.length-1].y-pts[0].y);
+    const sinuosity = straight>1 ? pathLen/straight : (pathLen>0?99:0);
+    return { minX, minY, maxX, maxY, w, h, reversals, sinuosity };
+  }
+  // Si el trazo recién terminado tiene forma de tachado Y cae encima de
+  // letra o texto ya existente, lo interpretamos como "borrar eso" en vez
+  // de agregarlo como letra nueva: quitamos tanto el garabato como lo que
+  // tachó, y dejamos un toast para deshacerlo por si el gesto fue sin
+  // querer (una "L" o una "e" grande mal interpretada, por ejemplo).
+  function tryStrikeThroughGesture(finishedStroke){
+    if(!finishedStroke || finishedStroke.tool!=='pen') return false;
+    const shape = strokeGestureShape(finishedStroke);
+    if(!shape) return false;
+    const wide = shape.w > shape.h*1.6 && shape.w > 26;
+    const scribbly = shape.reversals>=2 && shape.sinuosity>=1.6;
+    if(!wide || !scribbly) return false;
+
+    const idx = strokes.indexOf(finishedStroke);
+    const before = idx>=0 ? strokes.slice(0, idx) : strokes.slice(0,-1);
+    const targets = [];
+    before.forEach(s=>{
+      const b = gestureTargetBBox(s);
+      if(!b) return;
+      const overlapW = Math.min(shape.maxX,b.maxX) - Math.max(shape.minX,b.minX);
+      const targetW = Math.max(1, b.maxX-b.minX);
+      const vCenter = (shape.minY+shape.maxY)/2;
+      const within = vCenter > b.minY - (b.maxY-b.minY)*0.3 && vCenter < b.maxY + (b.maxY-b.minY)*0.3;
+      if(within && overlapW > targetW*0.5) targets.push(s);
+    });
+    if(!targets.length) return false;
+
+    const removeSet = new Set([finishedStroke, ...targets]);
+    const removedWithIndex = strokes.map((s,i)=>({s,i})).filter(o=>removeSet.has(o.s));
+    strokes = strokes.filter(s=>!removeSet.has(s));
+    redoStack = [];
+    redrawAll(); updateHistoryButtons(); scheduleSave();
+    lastTidyBackup = { kind:'gesture', removedWithIndex };
+    showTidyUndoToast('Borrado con gesto');
+    return true;
+  }
 
   // Caja delimitadora de un trazo (con un poco de aire según el grosor real
   // dibujado), usada tanto para agrupar en renglones/palabras como para
@@ -6016,8 +5844,27 @@ window.OcrEngine = (function(){
       const lines = groupIntoLines(boxes, medianH)
         .sort((a,b)=> (a.minY+a.maxY) - (b.minY+b.maxY));
 
+      // Para respetar sangría y párrafos (como hace Nebo al transcribir una
+      // página completa, en vez de aplastar todo en renglones sueltos
+      // pegados) necesitamos, por cada renglón, dónde arranca (minX) y qué
+      // tan separado está verticalmente del anterior.
+      const lineInfos = lines.map(line=>({
+        line,
+        minX: Math.min(...line.boxes.map(b=>b.minX)),
+      }));
+      const blockLeft = lineInfos.length ? Math.min(...lineInfos.map(l=>l.minX)) : 0;
+      const gaps = [];
+      for(let i=1;i<lines.length;i++) gaps.push(Math.max(0, lines[i].minY - lines[i-1].maxY));
+      const sortedGaps = gaps.slice().sort((a,b)=>a-b);
+      const medianGap = sortedGaps.length ? sortedGaps[Math.floor(sortedGaps.length/2)] : 0;
+      // Un hueco vertical bastante mayor al espaciado típico entre renglones
+      // de ESTE bloque (no un número fijo, porque cada uno escribe más o
+      // menos apretado) se interpreta como salto de párrafo intencional.
+      const paragraphGapThreshold = Math.max(medianH*0.9, medianGap*1.8);
+
       const outLines = [];
-      for(const line of lines){
+      for(let li=0; li<lineInfos.length; li++){
+        const { line, minX: lineMinX } = lineInfos[li];
         const words = groupLineIntoWords(line, medianH)
           .sort((a,b)=>a.minX-b.minX);
         const outWords = [];
@@ -6031,7 +5878,10 @@ window.OcrEngine = (function(){
           if(dictReady && text) text = correctWordWithDictionary(personalDict, text);
           if(text) outWords.push(text);
         }
-        if(outWords.length) outLines.push(outWords.join(' '));
+        if(!outWords.length) continue;
+        if(li>0 && gaps[li-1] > paragraphGapThreshold && outLines.length) outLines.push('');
+        const indented = (lineMinX - blockLeft) > medianH*0.8;
+        outLines.push((indented ? '\t' : '') + outWords.join(' '));
       }
       let recognized = outLines.join('\n').trim();
 
@@ -6108,27 +5958,43 @@ window.OcrEngine = (function(){
 
   let lastTidyBackup = null;
 
+  let tidyUndoHideTimer = null;
   function hideTidyUndoToast(){
+    clearTimeout(tidyUndoHideTimer);
     tidyUndoToast.classList.remove('show');
     lastTidyBackup = null;
   }
-  function showTidyUndoToast(){
+  // label opcional: este mismo toast/backup se reutiliza para dos acciones
+  // distintas (emprolijar letra y el gesto de tachar-para-borrar), así que
+  // el texto se ajusta según cuál disparó el aviso.
+  function showTidyUndoToast(label){
+    if(tidyUndoLabel) tidyUndoLabel.textContent = label || 'Letra emprolijada';
     tidyUndoToast.classList.add('show');
+    clearTimeout(tidyUndoHideTimer);
+    tidyUndoHideTimer = setTimeout(hideTidyUndoToast, 5000);
   }
   tidyUndoDismissBtn.addEventListener('click', hideTidyUndoToast);
   tidyUndoBtn.addEventListener('click', ()=>{
     if(!lastTidyBackup) return;
-    const { pairs } = lastTidyBackup;
-    // Igual que al emprolijar: reemplazamos cada trazo en su misma posición
-    // (en vez de sacarlo y volver a agregarlo al final) para no alterar el
-    // orden relativo con los trazos de goma y hacer reaparecer algo borrado.
-    const reverseMap = new Map(pairs.map(([orig, tidy]) => [tidy, orig]));
-    strokes = strokes.map(s => reverseMap.has(s) ? reverseMap.get(s) : s);
+    if(lastTidyBackup.kind === 'gesture'){
+      // El gesto de tachar borra trazos enteros (no los reemplaza), así que
+      // deshacerlo es reinsertarlos en su posición original dentro del
+      // array, en vez de mapear un trazo "prolijo" de vuelta al original.
+      const sorted = lastTidyBackup.removedWithIndex.slice().sort((a,b)=>a.i-b.i);
+      sorted.forEach(o=>{ strokes.splice(Math.min(o.i, strokes.length), 0, o.s); });
+    } else {
+      const { pairs } = lastTidyBackup;
+      // Igual que al emprolijar: reemplazamos cada trazo en su misma posición
+      // (en vez de sacarlo y volver a agregarlo al final) para no alterar el
+      // orden relativo con los trazos de goma y hacer reaparecer algo borrado.
+      const reverseMap = new Map(pairs.map(([orig, tidy]) => [tidy, orig]));
+      strokes = strokes.map(s => reverseMap.has(s) ? reverseMap.get(s) : s);
+    }
     redoStack = [];
     redrawAll(); updateHistoryButtons();
     scheduleSave();
     hideTidyUndoToast();
-    showStatus('Emprolijado deshecho');
+    showStatus('Deshecho');
   });
 
   function tidyStrokeShape(){
@@ -6175,8 +6041,8 @@ window.OcrEngine = (function(){
       redrawAll(); updateHistoryButtons();
       scheduleSave();
 
-      lastTidyBackup = { pairs };
-      showTidyUndoToast();
+      lastTidyBackup = { kind:'shape', pairs };
+      showTidyUndoToast('Letra emprolijada');
     } finally{
       tidyShapeBtn.disabled = false;
       tidyShapeBtn.classList.remove('loading');
@@ -6218,24 +6084,23 @@ window.OcrEngine = (function(){
   }
 
   boot();
+
+  // Expone utilidades de dibujo a otros <script> de la página (p. ej. el
+  // panel vectorial), que corren en su propio scope y no pueden ver las
+  // constantes/funciones declaradas acá adentro.
+  window.MARK_COLORS = MARK_COLORS;
+  window.INK_COLORS = INK_COLORS;
+  window.uid = uid;
+  window.dotTo = dotTo;
+  window.styleFor = styleFor;
+  window.drawFreehandIncrement = drawFreehandIncrement;
+  window.drawFreehandSmooth = drawFreehandSmooth;
+  window.drawFreehandTail = drawFreehandTail;
 })();
 </script>
 <script>
 (function(){
   "use strict";
-  // MARK_COLORS/INK_COLORS y las funciones/anchos de dibujo viven en el otro
-  // bloque <script> (otra IIFE); se toman de window, donde ese bloque los expone.
-  const MARK_COLORS = window.MARK_COLORS;
-  const INK_COLORS = window.INK_COLORS;
-  const PDF_PEN_WIDTH = window.PDF_PEN_WIDTH;
-  const PDF_MARKER_WIDTH = window.PDF_MARKER_WIDTH;
-  const PDF_ERASER_WIDTH = window.PDF_ERASER_WIDTH;
-  const styleFor = window.styleFor;
-  const dotTo = window.dotTo;
-  const drawFreehandIncrement = window.drawFreehandIncrement;
-  const drawFreehandTail = window.drawFreehandTail;
-  const drawFreehandSmooth = window.drawFreehandSmooth;
-  const uid = window.uid;
   const vbView=document.getElementById('vectorPanelView');
   const vbHeader=document.getElementById('vbHeader');
   const vbSvg=document.getElementById('vbSvg'), vbCamera=document.getElementById('vbCamera'), vbObjects=document.getElementById('vbObjects');
@@ -6244,42 +6109,41 @@ window.OcrEngine = (function(){
   // herramientas, ya juntas en una sola franja oscura) y la publica como
   // variable CSS, para que el lienzo arranque justo debajo y nunca quede
   // tapado por él, sin depender de números fijos por breakpoint.
+  // vbPdfSplitH: alto (px) reservado por el panel de PDFs cuando, en pantallas
+  // angostas, queda acoplado arriba (split real con la hoja abajo, en vez de
+  // taparla). vbBoard usa --vb-board-top (header + este alto) para su borde
+  // superior; --vb-header-h queda intacto (solo el header real) porque el
+  // panel de PDFs se posiciona respecto a ESE valor, y mezclar ambos crearía
+  // un ciclo (el panel empujaría su propia posición).
+  let vbPdfSplitH = 0;
   function vbSyncHeaderHeight(){
     if(!vbHeader) return 108;
     const h = Math.round(vbHeader.getBoundingClientRect().height) || 108;
     vbView.style.setProperty('--vb-header-h', h+'px');
-    vbView.style.setProperty('--vb-board-top', h+'px');
-    return h;
-  }
-  // vbPdfSplitW: ancho (px) reservado a la izquierda por el panel de PDFs
-  // cuando, en pantallas angostas, queda acoplado al costado (split real
-  // en paralelo con la hoja al lado, en vez de taparla). vbBoard usa
-  // --vb-board-left (este ancho) para su borde izquierdo, así el lienzo
-  // arranca justo donde termina el panel y nunca queda debajo de él.
-  let vbPdfSplitW = 0;
-  function vbUpdateBoardLeft(){
-    vbView.style.setProperty('--vb-board-left', vbPdfSplitW+'px');
+    const boardTop = h + vbPdfSplitH;
+    vbView.style.setProperty('--vb-board-top', boardTop+'px');
+    return boardTop;
   }
   function vbRecenterAfterLayoutChange(){
     if(vbPaperSel.value==='a4' || vbPaperSel.value==='oficio'){ vbFitToPage(); return; }
-    if(vScale===1){ vTx=vbPdfSplitW+(innerWidth-vbPdfSplitW)/2; vTy=(vbSyncHeaderHeight()+innerHeight)/2; }
+    if(vScale===1){ vTx=innerWidth/2; vTy=(vbSyncHeaderHeight()+innerHeight)/2; }
     vbTransform();
   }
   // Recalcula (o apaga) el split cuando el panel de PDFs abre/cierra/cambia
-  // de tamaño en pantallas angostas, para que la hoja se vea siempre al
-  // lado, en paralelo, nunca tapada.
+  // de tamaño en pantallas angostas, para que la hoja se vea siempre debajo,
+  // nunca tapada.
   function vbUpdatePdfSplitLayout(){
     const splitMode = window.innerWidth <= 760 && vbPdfPanel && vbPdfPanel.classList.contains('open');
     if(!splitMode){
-      if(vbPdfSplitW !== 0){ vbPdfSplitW = 0; vbUpdateBoardLeft(); vbRecenterAfterLayoutChange(); }
+      if(vbPdfSplitH !== 0){ vbPdfSplitH = 0; vbSyncHeaderHeight(); vbRecenterAfterLayoutChange(); }
       return;
     }
     requestAnimationFrame(()=>{
-      const w = vbPdfPanel ? Math.round(vbPdfPanel.getBoundingClientRect().width) : 0;
-      const newW = w ? w + 6 : 0;
-      if(newW !== vbPdfSplitW){
-        vbPdfSplitW = newW;
-        vbUpdateBoardLeft();
+      const h = vbPdfPanel ? Math.round(vbPdfPanel.getBoundingClientRect().height) : 0;
+      const newH = h ? h + 6 : 0;
+      if(newH !== vbPdfSplitH){
+        vbPdfSplitH = newH;
+        vbSyncHeaderHeight();
         vbRecenterAfterLayoutChange();
       }
     });
@@ -6332,7 +6196,6 @@ window.OcrEngine = (function(){
   }
   function vbSavePaperState(format,style){ try{ localStorage.setItem(vbPaperKey(), JSON.stringify({format,style})); }catch(e){} }
   function vbPenStyleKey(){ return 'cuaderno:vectorPenStyle:' + (vCurrentFolder ? vCurrentFolder.id : 'scratch'); }
-  function vbMarkStyleKey(){ return 'cuaderno:vectorMarkStyle:' + (vCurrentFolder ? vCurrentFolder.id : 'scratch'); }
 
   // Tamaño de la hoja A4 en el mismo sistema de unidades que usa el resto de
   // la app para sus páginas (1240x1754 ≈ A4 a 150dpi), así el PDF exportado
@@ -6345,13 +6208,6 @@ window.OcrEngine = (function(){
   let vScale=1, vTx=innerWidth/2, vTy=innerHeight/2, vTool='pen', vSpace=false;
   let vStroke=null, vPoints=[], vGesture=null, vTouchInfo=null, vSelected=null;
   let vHistory=[], vFuture=[], vSaved='';
-  // ---- Herramienta Formas (para cuadros conceptuales) ----
-  let vShapeType='line', vShapeEl=null, vShapeStart=null;
-  // ---- Rechazo de palma real: con esto activo, un dedo (pointerType
-  // "touch") no dibuja ni interactúa con la hoja; sólo la lapicera/stylus
-  // (pointerType "pen") o el mouse pueden hacerlo. La única excepción es la
-  // herramienta "mover lienzo" (mano), que sigue funcionando con el dedo.
-  let vPenOnly=false;
   // ---- Estilos de trazo del lápiz (bolígrafo, caligráfico, etc.) ----
   const VB_PEN_STYLES = {
     estandar:      { name:'Estándar',        widthMul:1,    alpha:1,   linecap:'round',  blend:false },
@@ -6439,7 +6295,7 @@ window.OcrEngine = (function(){
   });
   vbMarkStyleSel.addEventListener('change', ()=>{
     vMarkStyle=vbMarkStyleSel.value;
-    try{ localStorage.setItem(vbMarkStyleKey(), vMarkStyle); }catch(e){}
+    try{ localStorage.setItem('vb-mark-style:'+currentFolderId, vMarkStyle); }catch(e){}
     vbMarkStyleSel.classList.remove('open');
   });
   function vbRenderToolThickness(kind){
@@ -6510,43 +6366,15 @@ window.OcrEngine = (function(){
     vTool=t;
     vbView.querySelectorAll('#vbToolbar button').forEach(b=>b.classList.remove('active'));
     document.getElementById('vb'+t.charAt(0).toUpperCase()+t.slice(1))?.classList.add('active');
-    vbBoard.style.cursor = t==='pen'||t==='highlighter'||t==='shape' ? 'crosshair' : t==='text' ? 'text' : t==='eraser' ? 'none' : t==='select' ? 'default' : 'grab';
+    vbBoard.style.cursor = t==='pen'||t==='highlighter' ? 'crosshair' : t==='text' ? 'text' : t==='eraser' ? 'none' : t==='select' ? 'default' : 'grab';
     vbSelectHint.classList.toggle('show',t==='select');
     vbSyncSizeUI();
     vbUpdateEraserCursorSize();
     if(vbThicknessPanel) vbRenderThicknessPanel();
     vbEraserCursor.style.display = (t==='eraser') ? 'block' : 'none';
   }
-  ['select','pen','highlighter','eraser','text','hand','shape'].forEach(x=>{
+  ['select','pen','highlighter','eraser','text','hand'].forEach(x=>{
     document.getElementById('vb'+x.charAt(0).toUpperCase()+x.slice(1)).onclick=()=>vbSetTool(x);
-  });
-
-  // ---- Botón de Formas: abre/cierra el desplegable con los tipos de forma,
-  // igual que hace el lápiz/marcador con su propio panel de estilo ----
-  const vbShapeBtn=document.getElementById('vbShape');
-  const vbShapeTypeGrp=document.getElementById('vbShapeTypeGrp');
-  const vbShapeTypeBtns=[...vbShapeTypeGrp.querySelectorAll('.vbChoiceOpt')];
-  if(vbShapeBtn) vbShapeBtn.addEventListener('click',(e)=>{
-    e.preventDefault(); e.stopPropagation();
-    const wasActive = vTool==='shape';
-    vbSetTool('shape');
-    if(wasActive){ vbShapeTypeGrp.classList.toggle('open'); }
-    else {
-      const r=vbShapeBtn.getBoundingClientRect();
-      vbShapeTypeGrp.style.left=Math.max(8,Math.min(r.left,innerWidth-236))+'px';
-      vbShapeTypeGrp.style.top=(r.bottom+8)+'px';
-      vbShapeTypeGrp.classList.add('open');
-    }
-  });
-  vbShapeTypeBtns.forEach(b=>{
-    b.addEventListener('click',(e)=>{
-      e.preventDefault(); e.stopPropagation();
-      vShapeType=b.dataset.shape;
-      vbShapeTypeBtns.forEach(x=>x.classList.toggle('active', x===b));
-    });
-  });
-  document.addEventListener('pointerdown', e=>{
-    if(!e.target.closest('#vbShape') && !e.target.closest('#vbShapeTypeGrp')) vbShapeTypeGrp.classList.remove('open');
   });
 
   function vbStabilizePoint(raw){
@@ -6572,93 +6400,6 @@ window.OcrEngine = (function(){
     }
     const p=a[a.length-1]; d+=` T ${p.x} ${p.y}`;
     return d;
-  }
-  // ---------- Formas: helpers geométricos (equivalentes SVG de los que usa
-  // el cuaderno viejo basado en canvas) ----------
-  // Para círculo/cuadrado forzamos que el cuadro delimitador sea parejo
-  // (mismo ancho que alto), tomando el lado mayor y respetando la dirección
-  // en la que se arrastró el dedo/lapicera desde el punto inicial.
-  function vbEvenBBoxFrom(x0,y0,x1,y1){
-    const dx=x1-x0, dy=y1-y0;
-    const side=Math.max(Math.abs(dx),Math.abs(dy));
-    const sx=dx<0?-side:side, sy=dy<0?-side:side;
-    return {x0,y0,x1:x0+sx,y1:y0+sy};
-  }
-  function vbCloudPathD(x0,y0,x1,y1){
-    const cx=(x0+x1)/2, cy=(y0+y1)/2;
-    const rx=Math.max(Math.abs(x1-x0)/2,10), ry=Math.max(Math.abs(y1-y0)/2,10);
-    const bumps=Math.max(8,Math.round((rx+ry)/16));
-    let d='';
-    for(let i=0;i<bumps;i++){
-      const a0=(i/bumps)*Math.PI*2, a1=((i+1)/bumps)*Math.PI*2;
-      if(i===0) d+=`M ${cx+Math.cos(a0)*rx} ${cy+Math.sin(a0)*ry}`;
-      const aMid=(a0+a1)/2;
-      const mx=cx+Math.cos(aMid)*rx*1.15, my=cy+Math.sin(aMid)*ry*1.15;
-      const ex=cx+Math.cos(a1)*rx, ey=cy+Math.sin(a1)*ry;
-      d+=` Q ${mx} ${my} ${ex} ${ey}`;
-    }
-    return d+' Z';
-  }
-  function vbArrowPathD(x0,y0,x1,y1,w){
-    const angle=Math.atan2(y1-y0,x1-x0);
-    const headLen=Math.max(11,(w||3)*4.5);
-    const spread=Math.PI/7.5;
-    const hx1=x1-headLen*Math.cos(angle-spread), hy1=y1-headLen*Math.sin(angle-spread);
-    const hx2=x1-headLen*Math.cos(angle+spread), hy2=y1-headLen*Math.sin(angle+spread);
-    return `M ${x0} ${y0} L ${x1} ${y1} M ${x1} ${y1} L ${hx1} ${hy1} L ${hx2} ${hy2} Z`;
-  }
-  // Crea el elemento SVG para el tipo de forma elegido (line/rect/oval/etc.)
-  function vbNewShapeEl(type){
-    const tagMap={rect:'rect', square:'rect', oval:'ellipse', circle:'ellipse', line:'line'};
-    const tag=tagMap[type]||'path'; // arrow y cloud se dibujan como <path>
-    const el=document.createElementNS(NS,tag);
-    el.setAttribute('stroke', vbColor.value);
-    el.setAttribute('stroke-width', Math.max(.4, +vbSize.value));
-    el.setAttribute('stroke-linecap','round');
-    el.setAttribute('stroke-linejoin','round');
-    el.setAttribute('fill', type==='arrow' ? vbColor.value : 'none');
-    el.setAttribute('vector-effect','non-scaling-stroke');
-    el.dataset.obj='shape';
-    el.dataset.tool='shape';
-    el.dataset.shapeType=type;
-    return el;
-  }
-  // Actualiza la geometría del elemento a medida que se arrastra
-  function vbUpdateShapeGeom(el, type, x0,y0,x1,y1){
-    switch(type){
-      case 'rect': {
-        const rx=Math.min(x0,x1), ry=Math.min(y0,y1);
-        el.setAttribute('x',rx); el.setAttribute('y',ry);
-        el.setAttribute('width',Math.abs(x1-x0)); el.setAttribute('height',Math.abs(y1-y0));
-        break;
-      }
-      case 'square': {
-        const b=vbEvenBBoxFrom(x0,y0,x1,y1);
-        const rx=Math.min(b.x0,b.x1), ry=Math.min(b.y0,b.y1), side=Math.abs(b.x1-b.x0);
-        el.setAttribute('x',rx); el.setAttribute('y',ry);
-        el.setAttribute('width',side); el.setAttribute('height',side);
-        break;
-      }
-      case 'oval': {
-        const cx=(x0+x1)/2, cy=(y0+y1)/2;
-        el.setAttribute('cx',cx); el.setAttribute('cy',cy);
-        el.setAttribute('rx',Math.max(Math.abs(x1-x0)/2,.5));
-        el.setAttribute('ry',Math.max(Math.abs(y1-y0)/2,.5));
-        break;
-      }
-      case 'circle': {
-        const b=vbEvenBBoxFrom(x0,y0,x1,y1);
-        const cx=(b.x0+b.x1)/2, cy=(b.y0+b.y1)/2, r=Math.max(Math.abs(b.x1-b.x0)/2,.5);
-        el.setAttribute('cx',cx); el.setAttribute('cy',cy);
-        el.setAttribute('rx',r); el.setAttribute('ry',r);
-        break;
-      }
-      case 'cloud': el.setAttribute('d', vbCloudPathD(x0,y0,x1,y1)); break;
-      case 'arrow': el.setAttribute('d', vbArrowPathD(x0,y0,x1,y1, +el.getAttribute('stroke-width'))); break;
-      default: // line
-        el.setAttribute('x1',x0); el.setAttribute('y1',y0);
-        el.setAttribute('x2',x1); el.setAttribute('y2',y1);
-    }
   }
   function vbNewStroke(){
     vStroke=document.createElementNS(NS,'path');
@@ -6773,10 +6514,6 @@ window.OcrEngine = (function(){
   vbBoard.addEventListener('pointerdown', e=>{
     if(vbView.style.display==='none') return;
     if(e.pointerType==='mouse' && e.button!==0) return;
-    // Rechazo de palma real: con "Ignorar dedos" activo, un dedo no puede
-    // dibujar, borrar, seleccionar ni escribir texto; sólo mover el lienzo
-    // con la herramienta "mano" sigue andando con el dedo.
-    if(vPenOnly && e.pointerType==='touch' && !(vSpace || vTool==='hand')) return;
     vbBoard.setPointerCapture(e.pointerId);
     const p=vbClientWorldPoint(e.clientX, e.clientY);
     if(vSpace || vTool==='hand'){ vGesture={sx:e.clientX, sy:e.clientY, tx:vTx, ty:vTy}; return; }
@@ -6794,13 +6531,6 @@ window.OcrEngine = (function(){
       vbTextBox.value=''; vbTextBox.dataset.x=p.x; vbTextBox.dataset.y=p.y;
       vbTextBox.style.left=e.clientX+'px'; vbTextBox.style.top=e.clientY+'px'; vbTextBox.style.display='block'; vbTextBox.focus(); return;
     }
-    if(vTool==='shape'){
-      vShapeStart=p; vShapeEl=vbNewShapeEl(vShapeType);
-      vbUpdateShapeGeom(vShapeEl, vShapeType, p.x, p.y, p.x, p.y);
-      vbObjects.appendChild(vShapeEl);
-      vGesture={shape:true};
-      return;
-    }
     if(vTool==='pen' || vTool==='highlighter'){ vPoints=[p]; vbNewStroke(); vGesture={draw:true}; }
   });
   vbBoard.addEventListener('pointermove', e=>{
@@ -6813,9 +6543,6 @@ window.OcrEngine = (function(){
       if(Math.hypot(p.x-q.x, p.y-q.y) > .25/Math.max(vScale,.1)){ vPoints.push(p); vStroke.setAttribute('d', vbSmoothPath(vPoints)); }
     } else if(vGesture.erase){
       vbEraseCircleAt(e.clientX, e.clientY);
-    } else if(vGesture.shape){
-      const p=vbClientWorldPoint(e.clientX, e.clientY);
-      vbUpdateShapeGeom(vShapeEl, vShapeType, vShapeStart.x, vShapeStart.y, p.x, p.y);
     } else if(vGesture.select && vSelected){
       const dx=(e.clientX-vGesture.sx)/Math.max(vScale,.01), dy=(e.clientY-vGesture.sy)/Math.max(vScale,.01);
       vSelected.setAttribute('transform','translate('+dx+' '+dy+')');
@@ -6823,29 +6550,17 @@ window.OcrEngine = (function(){
       vTx=vGesture.tx+(e.clientX-vGesture.sx); vTy=vGesture.ty+(e.clientY-vGesture.sy); vbTransform();
     }
   });
-  vbBoard.addEventListener('pointerup', e=>{
+  vbBoard.addEventListener('pointerup', ()=>{
     if(!vGesture) return;
     if(vGesture.draw){
       if(vPoints.length<2) vStroke.remove();
       else { vStroke.dataset.pts = JSON.stringify(vPoints); vbCommit(); vbScheduleLiveRecognition(); }
     }
     if(vGesture.erase && vEraseDirty){ vbCommit(); vEraseDirty=false; }
-    if(vGesture.shape){
-      // Un toque sin arrastre no cuenta como forma: la descartamos para no
-      // dejar puntitos accidentales en la hoja.
-      const p=vbClientWorldPoint(e.clientX, e.clientY);
-      const tooSmall = Math.hypot(p.x-vShapeStart.x, p.y-vShapeStart.y) < 4/Math.max(vScale,.1);
-      if(tooSmall) vShapeEl.remove();
-      else vbCommit();
-      vShapeEl=null; vShapeStart=null;
-    }
     if(vGesture.select && vSelected){ vbCommit(); }
     vGesture=null; vStroke=null; vPoints=[];
   });
-  vbBoard.addEventListener('pointercancel', ()=>{
-    if(vGesture && vGesture.shape && vShapeEl) vShapeEl.remove();
-    vGesture=null; vStroke=null; vPoints=[]; vShapeEl=null; vShapeStart=null;
-  });
+  vbBoard.addEventListener('pointercancel', ()=>{ vGesture=null; vStroke=null; vPoints=[]; });
   vbBoard.addEventListener('pointerleave', ()=>{ vbEraserCursor.style.display = (vTool==='eraser' && vbView.style.display!=='none') ? 'block' : 'none'; });
   vbBoard.addEventListener('pointerenter', ()=>{ if(vTool==='eraser') vbEraserCursor.style.display='block'; });
 
@@ -7016,10 +6731,10 @@ window.OcrEngine = (function(){
 
     // Resolución mínima: si la palabra queda chica, subimos la escala para
     // que Tesseract tenga suficientes píxeles con los que trabajar. El piso
-    // se subió de 96 a 150px: con letra manuscrita, cuantos más píxeles por
-    // letra tenga el motor, menos confunde trazos parecidos (m/n, e/c, u/n),
-    // que es la causa más común de que adivine mal la palabra.
-    const MIN_PIXEL_H=150, MAX_SCALE=18;
+    // se subió de 64 a 96px por la misma razón que en el cuaderno: letra
+    // manuscrita necesita más resolución que letra de imprenta para que el
+    // motor la lea bien.
+    const MIN_PIXEL_H=96, MAX_SCALE=12;
     let scale=3.5;
     if(h>0 && h*scale<MIN_PIXEL_H) scale=Math.min(MAX_SCALE, MIN_PIXEL_H/h);
 
@@ -7171,13 +6886,13 @@ window.OcrEngine = (function(){
   // ---------- Tipo de hoja ----------
   const VB_PATTERNS = { cuadriculado:'vbPatternGrid', rayado:'vbPatternLined', punteado:'vbPatternDotted' };
   function vbFitToPage(){
-    const margin=48, topReserve=vbSyncHeaderHeight()+16, bottomReserve=90, leftReserve=vbPdfSplitW;
-    const availW = Math.max(200, innerWidth - leftReserve - margin*2);
+    const margin=48, topReserve=vbSyncHeaderHeight()+16, bottomReserve=90;
+    const availW = Math.max(200, innerWidth - margin*2);
     const availH = Math.max(200, innerHeight - topReserve - bottomReserve);
     const page=vbPageSize(vbPaperSel.value);
     const s = Math.max(.1, Math.min(availW/page.w, availH/page.h, 3));
     vScale = s;
-    vTx = leftReserve + margin + (availW - page.w*s)/2;
+    vTx = (innerWidth - page.w*s)/2;
     vTy = topReserve + (availH - page.h*s)/2;
     vbTransform();
   }
@@ -7784,7 +7499,7 @@ window.OcrEngine = (function(){
     if(vpDrawTool === 'eraser'){ vpEraseAt(pt); return; }
     const toolName = vpDrawTool === 'marker' ? 'highlighter' : 'pen';
     vpCurrentStroke = {
-      tool: toolName, markStyle: toolName === 'highlighter' ? window.currentMarkStyle : undefined, color: vpDrawColor,
+      tool: toolName, markStyle: toolName === 'highlighter' ? currentMarkStyle : undefined, color: vpDrawColor,
       width: toolName === 'pen' ? PDF_PEN_WIDTH : PDF_MARKER_WIDTH,
       penStyle: toolName === 'pen' ? 'estandar' : undefined,
       points: [pt],
@@ -8036,18 +7751,6 @@ window.OcrEngine = (function(){
     vbSettingsBackdrop.addEventListener('click', vbCloseSettings);
   }
 
-  // ---- Rechazo de mano (solo lapicera/stylus): preferencia global, igual
-  // que en el cuaderno viejo, no depende de la carpeta abierta ----
-  const vbPenOnlyChk = document.getElementById('vbPenOnly');
-  if(vbPenOnlyChk){
-    try{ vPenOnly = localStorage.getItem('cuaderno:vectorPenOnly') === '1'; }catch(e){ vPenOnly=false; }
-    vbPenOnlyChk.checked = vPenOnly;
-    vbPenOnlyChk.addEventListener('change', ()=>{
-      vPenOnly = vbPenOnlyChk.checked;
-      try{ localStorage.setItem('cuaderno:vectorPenOnly', vPenOnly ? '1' : '0'); }catch(e){}
-    });
-  }
-
   window.addEventListener('resize', ()=>{
     vbUpdatePdfSplitLayout();
     vbRecenterAfterLayoutChange();
@@ -8116,10 +7819,6 @@ window.OcrEngine = (function(){
     try{ penSt = localStorage.getItem(vbPenStyleKey()) || 'estandar'; }catch(e){}
     vPenStyle = penSt; vbPenStyleSel.value = penSt;
 
-    let markSt = 'translucido';
-    try{ markSt = localStorage.getItem(vbMarkStyleKey()) || 'translucido'; }catch(e){}
-    vMarkStyle = markSt; if(vbMarkStyleSel) vbMarkStyleSel.value = markSt;
-
     const paperState=vbLoadPaperState();
     const paper=paperState.format, style=paperState.style;
     vPaperStyle=style; vbPaperStyleSel.value=style; vbPaperSel.value=paper;
@@ -8148,6 +7847,19 @@ window.OcrEngine = (function(){
       navigator.serviceWorker.register('sw.js').catch(e=>console.warn('SW registration failed', e));
     });
   }
+  // Precarga del motor de OCR en un momento ocioso: así, cuando el usuario
+  // toca "Emprolijar letra" por primera vez, la librería y el worker ya
+  // están listos en vez de tardar varios segundos en bajarse e iniciarse.
+  // Se dispara solo si hay conexión; si no, no hace nada (el OCR seguirá
+  // funcionando normalmente, con su carga habitual, en cuanto haya red).
+  (function warmUpOcr(){
+    function go(){
+      if(navigator.onLine === false) return;
+      try{ window.OcrEngine && window.OcrEngine.preload(); }catch(e){}
+    }
+    if('requestIdleCallback' in window) requestIdleCallback(go, {timeout:5000});
+    else setTimeout(go, 2500);
+  })();
 </script>
 </body>
 </html>
