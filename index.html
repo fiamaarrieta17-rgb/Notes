@@ -5221,7 +5221,17 @@
     langPath:'https://tessdata.projectnaptha.com/4.0.0'
   };
   function getOcrWorker(){
-    if(!ocrWorkerPromise) ocrWorkerPromise = Tesseract.createWorker('spa', 1, OCR_WORKER_OPTIONS);
+    if(!ocrWorkerPromise){
+      // Si la creación del worker falla (típicamente por una conexión lenta/
+      // inestable la primera vez que hay que bajar el wasm + el diccionario),
+      // NO nos quedamos con esa promesa rota cacheada para siempre: la
+      // soltamos para que el próximo intento vuelva a crear el worker desde
+      // cero, en vez de fallar por el resto de la sesión sin motivo real.
+      ocrWorkerPromise = Tesseract.createWorker('spa', 1, OCR_WORKER_OPTIONS).catch(err=>{
+        ocrWorkerPromise = null;
+        throw err;
+      });
+    }
     return ocrWorkerPromise;
   }
   const OCR_PSM_SINGLE_WORD = '8';
@@ -5650,7 +5660,8 @@
       textStyle = 'impMin';
       updateTextStyleUI();
     }catch(err){
-      alert('No se pudo reconocer la letra. Revisá tu conexión a internet e intentá de nuevo.');
+      const reason = (err && (err.message || (err.toString && err.toString()))) || '';
+      alert('No se pudo reconocer la letra' + (reason ? (': ' + reason) : '.') + ' Revisá tu conexión a internet e intentá de nuevo.');
     }finally{
       ocrTidyBtn.disabled = false;
       ocrTidyBtn.classList.remove('loading');
@@ -6207,7 +6218,14 @@
         const s=document.createElement('script'); s.crossOrigin='anonymous'; s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.min.js';
         await new Promise((ok,no)=>{s.onload=ok;s.onerror=()=>no(new Error('No se pudo cargar Tesseract'));document.head.appendChild(s);});
       }
-      if(!vbOcrWorkerPromise) vbOcrWorkerPromise=Tesseract.createWorker('spa', 1, OCR_WORKER_OPTIONS);
+      if(!vbOcrWorkerPromise){
+        // Mismo problema que en el cuaderno principal: si la primera creación
+        // del worker falla, no la dejamos cacheada rota para siempre.
+        vbOcrWorkerPromise = Tesseract.createWorker('spa', 1, OCR_WORKER_OPTIONS).catch(err=>{
+          vbOcrWorkerPromise = null;
+          throw err;
+        });
+      }
       const worker=await vbOcrWorkerPromise;
       const paths=vbRecentPaths(), pack=vbBuildOcrImage(paths); if(!pack) return;
       const img=new Image(); const url=URL.createObjectURL(new Blob([pack.svg],{type:'image/svg+xml'}));
@@ -6215,7 +6233,13 @@
       await worker.setParameters({tessedit_pageseg_mode:'8',user_defined_dpi:'300'});
       const {data}=await worker.recognize(img); const text=((data&&data.text)||'').replace(/\s+/g,' ').trim();
       if(text){ vbLiveCandidate={text,box:pack.box}; vbLiveWord.textContent=text; vbLiveWord.className='f-impMin'; vbPositionLiveRecognition(pack.box); }
-    }catch(e){ console.warn('OCR en vivo no disponible',e); vbLiveCandidate=null; vbLiveWord.textContent='OCR no disponible'; vbLiveRecognition.classList.add('show','vbLiveOverWord'); }
+    }catch(e){
+      console.warn('OCR en vivo no disponible',e);
+      vbLiveCandidate=null;
+      const reason = (e && (e.message || e.toString && e.toString())) || '';
+      vbLiveWord.textContent = reason ? ('OCR no disponible: '+reason) : 'OCR no disponible';
+      vbLiveRecognition.classList.add('show','vbLiveOverWord');
+    }
   }
   function vbScheduleLiveRecognition(){
     clearTimeout(vbLiveTimer);
