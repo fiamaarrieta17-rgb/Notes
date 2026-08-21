@@ -74,6 +74,123 @@ window.OcrEngine = (function(){
   const REJECT_CONFIDENCE=22;
   const TIMEOUT_MS=25000;
 
+  // Interruptor global de OCR: se guarda en localStorage para que la
+  // preferencia se mantenga entre sesiones, y se avisa por evento a quien
+  // esté escuchando (los distintos <script> de la app, que no comparten
+  // variables entre sí) para que actualicen sus interruptores en pantalla.
+  const ENABLED_KEY='cuaderno:ocrEnabled';
+  function isEnabled(){
+    try{ const v=localStorage.getItem(ENABLED_KEY); return v===null ? true : v==='1'; }
+    catch(e){ return true; }
+  }
+  function setEnabled(on){
+    try{ localStorage.setItem(ENABLED_KEY, on ? '1':'0'); }catch(e){}
+    try{ window.dispatchEvent(new CustomEvent('ocrEnabledChange', {detail:{enabled:!!on}})); }catch(e){}
+  }
+
+  // ---------- Enderezado de inclinación (deskew) ----------
+  // La letra cursiva real casi siempre está inclinada hacia la derecha, y
+  // Tesseract (entrenado sobre todo con letra de imprenta vertical) lee
+  // bastante peor cuanto más inclinado está el trazo: confunde la forma de
+  // letras como "l/e", "n/u" o "a/o" cuando el palo no es vertical. Antes de
+  // reconocer, estimamos ese ángulo a partir de los propios trazos y los
+  // "enderezamos" con un corte (shear) horizontal — sin tocar los trazos
+  // guardados, solo la imagen que ve el OCR.
+  function estimateSlant(pointArrays){
+    let sumW=0, sumWRatio=0;
+    (pointArrays||[]).forEach(pts=>{
+      if(!pts || pts.length<2) return;
+      for(let i=1;i<pts.length;i++){
+        const dx=pts[i].x-pts[i-1].x, dy=pts[i].y-pts[i-1].y;
+        // Solo segmentos bien verticales delatan la inclinación real de la
+        // letra; los casi horizontales (barra de la "t", tildes, uniones
+        // entre letras) meterían ruido si los sumáramos.
+        if(Math.abs(dy) < Math.abs(dx)*1.1) continue;
+        const w=Math.abs(dy);
+        sumW += w; sumWRatio += w*(dx/dy);
+      }
+    });
+    if(sumW < 40) return 0; // muy poca información vertical: mejor no tocar nada
+    // Clamp a un rango razonable (~±22°) para que un trazo atípico (una
+    // firma con rúbrica, por ejemplo) no dispare una inclinación absurda.
+    return Math.max(-0.4, Math.min(0.4, sumWRatio/sumW));
+  }
+
+  // ---------- Corrección contra vocabulario ----------
+  // Lista compacta de palabras muy frecuentes en español: funciona como un
+  // corrector de "sentido común" desde el primer uso, antes de que el
+  // diccionario personal de cada app (que aprende del vocabulario propio del
+  // usuario) tenga algo guardado. No pretende ser un corrector ortográfico
+  // completo — es un empujoncito para los errores típicos de OCR sobre
+  // cursiva en las palabras más comunes del idioma.
+  const COMMON_WORDS = ('de la que el en y a los se del las por un para con no una '+
+    'su al lo como más pero sus le ya o este sí porque esta entre cuando muy sin '+
+    'sobre también me hasta hay donde quien desde todo nos durante todos uno les '+
+    'ni contra otros ese eso ante ellos e esto mí antes algunos qué unos yo así '+
+    'primero tú algo nosotros mi mis tu tus ellas nada esa estos vosotros vosotras '+
+    'os mío mía míos mías tuyo tuya tuyos tuyas suyo suya suyos suyas nuestro '+
+    'nuestra nuestros nuestras vuestro vuestra vuestros vuestras esos esas soy eres '+
+    'somos sois estoy estás está estamos estáis están ser es son fue era hola '+
+    'gracias buenos días tarde noche trabajo casa tiempo día año vida mundo hoy '+
+    'mañana ayer siempre nunca bien mal aquí allí porque cómo cuál cuáles').split(/\s+/);
+  const COMMON_WORDS_SET = new Set(COMMON_WORDS);
+
+  function levenshtein(a, b){
+    const m = a.length, n = b.length;
+    if(m === 0) return n;
+    if(n === 0) return m;
+    const dp = new Array(n+1);
+    for(let j=0;j<=n;j++) dp[j] = j;
+    for(let i=1;i<=m;i++){
+      let prev = dp[0]; dp[0] = i;
+      for(let j=1;j<=n;j++){
+        const tmp = dp[j];
+        dp[j] = a[i-1]===b[j-1] ? prev : 1 + Math.min(prev, dp[j], dp[j-1]);
+        prev = tmp;
+      }
+    }
+    return dp[n];
+  }
+  // Corrige una palabra reconocida contra la lista de comunes (siempre
+  // activa) y, si se provee, contra un diccionario personal (cada app decide
+  // cuándo pasarlo, según cuánto vocabulario propio ya aprendió). Solo
+  // corrige cuando hay una coincidencia bien cercana — si no, deja el
+  // resultado del OCR tal cual, para no inventar palabras.
+  function correctWord(word, personalDict){
+    if(!word || word.length<2) return word;
+    const lower = word.toLowerCase();
+    if(COMMON_WORDS_SET.has(lower)) return word;
+    if(personalDict && personalDict[lower]) return word;
+    const threshold = lower.length<=4 ? 1 : (lower.length<=7 ? 2 : 3);
+    let best=null, bestDist=Infinity, bestCount=0;
+    COMMON_WORDS_SET.forEach(dw=>{
+      if(Math.abs(dw.length-lower.length)>2) return;
+      const dist=levenshtein(lower,dw);
+      if(dist===0||dist>threshold) return;
+      if(dist<bestDist){ best=dw; bestDist=dist; bestCount=1; }
+    });
+    if(personalDict){
+      for(const dw in personalDict){
+        if(Math.abs(dw.length-lower.length)>2) continue;
+        const dist=levenshtein(lower,dw);
+        if(dist===0||dist>threshold) continue;
+        const count=(personalDict[dw]&&personalDict[dw].count)||1;
+        // Ante empate de distancia, preferimos el diccionario personal: es
+        // más probable que sea justo la palabra que el usuario suele escribir.
+        if(dist<bestDist || (dist===bestDist && count>=bestCount)){
+          best=dw; bestDist=dist; bestCount=count;
+        }
+      }
+    }
+    if(!best) return word;
+    return /^[A-ZÁÉÍÓÚÑ]/.test(word) ? best.charAt(0).toUpperCase()+best.slice(1) : best;
+  }
+  function correctTextBlock(text, personalDict){
+    return text.split('\n').map(line=>
+      line.split(' ').map(w => w ? correctWord(w, personalDict) : w).join(' ')
+    ).join('\n');
+  }
+
   let scriptPromise=null, workerPromise=null;
 
   function withTimeout(promise, ms, label){
@@ -166,7 +283,14 @@ window.OcrEngine = (function(){
   // "línea cruda" sin análisis de layout (ayuda cuando la forma es rara y
   // Tesseract ni siquiera encuentra dónde "empieza" el texto, que es lo que
   // suele pasar con letra manuscrita muy suelta o con trazos separados).
-  async function recognizeWord(img){
+  // opts.fast=true se usa para las sugerencias EN VIVO mientras se escribe:
+  // ahí lo que más importa es que la respuesta llegue rápido, así que nos
+  // quedamos con un solo intento (palabra suelta) en vez de escalar a línea
+  // y línea cruda. Para "Transcribir" (conversión completa, a pedido del
+  // usuario) sí vale la pena esperar los tres intentos, porque ahí se
+  // prioriza precisión sobre velocidad.
+  async function recognizeWord(img, opts){
+    const fast = !!(opts && opts.fast);
     const worker=await getWorker();
     let best='', bestConf=-1;
     async function attempt(psm){
@@ -179,12 +303,14 @@ window.OcrEngine = (function(){
       }catch(err){ /* seguimos al siguiente intento */ }
     }
     await attempt(PSM_SINGLE_WORD);
-    if(!best || bestConf<MIN_CONFIDENCE) await attempt(PSM_SINGLE_LINE);
-    if(!best || bestConf<MIN_CONFIDENCE) await attempt(PSM_RAW_LINE);
+    if(!fast){
+      if(!best || bestConf<MIN_CONFIDENCE) await attempt(PSM_SINGLE_LINE);
+      if(!best || bestConf<MIN_CONFIDENCE) await attempt(PSM_RAW_LINE);
+    }
     await worker.setParameters({ tessedit_pageseg_mode: PSM_SINGLE_WORD, user_defined_dpi: '300' });
-    // Si ni con los tres intentos se llega a una confianza mínima razonable,
-    // mejor no devolver nada: una palabra inventada obliga a corregir igual,
-    // pero además engaña porque parece "reconocida".
+    // Si no se llega a una confianza mínima razonable, mejor no devolver
+    // nada: una palabra inventada obliga a corregir igual, pero además
+    // engaña porque parece "reconocida".
     if(best && bestConf<REJECT_CONFIDENCE) return '';
     return best;
   }
@@ -199,7 +325,7 @@ window.OcrEngine = (function(){
     return (data && data.text) || '';
   }
 
-  return { recognizeWord, recognizeAuto, binarizeImageData, preload };
+  return { recognizeWord, recognizeAuto, binarizeImageData, preload, isEnabled, setEnabled, estimateSlant, correctWord, correctTextBlock };
 })();
 </script>
 <style>
@@ -545,6 +671,8 @@ window.OcrEngine = (function(){
   @media (min-width:640px){ button.tidyBtn .tidyLabel{display:inline;} }
   @keyframes tidySpin{ to{ transform:rotate(360deg); } }
   button.tidyBtn.loading svg{animation:tidySpin 0.9s linear infinite;}
+  button.tidyBtn#ocrToggleBtn.ocrOff{opacity:.5;}
+  button.tidyBtn#ocrToggleBtn.ocrOff svg{stroke:var(--danger);}
   button.icon:hover{color:var(--cream);border-color:var(--pine);}
 
   .swatch{
@@ -1335,6 +1463,12 @@ window.OcrEngine = (function(){
   }
   #vectorPanelView .vbs-action:hover{opacity:.9;}
   #vectorPanelView .vbs-action svg{width:16px;height:16px;flex-shrink:0;}
+  #vectorPanelView .vbs-switch{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--vb-muted);}
+  #vectorPanelView .vbs-switch input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;}
+  #vectorPanelView .vbs-switch-track{position:relative;width:38px;height:22px;border-radius:11px;background:#3a3d48;transition:background .15s ease;flex-shrink:0;}
+  #vectorPanelView .vbs-switch-thumb{position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .15s ease;}
+  #vectorPanelView .vbs-switch input:checked + .vbs-switch-track{background:var(--vb-accent);}
+  #vectorPanelView .vbs-switch input:checked + .vbs-switch-track .vbs-switch-thumb{transform:translateX(16px);}
   #vectorPanelView #vbUploadPdfBtn{background:var(--vb-ui-2);border-color:var(--vb-line);color:var(--vb-ink);}
   #vectorPanelView #vbUploadPdfBtn:hover{background:#2A2D38;}
   #vectorPanelView #vbUploadPdfBtn[disabled]{opacity:.6;cursor:default;pointer-events:none;}
@@ -1599,6 +1733,10 @@ window.OcrEngine = (function(){
     <button class="tidyBtn" id="tidyShapeBtn" title="Prolijar tu letra manteniendo tu caligrafía">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4V2m0 20v-2M8 9l-4-4m14 14-4-4M4 15l-4 4m20-14-4 4M22 15h2M0 9h2m11.6 2.6a4 4 0 1 0-5.66-5.66l-8.83 8.83a2 2 0 0 0 0 2.83l2.83 2.83a2 2 0 0 0 2.83 0z"/></svg>
       <span class="tidyLabel">Emprolijar letra</span>
+    </button>
+    <button class="tidyBtn" id="ocrToggleBtn" title="Activar o desactivar el reconocimiento de escritura (OCR)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+      <span class="tidyLabel">OCR</span>
     </button>
     <div class="divider"></div>
     <div class="grp" id="swatches"></div>
@@ -2038,6 +2176,14 @@ window.OcrEngine = (function(){
         <option value="cuadriculado" selected>Cuadriculada</option>
         <option value="punteado">Punteada</option>
       </select>
+    </div>
+    <div class="vbs-row">
+      <label class="vbs-label" for="vbOcrToggle">Reconocimiento de escritura (OCR)</label>
+      <label class="vbs-switch">
+        <input type="checkbox" id="vbOcrToggle">
+        <span class="vbs-switch-track"><span class="vbs-switch-thumb"></span></span>
+        <span id="vbOcrToggleText">Activado</span>
+      </label>
     </div>
     <div class="vbs-row">
       <button id="vbExportPdf" class="vbs-action" title="Guardar como PDF">
@@ -2602,6 +2748,23 @@ window.OcrEngine = (function(){
   const textCancelBtn = document.getElementById('textCancelBtn');
   const textInsertBtn = document.getElementById('textInsertBtn');
   const ocrTidyBtn = document.getElementById('ocrTidyBtn');
+  const ocrToggleBtn = document.getElementById('ocrToggleBtn');
+  function refreshOcrToggleBtn(){
+    if(!ocrToggleBtn) return;
+    const on = window.OcrEngine.isEnabled();
+    ocrToggleBtn.classList.toggle('ocrOff', !on);
+    ocrToggleBtn.title = on
+      ? 'OCR activado — tocá para desactivarlo'
+      : 'OCR desactivado — tocá para activarlo';
+  }
+  if(ocrToggleBtn){
+    refreshOcrToggleBtn();
+    ocrToggleBtn.addEventListener('click', ()=>{
+      window.OcrEngine.setEnabled(!window.OcrEngine.isEnabled());
+      refreshOcrToggleBtn();
+    });
+    window.addEventListener('ocrEnabledChange', refreshOcrToggleBtn);
+  }
   const tidyShapeBtn = document.getElementById('tidyShapeBtn');
   const ocrHintRow = document.getElementById('ocrHintRow');
   const tidyUndoToast = document.getElementById('tidyUndoToast');
@@ -4625,7 +4788,7 @@ window.OcrEngine = (function(){
       // Primero probamos si es un gesto de "tachar para borrar" (estilo
       // Nebo): si lo es, ya borró lo que tenía que borrar y no tiene
       // sentido además mandarlo a reconocer como si fuera una palabra nueva.
-      if(!tryStrikeThroughGesture(finishedStroke)) scheduleLiveRecognition(finishedStroke);
+      if(!tryStrikeThroughGesture(finishedStroke) && window.OcrEngine.isEnabled()) scheduleLiveRecognition(finishedStroke);
     }
   }
 
@@ -5619,8 +5782,14 @@ window.OcrEngine = (function(){
     // perfectamente aliasados) y suaviza el escalonado de los bordes que deja
     // el canvas al dibujar a escalas altas, sin borronear la forma general.
     octx.filter = 'blur(0.5px)';
-    octx.scale(scale, scale);
-    octx.translate(-minX, -minY);
+    // Enderezamos la inclinación cursiva con un corte (shear) horizontal
+    // alrededor del centro vertical de la palabra, calculado a partir de los
+    // trazos reales. El margen ya generoso que se deja alrededor de cada
+    // palabra (ver `pad` donde se llama a esta función) absorbe el
+    // corrimiento sin necesidad de agrandar el recorte.
+    const slant = window.OcrEngine.estimateSlant(boxes.map(b=>b.stroke.points));
+    const midY = minY + h/2;
+    octx.setTransform(scale, 0, -slant*scale, scale, scale*slant*midY - scale*minX, -scale*minY);
     boxes.forEach(b=>{
       // Antes de "fotografiar" el trazo para el OCR lo suavizamos apenas
       // (mismo promedio móvil que usa "Emprolijar letra"): el microtemblor
@@ -5655,56 +5824,18 @@ window.OcrEngine = (function(){
   // (Tesseract corre offline en el navegador y no se puede reentrenar así),
   // pero corrige el resultado hacia la palabra MÁS PARECIDA que el usuario ya
   // escribió antes, cuando la diferencia es chica (probable error de OCR) y no
-  // la toca cuando no hay ninguna coincidencia cercana.
+  // la toca cuando no hay ninguna coincidencia cercana. El algoritmo de
+  // comparación en sí (distancia de edición) vive en window.OcrEngine, junto
+  // con una lista de palabras comunes en español que corrige desde el primer
+  // uso; acá solo se administra el guardado del vocabulario propio de este
+  // dispositivo.
   const OCR_DICT_KEY = 'ocr-personal-dict';
-  const OCR_DICT_MIN_ENTRIES = 15; // no corregimos hasta tener vocabulario suficiente
+  const OCR_DICT_MIN_ENTRIES = 3; // con la lista de comunes de por medio, alcanza con poco vocabulario propio
   const OCR_DICT_MAX_ENTRIES = 900;
   let personalDictCache = null;
   async function loadPersonalDict(){
     if(!personalDictCache) personalDictCache = (await storageGet(OCR_DICT_KEY)) || {};
     return personalDictCache;
-  }
-  function levenshtein(a, b){
-    const m = a.length, n = b.length;
-    if(m === 0) return n;
-    if(n === 0) return m;
-    const dp = new Array(n+1);
-    for(let j=0;j<=n;j++) dp[j] = j;
-    for(let i=1;i<=m;i++){
-      let prev = dp[0]; dp[0] = i;
-      for(let j=1;j<=n;j++){
-        const tmp = dp[j];
-        dp[j] = a[i-1]===b[j-1] ? prev : 1 + Math.min(prev, dp[j], dp[j-1]);
-        prev = tmp;
-      }
-    }
-    return dp[n];
-  }
-  // Busca, dentro del vocabulario ya aprendido, la palabra más parecida a la
-  // que reconoció el OCR. Solo la usa como corrección si está lo bastante
-  // cerca (umbral chico) — si no hay nada parecido, deja el resultado tal cual.
-  function correctWordWithDictionary(dict, word){
-    if(!word) return word;
-    const lower = word.toLowerCase();
-    if(dict[lower]) return word; // ya es una palabra conocida, no la tocamos
-    let best = null, bestDist = Infinity, bestCount = 0;
-    for(const dw in dict){
-      if(Math.abs(dw.length - lower.length) > 2) continue;
-      const dist = levenshtein(lower, dw);
-      const threshold = lower.length <= 4 ? 1 : (lower.length <= 7 ? 2 : 3);
-      if(dist === 0 || dist > threshold) continue;
-      const count = dict[dw].count || 1;
-      if(dist < bestDist || (dist === bestDist && count > bestCount)){
-        best = dw; bestDist = dist; bestCount = count;
-      }
-    }
-    if(!best) return word;
-    return /^[A-ZÁÉÍÓÚÑ]/.test(word) ? best.charAt(0).toUpperCase() + best.slice(1) : best;
-  }
-  function correctTextBlock(dict, text){
-    return text.split('\n').map(line=>
-      line.split(' ').map(w => w ? correctWordWithDictionary(dict, w) : w).join(' ')
-    ).join('\n');
   }
   // Cada vez que el usuario confirma un texto (a mano, dictado u OCR ya
   // corregido), aprendemos esas palabras para reconocer mejor la próxima vez.
@@ -5773,11 +5904,12 @@ window.OcrEngine = (function(){
       const minX=Math.max(0,candidate.word.minX-pad),minY=Math.max(0,candidate.word.minY-pad);
       const maxX=Math.min(PAGE_W,candidate.word.maxX+pad),maxY=Math.min(PAGE_H,candidate.word.maxY+pad);
       const img=renderStrokesToImage(candidate.word.boxes,minX,minY,Math.max(1,Math.ceil(maxX-minX)),Math.max(1,Math.ceil(maxY-minY)),3.5);
-      let recognized=await window.OcrEngine.recognizeWord(img);
+      let recognized=await window.OcrEngine.recognizeWord(img, {fast:true});
       if(seq!==liveRecSeq)return;
       if(!recognized)return;
       const dict=await loadPersonalDict();
-      if(Object.keys(dict).length>=OCR_DICT_MIN_ENTRIES)recognized=correctWordWithDictionary(dict,recognized);
+      if(Object.keys(dict).length>=OCR_DICT_MIN_ENTRIES)recognized=window.OcrEngine.correctWord(recognized,dict);
+      else recognized=window.OcrEngine.correctWord(recognized,null);
       if(!recognized)return;
       liveRecCandidate={text:recognized,strokes:candidate.strokeRefs,x:candidate.word.minX,y:candidate.word.minY,medianH:candidate.medianH};
       liveRecWord.textContent=recognized;
@@ -5815,18 +5947,22 @@ window.OcrEngine = (function(){
 
   async function tidyHandwriting(){
     closePopover();
+    if(!window.OcrEngine.isEnabled()){
+      alert('El reconocimiento de escritura (OCR) está desactivado. Activalo con el botón "OCR" de la barra de herramientas para poder transcribir.');
+      return;
+    }
     const penStrokes = strokes.filter(s=>s.tool==='pen' && s.points && s.points.length);
     if(!penStrokes.length){
       alert('No hay nada escrito a mano en esta página para convertir.');
       return;
     }
 
-    const tidyLabelEl = ocrTidyBtn.querySelector('.tidyLabel');
-    const originalLabel = tidyLabelEl ? tidyLabelEl.textContent : '';
+    // No mostramos ningún texto de "Reconociendo…": el ícono con el spinner
+    // (clase .loading) ya alcanza como señal de que está trabajando, y así
+    // el resultado aparece directamente cuando está listo, sin avisos de
+    // por medio.
     ocrTidyBtn.disabled = true;
     ocrTidyBtn.classList.add('loading');
-    if(tidyLabelEl) tidyLabelEl.textContent = 'Reconociendo…';
-    showStatus('Reconociendo tu letra…');
 
     try{
       const personalDict = await loadPersonalDict();
@@ -5875,7 +6011,7 @@ window.OcrEngine = (function(){
           const img = renderStrokesToImage(word.boxes, minX, minY, w, h, scale);
           let text = '';
           try{ text = await window.OcrEngine.recognizeWord(img); }catch(err){ text = ''; }
-          if(dictReady && text) text = correctWordWithDictionary(personalDict, text);
+          if(text) text = window.OcrEngine.correctWord(text, dictReady ? personalDict : null);
           if(text) outWords.push(text);
         }
         if(!outWords.length) continue;
@@ -5898,7 +6034,7 @@ window.OcrEngine = (function(){
         const rawText = await window.OcrEngine.recognizeAuto(img);
         recognized = (rawText || '')
           .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-        if(dictReady && recognized) recognized = correctTextBlock(personalDict, recognized);
+        if(recognized) recognized = window.OcrEngine.correctTextBlock(recognized, dictReady ? personalDict : null);
       }
 
       if(!recognized){
@@ -5928,7 +6064,6 @@ window.OcrEngine = (function(){
     }finally{
       ocrTidyBtn.disabled = false;
       ocrTidyBtn.classList.remove('loading');
-      if(tidyLabelEl) tidyLabelEl.textContent = originalLabel;
     }
   }
   ocrTidyBtn.addEventListener('click', tidyHandwriting);
@@ -6725,6 +6860,13 @@ window.OcrEngine = (function(){
       minX=Math.min(minX,pt.x-r); maxX=Math.max(maxX,pt.x+r);
       minY=Math.min(minY,pt.y-r); maxY=Math.max(maxY,pt.y+r);
     }));
+    // Altura real de lo escrito (sin el acolchado que se agrega abajo): se
+    // usa después para que el texto transcripto salga del mismo tamaño que
+    // la letra manuscrita original, y también como referencia para
+    // enderezar la inclinación cursiva alrededor del centro vertical.
+    const rawH = maxY-minY;
+    const rawMidY = minY + rawH/2;
+    const slant = window.OcrEngine.estimateSlant(strokes.map(s=>s.pts));
     const pad=Math.max(14,(maxY-minY)*0.4);
     minX-=pad; minY-=pad; maxX+=pad; maxY+=pad;
     const w=Math.max(1,maxX-minX), h=Math.max(1,maxY-minY);
@@ -6747,7 +6889,10 @@ window.OcrEngine = (function(){
     // trazo dibujado a escalas altas, más parecido a tinta real que a un
     // trazo de canvas perfectamente aliasado (igual criterio que el cuaderno).
     ctx.filter='blur(0.5px)';
-    ctx.scale(scale,scale); ctx.translate(-minX,-minY);
+    // Enderezamos la inclinación cursiva con un corte (shear) horizontal
+    // alrededor del centro vertical real de la palabra: el margen ya
+    // generoso del recorte (`pad`, arriba) absorbe el corrimiento.
+    ctx.setTransform(scale, 0, -slant*scale, scale, scale*slant*rawMidY - scale*minX, -scale*minY);
     ctx.strokeStyle='#000000'; ctx.fillStyle='#000000';
     ctx.lineCap='round'; ctx.lineJoin='round';
     strokes.forEach(s=>{
@@ -6772,55 +6917,51 @@ window.OcrEngine = (function(){
     ctx.filter='none';
     ctx.putImageData(imgData,0,0);
 
-    return {canvas, box:{x:minX,y:minY,r:maxX,b:maxY}};
+    return {canvas, box:{x:minX,y:minY,r:maxX,b:maxY}, rawH};
   }
-  async function vbRecognizeRecentWord(){
+  // A diferencia de antes, esta función YA NO muestra nada mientras
+  // reconoce: el popup con la palabra solo aparece si Tesseract efectivamente
+  // reconoció algo. Si no reconoció nada o hay un error, se queda oculto en
+  // vez de quedar avisando "Reconociendo…" o mostrando un mensaje cada vez
+  // que el trazo es muy corto para reconocerse (algo muy común al escribir).
+  async function vbRecognizeRecentWord(seq){
     try{
       const paths=vbRecentPaths(), pack=vbBuildOcrImage(paths); if(!pack) return;
-      const text=await window.OcrEngine.recognizeWord(pack.canvas);
+      // Modo rápido: un solo intento (palabra suelta) en vez de escalar a
+      // línea / línea cruda, para que la sugerencia en vivo llegue antes.
+      let text=await window.OcrEngine.recognizeWord(pack.canvas, {fast:true});
+      if(seq!==vbLiveSeq) return; // el usuario ya siguió escribiendo: descartamos esta respuesta vieja
       if(text){
-        vbLiveCandidate={text,box:pack.box}; vbLiveWord.textContent=text; vbLiveWord.className='f-impMin'; vbPositionLiveRecognition(pack.box);
-      }else{
-        // El motor respondió pero no reconoció nada (letra poco clara, trazo
-        // muy corto, etc.). Antes esto dejaba el popup clavado en
-        // "Reconociendo…" para siempre porque no caía ni acá ni en el catch.
-        vbLiveCandidate=null;
-        vbLiveWord.textContent='No se reconoció letra';
+        // Corrige contra la lista de palabras comunes en español (la
+        // pizarra no tiene acceso al diccionario personal del cuaderno,
+        // que vive en otro almacenamiento, pero esto ya ayuda con los
+        // errores más típicos en palabras cortas y frecuentes).
+        text=window.OcrEngine.correctWord(text,null);
+        vbLiveCandidate={text,box:pack.box,rawH:pack.rawH};
+        vbLiveWord.textContent=text; vbLiveWord.className='f-impMin';
         vbPositionLiveRecognition(pack.box);
       }
     }catch(e){
       console.warn('OCR en vivo no disponible',e);
-      vbLiveCandidate=null;
-      const reason = (e && e.message) || '';
-      vbLiveWord.textContent = reason ? ('OCR no disponible: '+reason) : 'OCR no disponible';
-      vbLiveRecognition.classList.add('show','vbLiveOverWord');
     }
   }
+  let vbLiveSeq=0;
   function vbScheduleLiveRecognition(){
+    if(!window.OcrEngine.isEnabled()) return;
     clearTimeout(vbLiveTimer);
-    const paths=vbRecentPaths();
-    if(paths.length){
-      let bx=null;
-      paths.forEach(p=>{
-        const r=p.getBBox();
-        if(!bx){ bx={x:r.x,y:r.y,width:r.width,height:r.height}; }
-        else{
-          const x2=Math.max(bx.x+bx.width, r.x+r.width);
-          const y2=Math.max(bx.y+bx.height, r.y+r.height);
-          bx.x=Math.min(bx.x,r.x); bx.y=Math.min(bx.y,r.y);
-          bx.width=x2-bx.x; bx.height=y2-bx.y;
-        }
-      });
-      vbLiveCandidate={text:'',box:bx};
-      vbLiveWord.textContent='Reconociendo…';
-      vbPositionLiveRecognition(bx);
-    }
-    vbLiveTimer=setTimeout(vbRecognizeRecentWord,520);
+    vbLiveSeq++;
+    const seq=vbLiveSeq;
+    vbLiveTimer=setTimeout(()=>vbRecognizeRecentWord(seq),520);
   }
   vbLiveDismiss.addEventListener('click',vbHideLiveRecognition);
   vbLiveConvert.addEventListener('click',()=>{
     if(!vbLiveCandidate) return;
-    const {text,box}=vbLiveCandidate; const t=document.createElementNS(NS,'text'); t.setAttribute('x',box.x); t.setAttribute('y',box.b+34); t.setAttribute('font-size','28'); t.setAttribute('font-family','Patrick Hand, sans-serif'); t.setAttribute('fill',vbColor.value); t.dataset.obj='text'; t.textContent=text; vbObjects.appendChild(t); vbCommit(); vbHideLiveRecognition();
+    const {text,box,rawH}=vbLiveCandidate;
+    // El tamaño del texto insertado respeta el tamaño real de la letra
+    // manuscrita (rawH) en vez de un valor fijo, con los mismos topes que
+    // usa la herramienta de texto del resto de la app.
+    const size=Math.max(16, Math.min(96, Math.round(rawH || 28)));
+    const t=document.createElementNS(NS,'text'); t.setAttribute('x',box.x); t.setAttribute('y',box.b+Math.max(10,size*0.35)); t.setAttribute('font-size',String(size)); t.setAttribute('font-family','Patrick Hand, sans-serif'); t.setAttribute('fill',vbColor.value); t.dataset.obj='text'; t.textContent=text; vbObjects.appendChild(t); vbCommit(); vbHideLiveRecognition();
   });
 
   let vbRecognizer=null, vbRecognizing=false, vbDictationBase='';
@@ -7727,7 +7868,25 @@ window.OcrEngine = (function(){
   const vbSettingsBtn = document.getElementById('vbSettingsBtn');
   const vbSettingsPanel = document.getElementById('vbSettingsPanel');
   const vbSettingsBackdrop = document.getElementById('vbSettingsBackdrop');
+  const vbOcrToggle = document.getElementById('vbOcrToggle');
+  const vbOcrToggleText = document.getElementById('vbOcrToggleText');
+  function refreshVbOcrToggle(){
+    if(!vbOcrToggle) return;
+    const on = window.OcrEngine.isEnabled();
+    vbOcrToggle.checked = on;
+    if(vbOcrToggleText) vbOcrToggleText.textContent = on ? 'Activado' : 'Desactivado';
+  }
+  if(vbOcrToggle){
+    refreshVbOcrToggle();
+    vbOcrToggle.addEventListener('change', ()=>{
+      window.OcrEngine.setEnabled(vbOcrToggle.checked);
+      refreshVbOcrToggle();
+      if(!vbOcrToggle.checked) vbHideLiveRecognition();
+    });
+    window.addEventListener('ocrEnabledChange', refreshVbOcrToggle);
+  }
   function vbOpenSettings(){
+    refreshVbOcrToggle();
     const rect = vbSettingsBtn.getBoundingClientRect();
     const panelWidth = 230;
     let left = rect.right - panelWidth;
@@ -7855,7 +8014,7 @@ window.OcrEngine = (function(){
   (function warmUpOcr(){
     function go(){
       if(navigator.onLine === false) return;
-      try{ window.OcrEngine && window.OcrEngine.preload(); }catch(e){}
+      try{ if(window.OcrEngine && window.OcrEngine.isEnabled()) window.OcrEngine.preload(); }catch(e){}
     }
     if('requestIdleCallback' in window) requestIdleCallback(go, {timeout:5000});
     else setTimeout(go, 2500);
