@@ -6,6 +6,18 @@
 <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
 <meta name="color-scheme" content="dark">
 <title>Mis Notas</title>
+<script>
+// Aplica el tema guardado ANTES de que se pinte nada: si esto se hiciera
+// más tarde (por ejemplo junto con el resto de la app), se vería un
+// parpadeo de un tema al otro apenas se carga la página.
+(function(){
+  try{
+    var t = localStorage.getItem('app-theme');
+    if(t !== 'light' && t !== 'dark') t = 'dark';
+    document.documentElement.setAttribute('data-theme', t);
+  }catch(e){}
+})();
+</script>
 
 <!-- PWA -->
 <link rel="manifest" href="manifest.json">
@@ -139,13 +151,26 @@ window.OcrEngine = (function(){
     const m = a.length, n = b.length;
     if(m === 0) return n;
     if(n === 0) return m;
+    // Costo de sustitución reducido entre letras que la letra cursiva
+    // confunde muy seguido entre sí (h/n/m/u: comparten la misma "silueta"
+    // de palitos y jorobas, y solo cambian en la altura del asta o en
+    // cuántas jorobas tienen). Así, una palabra mal leída por una de estas
+    // confusiones queda más cerca de la palabra correcta y es más fácil que
+    // la corrección por diccionario la enganche.
+    const CONFUSABLE = {h:'nm', n:'hmu', m:'hn', u:'n'};
+    function subCost(x, y){
+      if(x===y) return 0;
+      if((CONFUSABLE[x]||'').indexOf(y)!==-1) return 0.5;
+      if((CONFUSABLE[y]||'').indexOf(x)!==-1) return 0.5;
+      return 1;
+    }
     const dp = new Array(n+1);
     for(let j=0;j<=n;j++) dp[j] = j;
     for(let i=1;i<=m;i++){
       let prev = dp[0]; dp[0] = i;
       for(let j=1;j<=n;j++){
         const tmp = dp[j];
-        dp[j] = a[i-1]===b[j-1] ? prev : 1 + Math.min(prev, dp[j], dp[j-1]);
+        dp[j] = Math.min(prev + subCost(a[i-1], b[j-1]), dp[j] + 1, dp[j-1] + 1);
         prev = tmp;
       }
     }
@@ -327,6 +352,43 @@ window.OcrEngine = (function(){
 
   return { recognizeWord, recognizeAuto, binarizeImageData, preload, isEnabled, setEnabled, estimateSlant, correctWord, correctTextBlock };
 })();
+
+// ---------- Tema (claro/oscuro) ----------
+// Módulo mínimo, compartido por los distintos <script> de la app (cada uno
+// corre en su propio scope y no comparte variables entre sí — por eso vive
+// colgado de window, igual que OcrEngine). Guarda la preferencia en
+// localStorage, actualiza el atributo que activan las reglas CSS
+// (html[data-theme="light"]), sincroniza los meta tags de color de la barra
+// del navegador/PWA, y avisa por evento a quien esté escuchando para que
+// cada interruptor en pantalla (cuaderno, pizarra, inicio) se mantenga en
+// sincro sin importar desde dónde se cambió el tema.
+window.AppTheme = (function(){
+  const KEY = 'app-theme';
+  const COLORS = { dark:'#1B1D24', light:'#F7F5EF' };
+  function get(){
+    try{ return localStorage.getItem(KEY) === 'light' ? 'light' : 'dark'; }
+    catch(e){ return 'dark'; }
+  }
+  function set(theme){
+    const t = theme === 'light' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', t);
+    try{ localStorage.setItem(KEY, t); }catch(e){}
+    const color = COLORS[t];
+    const metaColor = document.querySelector('meta[name="theme-color"]');
+    const metaBg = document.querySelector('meta[name="background-color"]');
+    const metaScheme = document.querySelector('meta[name="color-scheme"]');
+    if(metaColor) metaColor.setAttribute('content', color);
+    if(metaBg) metaBg.setAttribute('content', color);
+    if(metaScheme) metaScheme.setAttribute('content', t);
+    try{ window.dispatchEvent(new CustomEvent('themeChange', {detail:{theme:t}})); }catch(e){}
+  }
+  function toggle(){ set(get()==='light' ? 'dark' : 'light'); }
+  // El <head> ya aplicó el atributo data-theme antes de pintar (para evitar
+  // el parpadeo); acá solo sincronizamos los meta tags con lo que haya
+  // quedado aplicado, sin volver a tocar el atributo.
+  set(get());
+  return { get, set, toggle };
+})();
 </script>
 <style>
   :root{
@@ -335,6 +397,19 @@ window.OcrEngine = (function(){
     --cream:#EDEDF2; --cream-dim:#9799A6;
     --pine:#3448C5; --danger:#B23A48; --line-blue:#AFC4DA; --grid-line:#DCD3C0; --dot:#C7BCA5;
     --desk:#15161B;
+  }
+  /* ---------- Tema claro ----------
+     Solo se redefinen las variables de "cromado" de la app (fondos, texto,
+     bordes, acento): --paper, --grid-line, --line-blue, --dot e --ink
+     quedan IGUAL en los dos temas a propósito, porque representan el color
+     de LA HOJA (rayado, cuadriculado, punteado), que siempre es clara —
+     igual que en un cuaderno de papel real, no cambia con la luz del
+     cuarto. Lo que cambia es la interfaz alrededor de la hoja. */
+  html[data-theme="light"]{
+    --panel:#F7F5EF; --panel-2:#ECE9E0; --panel-edge:#D9D4C7;
+    --cream:#25262B; --cream-dim:#6C6F79;
+    --pine:#3448C5; --danger:#B23A48;
+    --desk:#E4E0D3;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
   button, .tab, .swatch, input[type=range], #kebabBtn, .zoombtn{ touch-action:manipulation; }
@@ -386,6 +461,13 @@ window.OcrEngine = (function(){
     display:flex;align-items:center;gap:7px;flex-shrink:0;
   }
   #addFolderBtn:hover{opacity:.9;}
+  #themeToggleBtn{
+    background:var(--panel-2);border:1px solid var(--panel-edge);color:var(--cream-dim);
+    width:36px;height:36px;border-radius:10px;cursor:pointer;flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;
+  }
+  #themeToggleBtn:hover{color:var(--cream);border-color:var(--pine);}
+  #themeToggleBtn svg{width:17px;height:17px;flex-shrink:0;}
   #folderBreadcrumb{
     display:none;align-items:center;flex-wrap:wrap;gap:5px;
     padding:0 16px 6px;font-size:12.5px;color:var(--cream-dim);
@@ -1265,7 +1347,15 @@ window.OcrEngine = (function(){
   #vectorPanelView{
     display:none;position:fixed;inset:0;z-index:500;
     --vb-ui:#1B1D24;--vb-ui-2:#20222B;--vb-ink:#EEF0F5;--vb-muted:#9799A6;--vb-line:#2C2F38;--vb-accent:#4F7CFF;
+    --vb-float-bg:rgba(27,29,36,.94);--vb-float-bg-soft:rgba(27,29,36,.7);
     font-family:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+  }
+  /* Mismo criterio que el resto de la app: el tema claro solo cambia el
+     cromado de la interfaz de la pizarra, no el color de la hoja en sí
+     (#vbBoard sigue blanco en los dos temas, como el papel real). */
+  html[data-theme="light"] #vectorPanelView{
+    --vb-ui:#F7F5EF;--vb-ui-2:#ECE9E0;--vb-ink:#25262B;--vb-muted:#6C6F79;--vb-line:#D9D4C7;--vb-accent:#3448C5;
+    --vb-float-bg:rgba(255,255,255,.96);--vb-float-bg-soft:rgba(255,255,255,.8);
   }
   #vectorPanelView #vbBoard{position:fixed;left:0;right:0;bottom:0;top:var(--vb-board-top,var(--vb-header-h,108px));background:#fff;touch-action:none;cursor:crosshair;}
   #vectorPanelView #vbSvg{position:absolute;inset:0;width:100%;height:100%;display:block;}
@@ -1276,7 +1366,7 @@ window.OcrEngine = (function(){
      nada y la goma quedaba sin efecto. */
   #vectorPanelView #vbObjects{pointer-events:auto;}
   #vectorPanelView #vbObjects .vb-selected{filter:drop-shadow(0 0 5px rgba(79,124,255,.95));stroke-dasharray:6 4;}
-  #vectorPanelView #vbSelectHint{position:fixed;z-index:22;display:none;left:50%;bottom:20px;transform:translateX(-50%);padding:7px 10px;border-radius:8px;background:rgba(27,29,36,.94);color:var(--vb-ink);font:11px Inter,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.3);}
+  #vectorPanelView #vbSelectHint{position:fixed;z-index:22;display:none;left:50%;bottom:20px;transform:translateX(-50%);padding:7px 10px;border-radius:8px;background:var(--vb-float-bg);color:var(--vb-ink);font:11px Inter,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.3);}
   #vectorPanelView #vbSelectHint.show{display:block;}
   #vectorPanelView.vb-a4-mode #vbBoard{background:var(--desk,#15161B);}
   /* Encabezado único, sólido, fijo arriba: agrupa la barra de páginas y la
@@ -1311,13 +1401,13 @@ window.OcrEngine = (function(){
     border-radius:9px;cursor:pointer;font-size:15px;display:inline-flex;align-items:center;justify-content:center;
     flex-shrink:0;
   }
-  #vectorPanelView #vbToolbar button:hover{background:#2A2D38;}
+  #vectorPanelView #vbToolbar button:hover{background:var(--vb-line);}
   #vectorPanelView #vbToolbar button.active{background:var(--vb-accent);color:#fff;border-color:var(--vb-accent);}
   #vectorPanelView #vbToolbar button svg{width:16px;height:16px;flex-shrink:0;}
   #vectorPanelView .vb-sep{width:1px;height:22px;background:var(--vb-line);margin:0 2px;flex:none;flex-shrink:0;}
   #vectorPanelView #vbSize{width:80px;accent-color:var(--vb-accent);flex-shrink:0;}
   #vectorPanelView #vbSizeQuickBtn,#vectorPanelView #vbSizeLabel,#vectorPanelView #vbSize{display:none !important;}
-  #vectorPanelView #vbThicknessPanel{display:none;position:fixed;z-index:30;min-width:220px;padding:10px;background:rgba(27,29,36,.98);border:1px solid var(--vb-line);border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.5);}
+  #vectorPanelView #vbThicknessPanel{display:none;position:fixed;z-index:30;min-width:220px;padding:10px;background:var(--vb-float-bg);border:1px solid var(--vb-line);border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.5);}
   #vectorPanelView #vbThicknessPanel.open{display:block;}
   #vectorPanelView #vbThicknessTitle{font-size:11px;color:var(--vb-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;}
   #vectorPanelView #vbThicknessPresets{display:flex;gap:6px;flex-wrap:wrap;}
@@ -1333,7 +1423,7 @@ window.OcrEngine = (function(){
     border-radius:9px;cursor:pointer;font-size:12px;font-family:'Inter',sans-serif;
     padding:0 7px;max-width:128px;flex-shrink:0;
   }
-  #vectorPanelView select:hover{background:#2A2D38;}
+  #vectorPanelView select:hover{background:var(--vb-line);}
   #vectorPanelView select option{background:#20222B;color:var(--vb-ink);}
   #vectorPanelView #vbEraserCursor{
     display:none;position:fixed;z-index:9;pointer-events:none;
@@ -1348,7 +1438,7 @@ window.OcrEngine = (function(){
     background:rgba(30,32,38,.35);border-radius:2px;
   }
   #vectorPanelView #vbZoom{display:none !important;
-    padding:6px;background:rgba(27,29,36,.96);border:1px solid var(--vb-line);border-radius:12px;
+    padding:6px;background:var(--vb-float-bg);border:1px solid var(--vb-line);border-radius:12px;
     box-shadow:0 5px 20px rgba(0,0,0,.3);
   }
   #vectorPanelView #vbZoom button{height:34px;min-width:34px;}
@@ -1356,22 +1446,22 @@ window.OcrEngine = (function(){
   #vectorPanelView #vbZoomPct{width:56px;text-align:center;font-size:13px;color:var(--vb-muted);}
   #vectorPanelView #vbCloseBtn{
     position:static;z-index:20;height:32px;width:32px;min-width:32px;padding:0;
-    border:1px solid var(--vb-line);background:rgba(27,29,36,.96);color:var(--vb-ink);
+    border:1px solid var(--vb-line);background:var(--vb-float-bg);color:var(--vb-ink);
     border-radius:10px;box-shadow:0 5px 20px rgba(0,0,0,.3);cursor:pointer;
     font-family:Inter,sans-serif;font-weight:600;font-size:13px;
     display:flex;align-items:center;justify-content:center;gap:6px;flex:0 0 32px;
   }
-  #vectorPanelView #vbCloseBtn:hover{background:#2A2D38;}
+  #vectorPanelView #vbCloseBtn:hover{background:var(--vb-line);}
   #vectorPanelView #vbCloseBtn svg{width:14px;height:14px;flex-shrink:0;}
   #vectorPanelView #vbFolderName{display:none;}
   #vectorPanelView #vbPageNav{display:flex;align-items:center;gap:6px;flex-shrink:0;}
-  #vectorPanelView #vbPageSelect{height:32px;max-width:140px;min-width:90px;padding:0 7px;border:1px solid var(--vb-line);border-radius:9px;background:rgba(27,29,36,.96);color:var(--vb-ink);font:12.5px Inter,system-ui,sans-serif;box-shadow:0 7px 28px rgba(0,0,0,.35);backdrop-filter:blur(12px);}
-  #vectorPanelView #vbAddPage{height:32px;padding:0 11px;border:1px dashed var(--vb-line);border-radius:9px;background:rgba(27,29,36,.7);color:var(--vb-ink);font-size:12.5px;font-family:Inter,system-ui,sans-serif;line-height:1;cursor:pointer;white-space:nowrap;backdrop-filter:blur(12px);}
+  #vectorPanelView #vbPageSelect{height:32px;max-width:140px;min-width:90px;padding:0 7px;border:1px solid var(--vb-line);border-radius:9px;background:var(--vb-float-bg);color:var(--vb-ink);font:12.5px Inter,system-ui,sans-serif;box-shadow:0 7px 28px rgba(0,0,0,.35);backdrop-filter:blur(12px);}
+  #vectorPanelView #vbAddPage{height:32px;padding:0 11px;border:1px dashed var(--vb-line);border-radius:9px;background:var(--vb-float-bg-soft);color:var(--vb-ink);font-size:12.5px;font-family:Inter,system-ui,sans-serif;line-height:1;cursor:pointer;white-space:nowrap;backdrop-filter:blur(12px);}
   #vectorPanelView #vbAddPage:hover{background:var(--vb-accent);border-color:var(--vb-accent);border-style:solid;}
   #vectorPanelView #vbPenStyleWrap,#vectorPanelView #vbMarkStyleWrap{position:relative;flex-shrink:0;}
   #vectorPanelView #vbPenStyle,#vectorPanelView #vbMarkStyle{
     display:none;position:fixed;z-index:16;width:180px;max-width:calc(100vw - 16px);
-    height:auto;top:calc(var(--vb-header-h,108px) + 6px);left:8px;padding:8px;background:rgba(27,29,36,.98);
+    height:auto;top:calc(var(--vb-header-h,108px) + 6px);left:8px;padding:8px;background:var(--vb-float-bg);
     border:1px solid var(--vb-line);border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.45);
   }
   #vectorPanelView #vbPenStyle.open,#vectorPanelView #vbMarkStyle.open{display:block;}
@@ -1380,7 +1470,7 @@ window.OcrEngine = (function(){
   #vectorPanelView #vbMarkStyle{width:205px;}
   #vectorPanelView #vbToolStylePanel{position:fixed !important;display:none;visibility:hidden;pointer-events:none;}
   #vectorPanelView #vbToolStylePanel.open{display:block !important;visibility:visible;pointer-events:auto !important;}
-  #vectorPanelView .vbChoicePanel{display:none;position:fixed;z-index:50;min-width:220px;max-width:calc(100vw - 16px);padding:10px;background:rgba(27,29,36,.99);border:1px solid var(--vb-line);border-radius:12px;box-shadow:0 14px 32px rgba(0,0,0,.55);}
+  #vectorPanelView .vbChoicePanel{display:none;position:fixed;z-index:50;min-width:220px;max-width:calc(100vw - 16px);padding:10px;background:var(--vb-float-bg);border:1px solid var(--vb-line);border-radius:12px;box-shadow:0 14px 32px rgba(0,0,0,.55);}
   #vectorPanelView .vbChoicePanel.open{display:block;}
   #vectorPanelView .vbChoiceTitle{font-size:11px;color:var(--vb-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;}
   #vectorPanelView .vbChoiceOptions{display:flex;gap:6px;flex-wrap:wrap;}
@@ -1443,7 +1533,7 @@ window.OcrEngine = (function(){
   #vectorPanelView #vbSettingsBackdrop.open{display:block;}
   #vectorPanelView #vbSettingsPanel{
     display:block;position:fixed;z-index:15;width:230px;
-    background:rgba(27,29,36,.98);border:1px solid var(--vb-line);border-radius:14px;
+    background:var(--vb-float-bg);border:1px solid var(--vb-line);border-radius:14px;
     box-shadow:0 12px 32px rgba(0,0,0,.4);padding:14px;
     opacity:0;visibility:hidden;pointer-events:none;
     transform:translateY(-8px);
@@ -1465,19 +1555,19 @@ window.OcrEngine = (function(){
   #vectorPanelView .vbs-action svg{width:16px;height:16px;flex-shrink:0;}
   #vectorPanelView .vbs-switch{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--vb-muted);}
   #vectorPanelView .vbs-switch input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;}
-  #vectorPanelView .vbs-switch-track{position:relative;width:38px;height:22px;border-radius:11px;background:#3a3d48;transition:background .15s ease;flex-shrink:0;}
+  #vectorPanelView .vbs-switch-track{position:relative;width:38px;height:22px;border-radius:11px;background:var(--vb-line);transition:background .15s ease;flex-shrink:0;}
   #vectorPanelView .vbs-switch-thumb{position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .15s ease;}
   #vectorPanelView .vbs-switch input:checked + .vbs-switch-track{background:var(--vb-accent);}
   #vectorPanelView .vbs-switch input:checked + .vbs-switch-track .vbs-switch-thumb{transform:translateX(16px);}
   #vectorPanelView #vbUploadPdfBtn{background:var(--vb-ui-2);border-color:var(--vb-line);color:var(--vb-ink);}
-  #vectorPanelView #vbUploadPdfBtn:hover{background:#2A2D38;}
+  #vectorPanelView #vbUploadPdfBtn:hover{background:var(--vb-line);}
   #vectorPanelView #vbUploadPdfBtn[disabled]{opacity:.6;cursor:default;pointer-events:none;}
 
   /* ---------- Panel lateral de PDFs (ventana en paralelo a la hoja) ---------- */
   #vectorPanelView #vbPdfPanel{
     position:fixed;z-index:17;top:calc(var(--vb-header-h,108px) + 8px);left:12px;right:auto;bottom:52px;
     width:min(560px,48vw);max-width:calc(100vw - 24px);
-    background:rgba(27,29,36,.98);border:1px solid var(--vb-line);border-radius:14px;
+    background:var(--vb-float-bg);border:1px solid var(--vb-line);border-radius:14px;
     box-shadow:0 12px 32px rgba(0,0,0,.4);
     display:flex;flex-direction:column;overflow:hidden;
     opacity:0;visibility:hidden;transform:translateX(12px);
@@ -1496,7 +1586,7 @@ window.OcrEngine = (function(){
     width:26px;height:26px;border-radius:7px;border:none;background:transparent;
     color:var(--vb-muted);display:flex;align-items:center;justify-content:center;cursor:pointer;
   }
-  #vectorPanelView #vbPdfPanelClose:hover{background:#2A2D38;color:var(--vb-ink);}
+  #vectorPanelView #vbPdfPanelClose:hover{background:var(--vb-line);color:var(--vb-ink);}
   #vectorPanelView #vbPdfPanelClose svg{width:16px;height:16px;}
   #vectorPanelView #vbPdfPanelBody{flex:1;min-height:0;min-width:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px;box-sizing:border-box;display:flex;flex-direction:column;}
   #vectorPanelView #vbPdfAddBtn{margin-bottom:10px;}
@@ -1536,7 +1626,7 @@ window.OcrEngine = (function(){
   #vectorPanelView #vbPdfViewer.show{display:flex;}
   #vectorPanelView #vbPdfViewerHead{display:flex;align-items:center;justify-content:space-between;gap:6px;color:var(--vb-muted);font-size:11px;}
   #vectorPanelView #vbPdfViewerTitle{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  #vectorPanelView #vbPdfViewerCanvasWrap{width:100%;min-width:0;min-height:120px;max-height:42vh;box-sizing:border-box;overflow:auto;background:#30323A;border-radius:7px;text-align:center;padding:6px;display:flex;justify-content:center;align-items:flex-start;}
+  #vectorPanelView #vbPdfViewerCanvasWrap{width:100%;min-width:0;min-height:120px;max-height:42vh;box-sizing:border-box;overflow:auto;background:var(--vb-ui-2);border-radius:7px;text-align:center;padding:6px;display:flex;justify-content:center;align-items:flex-start;}
   #vectorPanelView #vbPdfViewerCanvas{display:block;position:static!important;inset:auto!important;transform:none!important;float:none!important;flex:0 0 auto;max-width:100%;width:auto;height:auto;background:#fff;box-shadow:0 3px 10px rgba(0,0,0,.35);}
   #vectorPanelView #vbPdfViewerControls{width:100%;box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:6px;flex:0 0 auto;}
   #vectorPanelView #vbPdfViewerControls button{height:28px;min-width:28px;border:1px solid var(--vb-line);border-radius:7px;background:var(--vb-ui-2);color:var(--vb-ink);cursor:pointer;}
@@ -1551,7 +1641,7 @@ window.OcrEngine = (function(){
   #vectorPanelView #vpDrawToolbar::-webkit-scrollbar{height:0;}
   #vectorPanelView .vpTool{height:30px;min-width:30px;border:1px solid var(--vb-line);background:var(--vb-ui-2);color:var(--vb-ink);border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;padding:0;}
   #vectorPanelView .vpTool svg{width:15px;height:15px;flex-shrink:0;}
-  #vectorPanelView .vpTool:hover{background:#2A2D38;}
+  #vectorPanelView .vpTool:hover{background:var(--vb-line);}
   #vectorPanelView .vpTool.active{background:var(--vb-accent);color:#fff;border-color:var(--vb-accent);}
   #vectorPanelView .vpDivider{width:1px;height:20px;background:var(--vb-line);margin:0 2px;flex-shrink:0;}
   #vectorPanelView #vpDrawDots{display:flex;align-items:center;gap:5px;flex-shrink:0;}
@@ -1567,7 +1657,7 @@ window.OcrEngine = (function(){
 
   #vectorPanelView #vpSelToolbar{
     position:fixed;display:none;align-items:center;gap:6px;z-index:60;
-    background:rgba(27,29,36,.98);border:1px solid var(--vb-line);border-radius:9px;
+    background:var(--vb-float-bg);border:1px solid var(--vb-line);border-radius:9px;
     padding:6px 7px;box-shadow:0 8px 24px rgba(0,0,0,.45);
   }
   #vectorPanelView #vpSelToolbar.show{display:flex;}
@@ -1605,10 +1695,16 @@ window.OcrEngine = (function(){
         <div id="homeEyebrow">Apuntes</div>
         <h1>Mis carpetas</h1>
       </div>
-      <button id="addFolderBtn">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        Carpeta
-      </button>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+        <button id="themeToggleBtn" title="Cambiar a tema claro/oscuro">
+          <svg id="themeIconMoon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          <svg id="themeIconSun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><circle cx="12" cy="12" r="4"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        </button>
+        <button id="addFolderBtn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Carpeta
+        </button>
+      </div>
     </div>
     <div id="folderBreadcrumb"></div>
     <div id="folderEmpty">
@@ -1771,6 +1867,9 @@ window.OcrEngine = (function(){
       <div id="popoverBackdrop"></div>
       <div id="popover">
         <div class="row">
+          <label class="chk-label"><input type="checkbox" id="themeLightChk" autocomplete="off"> Tema claro</label>
+        </div>
+        <div class="row">
           <label class="field-label">Tipo de hoja</label>
           <select id="paperSelect">
             <option value="blanco">Blanca</option>
@@ -1793,9 +1892,13 @@ window.OcrEngine = (function(){
             <option value="boligrafo">Bolígrafo</option>
             <option value="fina">Fina</option>
             <option value="estilografica">Estilográfica (lapicera)</option>
+            <option value="gel">Gel</option>
+            <option value="caligrafica">Caligráfica</option>
             <option value="marcador">Marcador seco</option>
             <option value="grafito">Lápiz grafito</option>
+            <option value="carbon">Carboncillo</option>
             <option value="pincel">Pincel</option>
+            <option value="pincelSeco">Pincel seco</option>
           </select>
         </div>
         <div class="row">
@@ -2051,6 +2154,14 @@ window.OcrEngine = (function(){
         <filter id="vbPageShadow" x="-30%" y="-30%" width="160%" height="160%">
           <feDropShadow dx="0" dy="8" stdDeviation="14" flood-color="#000" flood-opacity="0.4"/>
         </filter>
+        <!-- Textura de grano real para el lápiz grafito y el pincel seco: la
+             turbulencia deforma apenas el borde del trazo (en vez de solo
+             bajarle la opacidad, como antes), simulando el rasguño irregular
+             de una punta seca sobre el papel. -->
+        <filter id="vbGrainFilter" x="-20%" y="-20%" width="140%" height="140%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7" result="noise"/>
+          <feDisplacementMap in="SourceGraphic" in2="noise" scale="2.6" xChannelSelector="R" yChannelSelector="G"/>
+        </filter>
       </defs>
       <g id="vbCamera">
         <rect id="vbGrid" x="-1000000" y="-1000000" width="2000000" height="2000000" fill="url(#vbPatternGrid)"/>
@@ -2084,12 +2195,15 @@ window.OcrEngine = (function(){
       <select id="vbPenStyle" title="Estilo de lápiz">
       <option value="estandar">Estándar</option>
       <option value="boligrafo">Bolígrafo</option>
-      <option value="caligrafico">Caligráfico</option>
       <option value="fina">Punta fina</option>
+      <option value="gel">Gel</option>
       <option value="estilografica">Estilográfica</option>
+      <option value="caligrafico">Caligráfico</option>
       <option value="marcador">Marcador seco</option>
       <option value="grafito">Lápiz grafito</option>
+      <option value="carbon">Carboncillo</option>
       <option value="pincel">Pincel</option>
+      <option value="pincelSeco">Pincel seco</option>
           </select>
       </div>
       <div id="vbMarkStyleWrap">
@@ -2176,6 +2290,14 @@ window.OcrEngine = (function(){
         <option value="cuadriculado" selected>Cuadriculada</option>
         <option value="punteado">Punteada</option>
       </select>
+    </div>
+    <div class="vbs-row">
+      <label class="vbs-label" for="vbThemeToggle">Tema claro</label>
+      <label class="vbs-switch">
+        <input type="checkbox" id="vbThemeToggle">
+        <span class="vbs-switch-track"><span class="vbs-switch-thumb"></span></span>
+        <span id="vbThemeToggleText">Desactivado</span>
+      </label>
     </div>
     <div class="vbs-row">
       <label class="vbs-label" for="vbOcrToggle">Reconocimiento de escritura (OCR)</label>
@@ -2368,18 +2490,35 @@ window.OcrEngine = (function(){
 
 
   // ---- Estilos de lápiz: cada uno define cómo varía el grosor con la presión y su opacidad ----
+  // Cada estilo define, además del grosor y la opacidad base, un modo de
+  // RENDERIZADO ('render') que cambia la técnica de dibujo, no solo el
+  // número: antes, todos los lápices se pintaban con el mismo trazo limpio
+  // de línea redondeada y solo cambiaban ancho/opacidad, así que en la
+  // práctica se veían todos parecidos. Ahora:
+  //  - 'grain'  (grafito, carboncillo, pincel seco): varias pasadas cortas
+  //    y desplazadas al azar en vez de una línea continua, como el grano
+  //    real de una punta que roza el papel.
+  //  - 'nib'    (caligráfica): punta plana de ángulo fijo — se engorda en
+  //    diagonal y se afina casi a la nada al moverse paralelo a la punta,
+  //    el efecto itálico clásico.
+  //  - 'brush'  (pincel): una pasada extra ancha y translúcida por debajo
+  //    del trazo, como el borde húmedo de un pincel real.
+  //  - 'gel'    (gel): además del trazo saturado, un brillo fino al medio.
+  //  - 'plain'  (el resto): trazo limpio de siempre, solo que ahora con
+  //    curvas de ancho más diferenciadas entre sí (una birome casi no
+  //    varía de grosor; una estilográfica sí, y mucho).
   const PEN_STYLES = {
-    estandar:      { name:'Estándar',              widthFn:(w,p)=> w*(0.4+p),             alpha:1 },
-    boligrafo:     { name:'Bolígrafo',             widthFn:(w,p)=> w*(0.62+p*0.3),        alpha:1 },
-    fina:          { name:'Fina',                  widthFn:(w,p)=> w*0.55*(0.5+p*0.6),  alpha:1 },
-    estilografica: { name:'Estilográfica',         widthFn:(w,p)=> w*(0.3+p*1.1),        alpha:1 },
-    gel:           { name:'Gel',                   widthFn:(w,p)=> w*(0.72+p*0.18),      alpha:.95 },
-    caligrafica:   { name:'Caligráfica',           widthFn:(w,p)=> w*(0.28+p*1.35),      alpha:1 },
-    marcador:      { name:'Marcador seco',         widthFn:(w,p)=> w*1.9*(0.78+p*0.22), alpha:.82 },
-    grafito:       { name:'Lápiz grafito',         widthFn:(w,p)=> w*(0.5+p*0.55),       alpha:.92, grain:true },
-    carbon:        { name:'Carboncillo',            widthFn:(w,p)=> w*(0.72+p*0.8),       alpha:.62, grain:true },
-    pincel:        { name:'Pincel',                widthFn:(w,p)=> w*(0.25+p*1.4),       alpha:.95 },
-    pincelSeco:    { name:'Pincel seco',           widthFn:(w,p)=> w*(0.5+p*1.1),        alpha:.72, grain:true },
+    estandar:      { name:'Estándar',              widthFn:(w,p)=> w*(0.4+p),              alpha:1,   render:'plain' },
+    boligrafo:     { name:'Bolígrafo',              widthFn:(w,p)=> w*(0.78+p*0.14),        alpha:1,   render:'plain' },
+    fina:          { name:'Fina',                   widthFn:(w,p)=> w*0.5*(0.55+p*0.5),     alpha:1,   render:'plain' },
+    estilografica: { name:'Estilográfica',          widthFn:(w,p)=> w*(0.2+p*1.4),          alpha:1,   render:'plain' },
+    gel:           { name:'Gel',                    widthFn:(w,p)=> w*(0.78+p*0.22),        alpha:1,   render:'gel' },
+    caligrafica:   { name:'Caligráfica',            widthFn:(w,p)=> w*(0.85+p*0.5),         alpha:1,   render:'nib' },
+    marcador:      { name:'Marcador seco',          widthFn:(w,p)=> w*1.9*(0.88+p*0.12),    alpha:.55, render:'plain', blend:'multiply' },
+    grafito:       { name:'Lápiz grafito',          widthFn:(w,p)=> w*(0.5+p*0.55),         alpha:.85, render:'grain' },
+    carbon:        { name:'Carboncillo',            widthFn:(w,p)=> w*(0.8+p*0.9),          alpha:.68, render:'grain' },
+    pincel:        { name:'Pincel',                 widthFn:(w,p)=> w*(0.2+p*1.7),          alpha:1,   render:'brush' },
+    pincelSeco:    { name:'Pincel seco',            widthFn:(w,p)=> w*(0.5+p*1.1),          alpha:.68, render:'grain' },
   };
   function widthForStroke(stroke, p){
     if(stroke.tool==='highlighter' || stroke.tool==='underline'){
@@ -2394,9 +2533,7 @@ window.OcrEngine = (function(){
   function alphaForStroke(stroke, baseAlpha, idx){
     if(stroke.tool==='pen'){
       const ps = PEN_STYLES[stroke.penStyle] || PEN_STYLES.estandar;
-      let a = baseAlpha * (ps.alpha!=null ? ps.alpha : 1);
-      if(ps.grain){ const g = 0.72 + (Math.abs(Math.sin((idx+1)*12.9898))%1)*0.28; a *= g; }
-      return a;
+      return baseAlpha * (ps.alpha!=null ? ps.alpha : 1);
     }
     return baseAlpha;
   }
@@ -2671,6 +2808,23 @@ window.OcrEngine = (function(){
   // apoyada) se descarta por completo, en vez de contarse como un segundo
   // dedo y disparar un pellizco/zoom accidental que corta el trazo.
   let activeDrawPointerId = null;
+  // Detección de lápiz "cerca" de la pantalla: en tablets con lápiz activo
+  // (Apple Pencil, S-Pen, etc.) el sistema suele reportar eventos de puntero
+  // tipo 'pen' apenas se acerca, incluso ANTES de tocar (hover). Usamos eso
+  // para saber que hay un lápiz en uso aunque todavía no esté "dibujando":
+  // así, si la palma se apoya un instante antes de que la punta toque la
+  // hoja, igual se la reconoce como palma y se la ignora — antes, el
+  // rechazo solo miraba si YA había un trazo en curso, y una palma apoyada
+  // *antes* del primer toque del lápiz se colaba como si fuera un segundo
+  // dedo (disparando un pellizco/zoom accidental que cortaba el trazo).
+  let penNearActive = false, penNearTimer = null;
+  function notePenNear(){
+    penNearActive = true;
+    clearTimeout(penNearTimer);
+    penNearTimer = setTimeout(()=>{ penNearActive = false; }, 700);
+  }
+  document.addEventListener('pointerdown', (e)=>{ if(e.pointerType==='pen') notePenNear(); }, true);
+  document.addEventListener('pointermove', (e)=>{ if(e.pointerType==='pen') notePenNear(); }, true);
 
   const homeView = document.getElementById('homeView');
   const notebookView = document.getElementById('notebookView');
@@ -2678,6 +2832,22 @@ window.OcrEngine = (function(){
   const folderBreadcrumbEl = document.getElementById('folderBreadcrumb');
   const folderEmpty = document.getElementById('folderEmpty');
   const addFolderBtn = document.getElementById('addFolderBtn');
+  const themeToggleBtn = document.getElementById('themeToggleBtn');
+  const themeIconMoon = document.getElementById('themeIconMoon');
+  const themeIconSun = document.getElementById('themeIconSun');
+  function refreshThemeIcon(){
+    const light = window.AppTheme.get() === 'light';
+    // Ícono de LUNA cuando el tema es claro (invita a "pasar a oscuro") y de
+    // SOL cuando es oscuro (invita a "pasar a claro") — el ícono siempre
+    // muestra el destino del toque, no el estado actual.
+    if(themeIconMoon) themeIconMoon.style.display = light ? '' : 'none';
+    if(themeIconSun) themeIconSun.style.display = light ? 'none' : '';
+  }
+  if(themeToggleBtn){
+    refreshThemeIcon();
+    themeToggleBtn.addEventListener('click', ()=>{ window.AppTheme.toggle(); });
+    window.addEventListener('themeChange', refreshThemeIcon);
+  }
   const backHomeBtn = document.getElementById('backHomeBtn');
 
   const folderEditBackdrop = document.getElementById('folderEditBackdrop');
@@ -2738,6 +2908,16 @@ window.OcrEngine = (function(){
   const penStyleSelect = document.getElementById('penStyleSelect');
   const tidyModeChk = document.getElementById('tidyMode');
   const penOnlyChk = document.getElementById('penOnly');
+  const themeLightChk = document.getElementById('themeLightChk');
+  if(themeLightChk){
+    themeLightChk.checked = window.AppTheme.get() === 'light';
+    themeLightChk.addEventListener('change', ()=>{
+      window.AppTheme.set(themeLightChk.checked ? 'light' : 'dark');
+    });
+    window.addEventListener('themeChange', (e)=>{
+      themeLightChk.checked = e.detail.theme === 'light';
+    });
+  }
   const textEditorBackdrop = document.getElementById('textEditorBackdrop');
   const textEditorPanel = document.getElementById('textEditorPanel');
   const textStyleBtns = [...document.querySelectorAll('.textStyleBtn')];
@@ -4417,26 +4597,147 @@ window.OcrEngine = (function(){
   }
 
   // Funciones de bajo nivel: dibujan sobre cualquier contexto (visible, base o buffer)
+  // ---------- Motor de renderizado por técnica de lápiz ----------
+  // jitterSeed: un hash determinístico (no aleatorio de verdad) para que el
+  // "temblor" de las técnicas con grano sea siempre el mismo si el trazo se
+  // vuelve a dibujar (reabrir la página, exportar, etc.) — si usáramos
+  // Math.random() cada redibujado se vería distinto.
+  function jitterSeed(idx, salt){
+    const x = Math.sin(idx*12.9898 + salt*78.233) * 43758.5453;
+    return x - Math.floor(x);
+  }
+  // Ribbon de pluma itálica: la punta tiene un ángulo FIJO (NIB_ANGLE) y el
+  // grosor de la marca en cada tramo es la proyección de esa punta sobre la
+  // perpendicular a la dirección de avance — así se engorda en diagonal y
+  // se afina casi a la nada al moverse paralelo al filo, el efecto real de
+  // una pluma caligráfica (no simplemente "más ancho porque sí").
+  const NIB_ANGLE = Math.PI/4;
+  const NIB_NX = Math.cos(NIB_ANGLE), NIB_NY = Math.sin(NIB_ANGLE);
+  function drawNibRibbon(ctx, p0, pc, p1, baseWidth, color, alpha, composite){
+    const samples = 6;
+    const pts = [];
+    for(let i=0;i<=samples;i++){
+      const t = i/samples;
+      const it = 1-t;
+      pts.push({ x: it*it*p0.x + 2*it*t*pc.x + t*t*p1.x, y: it*it*p0.y + 2*it*t*pc.y + t*t*p1.y });
+    }
+    ctx.fillStyle = color; ctx.globalAlpha = alpha; ctx.globalCompositeOperation = composite;
+    const halfMin = baseWidth*0.14, halfMax = baseWidth*0.62;
+    ctx.beginPath();
+    for(let i=0;i<pts.length-1;i++){
+      const a=pts[i], b=pts[i+1];
+      let dx=b.x-a.x, dy=b.y-a.y; const len=Math.hypot(dx,dy)||1; dx/=len; dy/=len;
+      const cross = Math.abs(dx*NIB_NY - dy*NIB_NX);
+      const half = halfMin + (halfMax-halfMin)*cross;
+      const ox=-dy*half, oy=dx*half;
+      ctx.moveTo(a.x+ox, a.y+oy); ctx.lineTo(b.x+ox, b.y+oy);
+      ctx.lineTo(b.x-ox, b.y-oy); ctx.lineTo(a.x-ox, a.y-oy); ctx.closePath();
+    }
+    ctx.fill();
+    ctx.globalAlpha=1; ctx.globalCompositeOperation='source-over';
+  }
+  // Pinta un tramo de trazo (línea recta de 2 puntos, o curva cuadrática de
+  // 3: [inicio, punto de control real, fin]) según la TÉCNICA del estilo de
+  // lápiz — esta es la pieza central que hace que cada lápiz se sienta
+  // realmente distinto, no solo "más fino o más grueso".
+  function paintStrokePath(targetCtx, stroke, style, idx, pts){
+    const p0 = pts[0], p1 = pts[pts.length-1], pc = pts.length===3 ? pts[1] : null;
+    const pressureP = pc ? pc.p : p1.p;
+    const baseWidth = widthForStroke(stroke, pressureP);
+    const baseAlpha = alphaForStroke(stroke, style.alpha, idx);
+    const ps = stroke.tool==='pen' ? (PEN_STYLES[stroke.penStyle] || PEN_STYLES.estandar) : null;
+    const composite = (ps && ps.blend) ? ps.blend : style.composite;
+    const render = ps ? (ps.render || 'plain') : 'plain';
+    function tracePath(ctx, ox, oy){
+      ctx.moveTo(p0.x+ox, p0.y+oy);
+      if(pc) ctx.quadraticCurveTo(pc.x+ox, pc.y+oy, p1.x+ox, p1.y+oy);
+      else ctx.lineTo(p1.x+ox, p1.y+oy);
+    }
+    if(render==='nib'){
+      drawNibRibbon(targetCtx, p0, pc||p1, p1, baseWidth, stroke.color, baseAlpha, composite);
+      return;
+    }
+    if(render==='grain'){
+      // Grano real: en vez de UNA línea continua, varias pasadas cortas con
+      // posición, ancho y opacidad levemente distintos entre sí — como una
+      // punta que roza el papel en vez de deslizar tinta líquida pareja.
+      const passes = 4;
+      targetCtx.strokeStyle = stroke.color; targetCtx.lineJoin='round'; targetCtx.lineCap='round';
+      targetCtx.globalCompositeOperation = composite;
+      for(let k=0;k<passes;k++){
+        const jx = (jitterSeed(idx,k*3+1)-0.5) * baseWidth*0.55;
+        const jy = (jitterSeed(idx,k*3+2)-0.5) * baseWidth*0.55;
+        const wJ = Math.max(0.6, baseWidth*(0.5+jitterSeed(idx,k*3+3)*0.7));
+        targetCtx.globalAlpha = baseAlpha*(0.3+jitterSeed(idx,k*7+5)*0.35);
+        targetCtx.lineWidth = wJ;
+        targetCtx.beginPath(); tracePath(targetCtx, jx, jy); targetCtx.stroke();
+      }
+      targetCtx.globalAlpha=1; targetCtx.globalCompositeOperation='source-over';
+      return;
+    }
+    targetCtx.globalCompositeOperation = composite;
+    if(render==='brush'){
+      // Halo blando: una pasada extra, más ancha y bien translúcida, por
+      // debajo del trazo principal — el borde "mojado" típico de un pincel.
+      targetCtx.globalAlpha = baseAlpha*0.3; targetCtx.strokeStyle = stroke.color;
+      targetCtx.lineWidth = baseWidth*1.75; targetCtx.lineJoin='round'; targetCtx.lineCap='round';
+      targetCtx.beginPath(); tracePath(targetCtx,0,0); targetCtx.stroke();
+    }
+    targetCtx.globalAlpha = baseAlpha; targetCtx.strokeStyle = stroke.color;
+    targetCtx.lineWidth = baseWidth; targetCtx.lineJoin='round'; targetCtx.lineCap='round';
+    targetCtx.beginPath(); tracePath(targetCtx,0,0); targetCtx.stroke();
+    if(render==='gel'){
+      // Brillo: una línea fina y clara al medio del trazo, como el reflejo
+      // típico de una tinta de gel bien saturada.
+      targetCtx.globalAlpha = baseAlpha*0.32; targetCtx.strokeStyle = '#ffffff';
+      targetCtx.lineWidth = Math.max(0.5, baseWidth*0.22);
+      targetCtx.beginPath(); tracePath(targetCtx,0,0); targetCtx.stroke();
+    }
+    targetCtx.globalAlpha = 1; targetCtx.globalCompositeOperation = 'source-over';
+  }
   function dotTo(targetCtx, stroke, style){
     const p = stroke.points[0];
-    targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, 0); targetCtx.globalCompositeOperation = style.composite;
-    targetCtx.fillStyle = stroke.color;
+    const ps = stroke.tool==='pen' ? (PEN_STYLES[stroke.penStyle] || PEN_STYLES.estandar) : null;
+    const baseWidth = widthForStroke(stroke, p.p);
+    const baseAlpha = alphaForStroke(stroke, style.alpha, 0);
+    const composite = (ps && ps.blend) ? ps.blend : style.composite;
+    const render = ps ? (ps.render || 'plain') : 'plain';
+    if(render==='grain'){
+      targetCtx.fillStyle = stroke.color; targetCtx.globalCompositeOperation = composite;
+      for(let k=0;k<4;k++){
+        const jx=(jitterSeed(0,k*3+1)-0.5)*baseWidth*0.5, jy=(jitterSeed(0,k*3+2)-0.5)*baseWidth*0.5;
+        targetCtx.globalAlpha = baseAlpha*(0.3+jitterSeed(0,k*7+5)*0.35);
+        targetCtx.beginPath(); targetCtx.arc(p.x+jx, p.y+jy, baseWidth*(0.3+jitterSeed(0,k*5+2)*0.25), 0, Math.PI*2); targetCtx.fill();
+      }
+      targetCtx.globalAlpha=1; targetCtx.globalCompositeOperation='source-over';
+      return;
+    }
+    if(render==='nib'){
+      targetCtx.save(); targetCtx.translate(p.x,p.y); targetCtx.rotate(NIB_ANGLE);
+      targetCtx.fillStyle = stroke.color; targetCtx.globalAlpha = baseAlpha; targetCtx.globalCompositeOperation = composite;
+      targetCtx.beginPath(); targetCtx.ellipse(0,0, baseWidth*0.62, baseWidth*0.16, 0, 0, Math.PI*2); targetCtx.fill();
+      targetCtx.restore();
+      targetCtx.globalAlpha=1; targetCtx.globalCompositeOperation='source-over';
+      return;
+    }
+    targetCtx.globalCompositeOperation = composite;
+    if(render==='brush'){
+      targetCtx.globalAlpha = baseAlpha*0.3; targetCtx.fillStyle = stroke.color;
+      targetCtx.beginPath(); targetCtx.arc(p.x, p.y, baseWidth*0.85, 0, Math.PI*2); targetCtx.fill();
+    }
+    targetCtx.globalAlpha = baseAlpha; targetCtx.fillStyle = stroke.color;
     targetCtx.beginPath();
-    targetCtx.arc(p.x, p.y, widthForStroke(stroke, p.p) / 2, 0, Math.PI*2);
+    targetCtx.arc(p.x, p.y, baseWidth / 2, 0, Math.PI*2);
     targetCtx.fill();
+    if(render==='gel'){
+      targetCtx.globalAlpha = baseAlpha*0.32; targetCtx.fillStyle = '#ffffff';
+      targetCtx.beginPath(); targetCtx.arc(p.x, p.y, Math.max(0.5, baseWidth*0.16), 0, Math.PI*2); targetCtx.fill();
+    }
     targetCtx.globalAlpha = 1; targetCtx.globalCompositeOperation = 'source-over';
   }
   function segmentTo(targetCtx, stroke, i0, i1, style){
     const p0 = stroke.points[i0], p1 = stroke.points[i1];
-    targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, i1); targetCtx.globalCompositeOperation = style.composite;
-    targetCtx.strokeStyle = stroke.color;
-    targetCtx.lineWidth = widthForStroke(stroke, p1.p);
-    targetCtx.lineJoin = 'round'; targetCtx.lineCap = 'round';
-    targetCtx.beginPath();
-    targetCtx.moveTo(p0.x, p0.y);
-    targetCtx.lineTo(p1.x, p1.y);
-    targetCtx.stroke();
-    targetCtx.globalAlpha = 1; targetCtx.globalCompositeOperation = 'source-over';
+    paintStrokePath(targetCtx, stroke, style, i1, [p0, p1]);
   }
   // ---------- Trazo suavizado tipo Nebo ----------
   // El dibujado anterior unía los puntos crudos del puntero con líneas RECTAS
@@ -4466,16 +4767,7 @@ window.OcrEngine = (function(){
     const p0 = pts[i-1], p1 = pts[i], p2 = pts[i+1];
     const start = (i === 1) ? p0 : midpoint(p0, p1);
     const end = midpoint(p1, p2);
-    targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, i);
-    targetCtx.globalCompositeOperation = style.composite;
-    targetCtx.strokeStyle = stroke.color;
-    targetCtx.lineWidth = widthForStroke(stroke, p1.p);
-    targetCtx.lineJoin = 'round'; targetCtx.lineCap = 'round';
-    targetCtx.beginPath();
-    targetCtx.moveTo(start.x, start.y);
-    targetCtx.quadraticCurveTo(p1.x, p1.y, end.x, end.y);
-    targetCtx.stroke();
-    targetCtx.globalAlpha = 1; targetCtx.globalCompositeOperation = 'source-over';
+    paintStrokePath(targetCtx, stroke, style, i, [start, p1, end]);
   }
   function drawFreehandTail(targetCtx, stroke, style){
     const pts = stroke.points;
@@ -4483,16 +4775,7 @@ window.OcrEngine = (function(){
     if(n < 3) return; // con 2 puntos el segmento recto ya quedó completo
     const prev = pts[n-2], last = pts[n-1];
     const start = midpoint(prev, last);
-    targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, n-1);
-    targetCtx.globalCompositeOperation = style.composite;
-    targetCtx.strokeStyle = stroke.color;
-    targetCtx.lineWidth = widthForStroke(stroke, last.p);
-    targetCtx.lineJoin = 'round'; targetCtx.lineCap = 'round';
-    targetCtx.beginPath();
-    targetCtx.moveTo(start.x, start.y);
-    targetCtx.lineTo(last.x, last.y);
-    targetCtx.stroke();
-    targetCtx.globalAlpha = 1; targetCtx.globalCompositeOperation = 'source-over';
+    paintStrokePath(targetCtx, stroke, style, n-1, [start, last]);
   }
   function drawFreehandSmooth(targetCtx, stroke, style){
     const pts = stroke.points;
@@ -4504,18 +4787,9 @@ window.OcrEngine = (function(){
       const p0 = pts[i-1], p1 = pts[i], p2 = pts[i+1];
       const start = (i === 1) ? p0 : midpoint(p0, p1);
       const end = midpoint(p1, p2);
-      targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, i);
-      targetCtx.globalCompositeOperation = style.composite;
-      targetCtx.strokeStyle = stroke.color;
-      targetCtx.lineWidth = widthForStroke(stroke, p1.p);
-      targetCtx.lineJoin = 'round'; targetCtx.lineCap = 'round';
-      targetCtx.beginPath();
-      targetCtx.moveTo(start.x, start.y);
-      targetCtx.quadraticCurveTo(p1.x, p1.y, end.x, end.y);
-      targetCtx.stroke();
+      paintStrokePath(targetCtx, stroke, style, i, [start, p1, end]);
     }
     drawFreehandTail(targetCtx, stroke, style);
-    targetCtx.globalAlpha = 1; targetCtx.globalCompositeOperation = 'source-over';
   }
   function lineSegmentTo(targetCtx, stroke, style){
     targetCtx.globalAlpha = style.alpha; targetCtx.globalCompositeOperation = style.composite;
@@ -4537,14 +4811,19 @@ window.OcrEngine = (function(){
     if(e.target.closest('#liveRecognition')) return;
     hasInteracted = true;
 
-    // Rechazo de palma real: si "Ignorar dedos" está activo y ya hay un
-    // puntero (lápiz) escribiendo, cualquier OTRO puntero táctil que aparezca
-    // (la palma apoyada sobre la pantalla) se ignora del todo: no se agrega a
-    // activePointers, no se captura, no cuenta como segundo dedo. Sin esto,
-    // la palma sumaba un segundo puntero y el código de más abajo lo trataba
-    // como el arranque de un pellizco, cortando el trazo en curso — que es
-    // justo el "no ignora los dedos" que se estaba viendo.
-    if(penOnly && e.pointerType === 'touch' && activeDrawPointerId !== null && activeDrawPointerId !== e.pointerId){
+    // Rechazo de palma real: si "Ignorar dedos" está activo, cualquier
+    // puntero táctil se descarta por completo —no se agrega a
+    // activePointers, no se captura, no cuenta como dedo para pellizco—
+    // siempre que haya señales de que el lápiz está en juego: o ya hay un
+    // trazo en curso con OTRO puntero (activeDrawPointerId), o el lápiz
+    // estuvo "cerca" hace muy poco (penNearActive, ver más arriba). Esto
+    // cubre tanto la palma que se apoya MIENTRAS se escribe como la que se
+    // apoya un instante ANTES de que la punta toque la hoja — antes solo se
+    // cubría el primer caso, así que una palma apoyada de entrada se colaba
+    // como puntero normal y, al tocar el lápiz, sumaba un segundo puntero
+    // que el código de más abajo interpretaba como el arranque de un
+    // pellizco, cortando el trazo en vez de dejar escribir.
+    if(penOnly && e.pointerType === 'touch' && (penNearActive || (activeDrawPointerId !== null && activeDrawPointerId !== e.pointerId))){
       return;
     }
 
@@ -5795,11 +6074,23 @@ window.OcrEngine = (function(){
       // (mismo promedio móvil que usa "Emprolijar letra"): el microtemblor
       // de mano no aporta información a la forma de la letra y sí puede
       // confundir al reconocedor, que interpreta mejor un trazo limpio que
-      // uno entrecortado. Además forzamos color negro sólido, estilo
-      // "estándar" (sin veteado ni opacidad reducida de marcador/grafito) y
-      // un grosor mínimo, para el mejor contraste posible.
+      // uno entrecortado. Además forzamos color negro sólido y estilo
+      // "estándar" (sin veteado ni opacidad reducida de marcador/grafito)
+      // para el mejor contraste posible.
+      //
+      // El grosor mínimo/máximo se calcula como PROPORCIÓN de la altura de
+      // la palabra (h), no como un valor fijo: antes era un mínimo fijo
+      // (2.8), y al escalarse junto con letra chica (donde la escala sube
+      // mucho para llegar al piso de resolución) terminaba siendo
+      // desproporcionadamente grueso. Eso hacía que, por ejemplo, las tres
+      // patas de la "m" se pegaran entre sí y se leyeran como "n", o que el
+      // asta de la "h" se engordara y perdiera la forma que la distingue de
+      // "n"/"m". Con un grosor relativo a la altura real de lo escrito, la
+      // proporción del trazo se mantiene sin importar si la letra es chica
+      // o grande.
+      const minW = Math.max(1.2, h*0.035), maxW = Math.max(minW+0.5, h*0.13);
       const smoothedPoints = smoothStrokePoints(b.stroke.points);
-      const forced = Object.assign({}, b.stroke, { color:'#000000', penStyle:'estandar', width: Math.max(b.stroke.width, 2.8), points: smoothedPoints });
+      const forced = Object.assign({}, b.stroke, { color:'#000000', penStyle:'estandar', width: Math.min(maxW, Math.max(b.stroke.width, minW)), points: smoothedPoints });
       if(forced.points.length < 2) dotTo(octx, forced, SILHOUETTE_STYLE);
       else for(let i=1;i<forced.points.length;i++) segmentTo(octx, forced, i-1, i, SILHOUETTE_STYLE);
     });
@@ -6344,15 +6635,23 @@ window.OcrEngine = (function(){
   let vStroke=null, vPoints=[], vGesture=null, vTouchInfo=null, vSelected=null;
   let vHistory=[], vFuture=[], vSaved='';
   // ---- Estilos de trazo del lápiz (bolígrafo, caligráfico, etc.) ----
+  // Cada estilo, además de ancho/opacidad, puede pedir una mezcla real
+  // ('blend': cómo se combina con lo que ya está dibujado debajo) y/o un
+  // filtro de textura ('filter': una deformación real del trazo, no solo
+  // menos opacidad) — así el marcador oscurece de verdad donde se pisa a
+  // sí mismo, y el grafito/pincel seco tienen un borde rugoso genuino.
   const VB_PEN_STYLES = {
     estandar:      { name:'Estándar',        widthMul:1,    alpha:1,   linecap:'round',  blend:false },
-    boligrafo:     { name:'Bolígrafo',        widthMul:.7,   alpha:1,   linecap:'round',  blend:false },
-    caligrafico:   { name:'Caligráfico',      widthMul:1.9,  alpha:.94, linecap:'square', blend:false },
+    boligrafo:     { name:'Bolígrafo',        widthMul:.75,  alpha:1,   linecap:'round',  blend:false },
     fina:          { name:'Punta fina',       widthMul:.45,  alpha:1,   linecap:'round',  blend:false },
+    gel:           { name:'Gel',              widthMul:.85,  alpha:1,   linecap:'round',  blend:false },
     estilografica: { name:'Estilográfica',    widthMul:1.15, alpha:.92, linecap:'round',  blend:false },
-    marcador:      { name:'Marcador seco',    widthMul:2.4,  alpha:.5,  linecap:'round',  blend:false },
-    grafito:       { name:'Lápiz grafito',    widthMul:.95,  alpha:.75, linecap:'round',  blend:true  },
+    caligrafico:   { name:'Caligráfico',      widthMul:2.1,  alpha:1,   linecap:'square', blend:false },
+    marcador:      { name:'Marcador seco',    widthMul:2.4,  alpha:.55, linecap:'round',  blend:'multiply' },
+    grafito:       { name:'Lápiz grafito',    widthMul:.95,  alpha:.75, linecap:'round',  blend:true, filter:'vbGrainFilter' },
+    carbon:        { name:'Carboncillo',      widthMul:1.5,  alpha:.62, linecap:'round',  blend:true, filter:'vbGrainFilter' },
     pincel:        { name:'Pincel',           widthMul:2.8,  alpha:.88, linecap:'round',  blend:false },
+    pincelSeco:    { name:'Pincel seco',      widthMul:1.6,  alpha:.6,  linecap:'round',  blend:true, filter:'vbGrainFilter' },
   };
   let vPenStyle='estandar';
   let vMarkStyle='translucido';
@@ -6557,6 +6856,7 @@ window.OcrEngine = (function(){
       vStroke.setAttribute('stroke-linecap', style.linecap);
       vStroke.setAttribute('stroke-linejoin', style.linecap==='square' ? 'miter' : 'round');
       if(style.blend) vStroke.style.mixBlendMode='multiply';
+      if(style.filter) vStroke.style.filter=`url(#${style.filter})`;
     }
     vbObjects.appendChild(vStroke);
   }
@@ -6897,9 +7197,17 @@ window.OcrEngine = (function(){
     ctx.lineCap='round'; ctx.lineJoin='round';
     strokes.forEach(s=>{
       const pts=vbSmoothPoints(s.pts);
-      ctx.lineWidth=s.width;
+      // Mismo criterio que el cuaderno: el grosor se acota como proporción
+      // de la altura real de la palabra (h), no con el ancho del trazo tal
+      // cual. Sin un piso, un trazo muy fino se puede desdibujar con el
+      // desenfoque previo y perder el asta de la "h" o el enganche entre
+      // las patas de la "m"; sin un techo, un trazo grueso puede pegar esas
+      // mismas patas entre sí y confundirse con "n". Ambos casos mejoran
+      // atándolo al tamaño real de la letra en vez de a un valor fijo.
+      const minW = Math.max(1.2, h*0.035), maxW = Math.max(minW+0.5, h*0.13);
+      ctx.lineWidth=Math.min(maxW, Math.max(s.width, minW));
       if(pts.length<2){
-        ctx.beginPath(); ctx.arc(pts[0].x,pts[0].y,s.width/2,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(pts[0].x,pts[0].y,ctx.lineWidth/2,0,Math.PI*2); ctx.fill();
       }else{
         ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
         for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x,pts[i].y);
@@ -7870,6 +8178,21 @@ window.OcrEngine = (function(){
   const vbSettingsBackdrop = document.getElementById('vbSettingsBackdrop');
   const vbOcrToggle = document.getElementById('vbOcrToggle');
   const vbOcrToggleText = document.getElementById('vbOcrToggleText');
+  const vbThemeToggle = document.getElementById('vbThemeToggle');
+  const vbThemeToggleText = document.getElementById('vbThemeToggleText');
+  function refreshVbThemeToggle(){
+    if(!vbThemeToggle) return;
+    const light = window.AppTheme.get() === 'light';
+    vbThemeToggle.checked = light;
+    if(vbThemeToggleText) vbThemeToggleText.textContent = light ? 'Activado' : 'Desactivado';
+  }
+  if(vbThemeToggle){
+    refreshVbThemeToggle();
+    vbThemeToggle.addEventListener('change', ()=>{
+      window.AppTheme.set(vbThemeToggle.checked ? 'light' : 'dark');
+    });
+    window.addEventListener('themeChange', refreshVbThemeToggle);
+  }
   function refreshVbOcrToggle(){
     if(!vbOcrToggle) return;
     const on = window.OcrEngine.isEnabled();
@@ -7887,6 +8210,7 @@ window.OcrEngine = (function(){
   }
   function vbOpenSettings(){
     refreshVbOcrToggle();
+    refreshVbThemeToggle();
     const rect = vbSettingsBtn.getBoundingClientRect();
     const panelWidth = 230;
     let left = rect.right - panelWidth;
