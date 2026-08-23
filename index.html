@@ -123,6 +123,14 @@ window.OcrEngine = (function(){
   // usuario) tenga algo guardado. No pretende ser un corrector ortográfico
   // completo — es un empujoncito para los errores típicos de OCR sobre
   // cursiva en las palabras más comunes del idioma.
+  // Lista ordenada de más a menos frecuente (aproximado): el ORDEN importa,
+  // no solo la pertenencia. Antes era un Set plano — todas las palabras
+  // "pesaban" igual a la hora de desempatar dos candidatas a la misma
+  // distancia de edición. Ahora cada palabra tiene un rango (su posición en
+  // esta lista), y ese rango se usa como criterio de desempate: entre dos
+  // correcciones igual de válidas, se prefiere la más frecuente en español
+  // en vez de la primera que aparezca al recorrer el Set (orden que ni
+  // siquiera estaba garantizado).
   const COMMON_WORDS = ('de la que el en y a los se del las por un para con no una '+
     'su al lo como más pero sus le ya o este sí porque esta entre cuando muy sin '+
     'sobre también me hasta hay donde quien desde todo nos durante todos uno les '+
@@ -132,8 +140,59 @@ window.OcrEngine = (function(){
     'nuestra nuestros nuestras vuestro vuestra vuestros vuestras esos esas soy eres '+
     'somos sois estoy estás está estamos estáis están ser es son fue era hola '+
     'gracias buenos días tarde noche trabajo casa tiempo día año vida mundo hoy '+
-    'mañana ayer siempre nunca bien mal aquí allí porque cómo cuál cuáles').split(/\s+/);
+    'mañana ayer siempre nunca bien mal aquí allí porque cómo cuál cuáles '+
+    // --- Verbos muy frecuentes, conjugados en las formas más comunes ---
+    // (presente, pretérito e imperfecto de indicativo de ser/estar/haber/
+    // tener/hacer/decir/poder/ir/ver/dar/saber/querer/deber/poner/venir), sin
+    // pretender ser una conjugación completa: cubren los errores de OCR más
+    // típicos en textos manuscritos cotidianos (notas, agendas, tareas).
+    'he has ha hemos habéis han había habías habíamos habían tengo tienes tiene '+
+    'tenemos tenéis tienen tenía tenías teníamos tenían tuve tuvo tuvimos tuvieron '+
+    'hago haces hace hacemos hacéis hacen hacía hacía hice hizo hicimos hicieron '+
+    'haré harás hará haremos harán digo dices dice decimos decís dicen decía dije '+
+    'dijo dijimos dijeron diré dirás dirá puedo puedes puede podemos podéis pueden '+
+    'podía podías podíamos podían pude pudo pudimos pudieron podré podrás podrá '+
+    'voy vas va vamos vais van iba ibas íbamos iban fui fue fuimos fueron iré irás '+
+    'irá iremos irán veo ves ve vemos veis ven veía veías veíamos veían vi vio '+
+    'vimos vieron doy das da damos dais dan daba dabas dábamos daban di dio dimos '+
+    'dieron sé sabes sabe sabemos sabéis saben sabía sabías sabíamos sabían supe '+
+    'supo supimos supieron quiero quieres quiere queremos queréis quieren quería '+
+    'querías queríamos querían quise quiso quisimos quisieron debo debes debe '+
+    'debemos debéis deben debía debías debíamos debían pongo pones pone ponemos '+
+    'ponéis ponen ponía ponías poníamos ponían puse puso pusimos pusieron vengo '+
+    'vienes viene venimos venís vienen venía venías veníamos venían vine vino '+
+    'vinimos vinieron '+
+    // --- Sustantivos, adjetivos y conectores muy comunes en notas cotidianas ---
+    'cosa cosas persona personas gente hombre mujer niño niña familia amigo amiga '+
+    'amigos amigas nombre número lugar parte forma manera momento hora horas '+
+    'semana semanas mes meses veces vez fin final principio ejemplo problema '+
+    'pregunta respuesta idea ideas plan lista nota notas apunte apuntes tarea '+
+    'tareas clase clases escuela colegio universidad libro libros página páginas '+
+    'papel lápiz lapicera cuaderno agenda proyecto reunión reuniones equipo '+
+    'grupo empresa negocio dinero precio pago cuenta correo mensaje teléfono '+
+    'ciudad país mundo calle casa cocina cuarto puerta ventana coche auto comida '+
+    'agua café té leche pan fruta salud médico doctor hospital escuela '+
+    'grande pequeño pequeña nuevo nueva viejo vieja bueno buena malo mala mejor '+
+    'peor mismo misma otro otra otros otras mucho mucha muchos muchas poco poca '+
+    'pocos pocas todo toda todos todas cada cierto cierta claro clara importante '+
+    'necesario necesaria posible imposible fácil difícil rápido rápida lento '+
+    'lenta primero primera segundo segunda tercero tercera último última '+
+    'y o pero porque aunque cuando mientras además entonces luego después antes '+
+    'durante desde hasta según sin con para por sobre bajo entre hacia contra '+
+    'lunes martes miércoles jueves viernes sábado domingo enero febrero marzo '+
+    'abril mayo junio julio agosto septiembre octubre noviembre diciembre '+
+    'uno dos tres cuatro cinco seis siete ocho nueve diez once doce veinte '+
+    'treinta cien mil').split(/\s+/);
   const COMMON_WORDS_SET = new Set(COMMON_WORDS);
+  const COMMON_WORDS_RANK = new Map();
+  COMMON_WORDS.forEach((w,i)=>{ if(!COMMON_WORDS_RANK.has(w)) COMMON_WORDS_RANK.set(w,i); });
+  // Quita acentos para comparar: la confusión más común del OCR sobre
+  // cursiva no es cambiar una letra por otra sino "perder" o "inventar" una
+  // tilde (é↔e, á↔a…), porque el trazo de la tilde es chico y fácil de
+  // fundir con el trazo de al lado. Comparar también sin acentos permite
+  // reconocer esos casos como coincidencia MUY cercana (distancia 0 en la
+  // forma "pelada") sin aflojar el criterio para errores de otro tipo.
+  function stripAccents(s){ return s.normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
 
   function levenshtein(a, b){
     const m = a.length, n = b.length;
@@ -162,23 +221,39 @@ window.OcrEngine = (function(){
     if(COMMON_WORDS_SET.has(lower)) return word;
     if(personalDict && personalDict[lower]) return word;
     const threshold = lower.length<=4 ? 1 : (lower.length<=7 ? 2 : 3);
-    let best=null, bestDist=Infinity, bestCount=0;
-    COMMON_WORDS_SET.forEach(dw=>{
+    const lowerBare = stripAccents(lower);
+    // "Puntaje" de una candidata: la distancia de edición manda, pero entre
+    // candidatas a la MISMA distancia se prefiere la más frecuente en
+    // español (rank más bajo = más frecuente) y, en el diccionario personal,
+    // la que el usuario más usó. Antes el desempate por distancia igual
+    // dependía del orden de recorrido del Set (arbitrario); ahora es
+    // determinístico y tiende a la corrección más probable.
+    let best=null, bestDist=Infinity, bestScore=Infinity;
+    COMMON_WORDS.forEach((dw,rank)=>{
       if(Math.abs(dw.length-lower.length)>2) return;
-      const dist=levenshtein(lower,dw);
+      let dist=levenshtein(lower,dw);
+      // Si la única diferencia son acentos, cuenta como una coincidencia
+      // fuerte (equivalente a distancia 0.5) en vez de la distancia cruda,
+      // que a veces ya supera el umbral solo por la(s) tilde(s).
+      if(dist>0 && dist<=threshold+1 && stripAccents(dw)===lowerBare) dist=Math.min(dist,0.5);
       if(dist===0||dist>threshold) return;
-      if(dist<bestDist){ best=dw; bestDist=dist; bestCount=1; }
+      const score = dist + rank/COMMON_WORDS.length*0.4; // el rank solo desempata, no domina
+      if(score<bestScore){ best=dw; bestDist=dist; bestScore=score; }
     });
     if(personalDict){
       for(const dw in personalDict){
         if(Math.abs(dw.length-lower.length)>2) continue;
-        const dist=levenshtein(lower,dw);
+        let dist=levenshtein(lower,dw);
+        if(dist>0 && dist<=threshold+1 && stripAccents(dw)===lowerBare) dist=Math.min(dist,0.5);
         if(dist===0||dist>threshold) continue;
         const count=(personalDict[dw]&&personalDict[dw].count)||1;
-        // Ante empate de distancia, preferimos el diccionario personal: es
-        // más probable que sea justo la palabra que el usuario suele escribir.
-        if(dist<bestDist || (dist===bestDist && count>=bestCount)){
-          best=dw; bestDist=dist; bestCount=count;
+        // El diccionario personal aprende del propio vocabulario del
+        // usuario, así que una palabra que ya escribió muchas veces pesa
+        // más que su posición arbitraria: se le da ventaja incluso frente a
+        // una común genérica a la misma distancia (score más bajo = gana).
+        const score = dist - Math.min(0.35, Math.log2(1+count)*0.08);
+        if(score<bestScore || (score===bestScore && best && !personalDict[best])){
+          best=dw; bestDist=dist; bestScore=score;
         }
       }
     }
@@ -901,6 +976,27 @@ window.OcrEngine = (function(){
   #pdfAddBtn:hover{opacity:.9;border-color:var(--pine);color:#fff;}
   #pdfAddBtn svg{flex-shrink:0;}
   #pdfLibraryBtnLabel{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  /* ---------- Barra de búsqueda dentro del PDF ---------- */
+  #pdfSearchBar{
+    display:none;align-items:center;gap:6px;padding:7px 8px;
+    border-bottom:1px solid var(--panel-edge);flex-shrink:0;
+  }
+  #pdfSearchBar.open{display:flex;}
+  #pdfSearchInput{
+    flex:1;min-width:0;background:var(--panel-2);color:var(--cream);border:1px solid var(--panel-edge);
+    border-radius:6px;padding:6px 8px;font-size:12px;font-family:'Inter',sans-serif;
+  }
+  #pdfSearchInput:focus{outline:none;border-color:var(--pine);}
+  #pdfSearchCount{font-size:11px;color:var(--cream-dim);white-space:nowrap;min-width:64px;text-align:center;}
+  .textLayer span.pdfSearchHit{background:rgba(245,217,73,.55);border-radius:2px;}
+  /* ---------- Ir a una página escribiendo el número ---------- */
+  .pdfPageJumpInput{
+    width:44px;background:var(--panel-2);color:var(--cream);border:1px solid var(--pine);
+    border-radius:5px;font-size:12px;font-family:'Inter',sans-serif;text-align:center;padding:3px 2px;
+  }
+  .pdfPageJumpInput:focus{outline:none;}
+  #pdfPageLabel{cursor:pointer;border-radius:5px;padding:2px 4px;}
+  #pdfPageLabel:hover{background:var(--panel-2);color:var(--cream);}
   #pdfCanvasWrap{
     flex:1;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;
     background:var(--desk);padding:12px;position:relative;
@@ -2137,7 +2233,23 @@ window.OcrEngine = (function(){
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Subir PDF
         </button>
+        <button class="icon" id="pdfSearchToggleBtn" title="Buscar en el PDF">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        </button>
         <button class="icon" id="pdfCloseBtn" title="Cerrar panel">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div id="pdfSearchBar">
+        <input type="text" id="pdfSearchInput" placeholder="Buscar en el PDF…" autocomplete="off">
+        <span id="pdfSearchCount"></span>
+        <button class="icon" id="pdfSearchPrevBtn" title="Resultado anterior">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <button class="icon" id="pdfSearchNextBtn" title="Resultado siguiente">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+        <button class="icon" id="pdfSearchCloseBtn" title="Cerrar búsqueda">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
@@ -2642,15 +2754,44 @@ window.OcrEngine = (function(){
     pincel:        { name:'Pincel',                widthFn:(w,p)=> w*(0.25+p*1.4),       alpha:.95 },
     pincelSeco:    { name:'Pincel seco',           widthFn:(w,p)=> w*(0.5+p*1.1),        alpha:.72, grain:true },
   };
-  function widthForStroke(stroke, p){
+  // ---------- Afinado de puntas (como Nebo/tinta real) ----------
+  // Un trazo de tinta real nunca empieza y termina con el ancho completo:
+  // la lapicera "entra" y "sale" del papel con menos presión, así que la
+  // punta se ve fina. Acá lo simulamos aunque no haya presión real (mouse,
+  // dedo): los primeros y los últimos puntos del trazo se dibujan más finos
+  // y van ensanchando/afinando de forma gradual. Solo aplica a "pen" (no a
+  // marcador, subrayador ni goma, donde una punta cuadrada es lo esperado).
+  const PEN_TAPER_POINTS = 5;
+  function taperFactor(stroke, idx, opts){
+    if(stroke.tool !== 'pen' || idx==null) return 1;
+    const total = stroke.points ? stroke.points.length : 0;
+    if(total < 3) return 1;
+    const n = Math.min(PEN_TAPER_POINTS, Math.floor((total-1)/2));
+    if(n<=0) return 1;
+    if(idx < n) return 0.32 + 0.68*(idx/n);
+    // El afinado del FINAL solo se aplica cuando se sabe con certeza que
+    // "idx" ya es el último tramo del trazo (opts.end===true) — durante el
+    // dibujado en vivo el trazo sigue creciendo, así que el "final" de hoy
+    // puede ser la mitad de mañana; afinarlo ahí se vería como un tirón raro
+    // justo debajo del lápiz. Ese afinado final se aplica una sola vez, al
+    // soltar, cuando se redibuja el trazo completo ya cerrado.
+    if(opts && opts.end){
+      const distFromEnd = (total-1) - idx;
+      if(distFromEnd < n) return 0.32 + 0.68*(distFromEnd/n);
+    }
+    return 1;
+  }
+  function widthForStroke(stroke, p, idx, taperOpts){
+    let w;
     if(stroke.tool==='highlighter' || stroke.tool==='underline'){
-      return stroke.width * (markStyleFor(stroke).widthMul || 1) * (0.4 + p);
-    }
-    if(stroke.tool==='pen'){
+      w = stroke.width * (markStyleFor(stroke).widthMul || 1) * (0.4 + p);
+    } else if(stroke.tool==='pen'){
       const ps = PEN_STYLES[stroke.penStyle] || PEN_STYLES.estandar;
-      return ps.widthFn(stroke.width, p);
+      w = ps.widthFn(stroke.width, p);
+    } else {
+      w = stroke.width * (0.4 + p);
     }
-    return stroke.width * (0.4 + p);
+    return w * taperFactor(stroke, idx, taperOpts);
   }
   function alphaForStroke(stroke, baseAlpha, idx){
     if(stroke.tool==='pen'){
@@ -2873,7 +3014,14 @@ window.OcrEngine = (function(){
     {name:"Océano", hex:"#3E5C76"}, {name:"Azul", hex:"#2E5EAA"}, {name:"Violeta", hex:"#6E5AA8"},
     {name:"Óxido", hex:"#B5502E"}, {name:"Rojo", hex:"#C43D3D"}, {name:"Ocre", hex:"#C99A3C"},
     {name:"Verde oliva", hex:"#6B7A3A"}, {name:"Marrón", hex:"#7A5230"}, {name:"Gris", hex:"#8A8580"},
+    {name:"Blanco", hex:"#F4F2EC"},
   ];
+  // Color de tinta por defecto según el tema: en modo oscuro un grafito casi
+  // negro es prácticamente invisible sobre la hoja oscura, así que ahí el
+  // valor por defecto es blanco (el resto de la paleta sigue disponible
+  // igual, esto solo cambia qué color viene elegido de entrada).
+  const INK_DEFAULT_LIGHT = INK_COLORS[0].hex; // Grafito
+  const INK_DEFAULT_DARK = INK_COLORS[INK_COLORS.length-1].hex; // Blanco
   const MARK_COLORS = [
     {name:"Amarillo", hex:"#F5D949"}, {name:"Verde", hex:"#8FD14F"}, {name:"Menta", hex:"#6FE3C6"},
     {name:"Rosa", hex:"#F28FB0"}, {name:"Fucsia", hex:"#E85DB0"}, {name:"Celeste", hex:"#7FC7E8"},
@@ -2912,7 +3060,25 @@ window.OcrEngine = (function(){
   let customInkColors = [], customMarkColors = [];
   let pages = [], currentPageId = null, strokes = [], redoStack = [];
   let tool = 'pen';
-  let inkColor = INK_COLORS[0].hex, markColor = MARK_COLORS[0].hex;
+  // El tema (claro/oscuro) todavía no se aplicó a esta altura del arranque
+  // (el script que lo hace corre más abajo, al final del documento), así
+  // que para elegir el color de tinta inicial correcto se repite acá la
+  // misma lectura mínima (localStorage → preferencia del sistema → oscuro)
+  // que usa ese script, en vez de depender de document.documentElement.
+  function preferredThemeIsLight(){
+    try{
+      const saved = localStorage.getItem('cuaderno:theme');
+      if(saved==='light') return true;
+      if(saved==='dark') return false;
+    }catch(e){}
+    try{ return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches); }catch(e){ return false; }
+  }
+  // inkColorIsDefault: mientras sea true, el color de tinta sigue al tema
+  // (blanco en oscuro, grafito en claro) automáticamente. En cuanto el
+  // usuario elige un color a mano —de la paleta o del selector— pasa a
+  // false y desde ahí ese color queda fijo, sin importar qué tema se use.
+  let inkColorIsDefault = true;
+  let inkColor = preferredThemeIsLight() ? INK_DEFAULT_LIGHT : INK_DEFAULT_DARK, markColor = MARK_COLORS[0].hex;
   let widths = {pen:TOOL_RANGE.pen.def, eraser:TOOL_RANGE.eraser.def, highlighter:TOOL_RANGE.highlighter.def, underline:TOOL_RANGE.underline.def, text:TOOL_RANGE.text.def, shape:TOOL_RANGE.shape.def};
   let penOnly = false;
   let currentPenStyle = 'estandar';
@@ -3101,6 +3267,13 @@ window.OcrEngine = (function(){
   const pdfZoomOutBtn = document.getElementById('pdfZoomOutBtn');
   const pdfZoomInBtn = document.getElementById('pdfZoomInBtn');
   const pdfZoomLabelEl = document.getElementById('pdfZoomLabel');
+  const pdfSearchToggleBtn = document.getElementById('pdfSearchToggleBtn');
+  const pdfSearchBarEl = document.getElementById('pdfSearchBar');
+  const pdfSearchInputEl = document.getElementById('pdfSearchInput');
+  const pdfSearchCountEl = document.getElementById('pdfSearchCount');
+  const pdfSearchPrevBtn = document.getElementById('pdfSearchPrevBtn');
+  const pdfSearchNextBtn = document.getElementById('pdfSearchNextBtn');
+  const pdfSearchCloseBtn = document.getElementById('pdfSearchCloseBtn');
   const pdfFileInputEl = document.getElementById('pdfFileInput');
   const pdfPageStackEl = document.getElementById('pdfPageStack');
   const pdfTextLayerEl = document.getElementById('pdfTextLayer');
@@ -3439,6 +3612,7 @@ window.OcrEngine = (function(){
 
     renderPdfMarksLayer();
     renderPdfInkLayer();
+    if(pdfSearchTerm) pdfHighlightSearchMatches();
   }
 
   // ---------- Subrayado/resaltado sobre el texto del PDF ----------
@@ -3760,6 +3934,7 @@ window.OcrEngine = (function(){
     if(!id){ showPdfEmpty(); return; }
     const meta = await pdfMetaGet(id);
     if(!meta){ showPdfEmpty(); return; }
+    pdfResetSearch();
     pdfLoadingHintEl.style.display = 'block';
     pdfEmptyStateEl.classList.remove('show');
     try{
@@ -3780,6 +3955,217 @@ window.OcrEngine = (function(){
     }
   }
 
+  // ---------- Búsqueda de texto dentro del PDF ----------
+  // Estrategia simple y robusta: en vez de indexar cada coincidencia exacta
+  // (posición dentro de cada span del layout, que puede desalinearse con el
+  // texto real de pdf.js), se navega entre PÁGINAS que contienen el término
+  // y, en la página mostrada, se resaltan TODAS las coincidencias a la vez.
+  // Es menos "de precisión" que un buscador de escritorio pero cubre el caso
+  // real de uso acá (encontrar en qué página está algo) sin arriesgar bugs
+  // de desalineación de índices entre el texto extraído y los <span> del DOM.
+  let pdfSearchTerm = '';
+  let pdfSearchPages = [];   // números de página (ascendente) con al menos una coincidencia
+  let pdfSearchPageIdx = -1; // posición dentro de pdfSearchPages que se está mostrando
+  let pdfSearchTotalHits = 0;
+  let pdfSearchTextCache = new Map(); // página -> texto ya normalizado (evita volver a pedírselo a pdf.js)
+  let pdfSearchInputTimer = null;
+
+  function pdfNormalizeForSearch(s){
+    return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  }
+  async function pdfPageNormalizedText(pageNum){
+    if(pdfSearchTextCache.has(pageNum)) return pdfSearchTextCache.get(pageNum);
+    const page = await currentPdfDoc.getPage(pageNum);
+    const content = await page.getTextContent();
+    const norm = pdfNormalizeForSearch(content.items.map(it=>it.str).join(' '));
+    pdfSearchTextCache.set(pageNum, norm);
+    return norm;
+  }
+  function pdfResetSearch(){
+    pdfSearchTerm=''; pdfSearchPages=[]; pdfSearchPageIdx=-1; pdfSearchTotalHits=0;
+    pdfSearchTextCache = new Map();
+    if(pdfSearchInputEl) pdfSearchInputEl.value='';
+    pdfUpdateSearchUI();
+    pdfHighlightSearchMatches();
+  }
+  async function pdfRunSearch(rawTerm){
+    const term = rawTerm.trim();
+    pdfSearchTerm = term;
+    pdfSearchPages = []; pdfSearchPageIdx = -1; pdfSearchTotalHits = 0;
+    pdfHighlightSearchMatches();
+    if(!currentPdfDoc || !term){ pdfUpdateSearchUI(); return; }
+    const needle = pdfNormalizeForSearch(term);
+    pdfSearchCountEl.textContent = 'Buscando…';
+    const myTerm = term; // si el usuario sigue tipeando, esta pasada vieja se descarta al terminar
+    for(let p=1; p<=currentPdfDoc.numPages; p++){
+      const norm = await pdfPageNormalizedText(p);
+      if(pdfSearchTerm !== myTerm) return;
+      let count=0, from=0, pos;
+      while((pos = norm.indexOf(needle, from)) !== -1){ count++; from = pos + needle.length; }
+      if(count){ pdfSearchPages.push(p); pdfSearchTotalHits += count; }
+    }
+    if(pdfSearchTerm !== myTerm) return;
+    if(pdfSearchPages.length){
+      // Arranca en la primera página CON resultados a partir de la actual
+      // (hacia adelante), en vez de saltar siempre al principio del documento.
+      let startIdx = pdfSearchPages.findIndex(p=>p>=currentPdfPageNum);
+      if(startIdx===-1) startIdx = 0;
+      await pdfGoToSearchPage(startIdx);
+    } else {
+      pdfUpdateSearchUI();
+    }
+  }
+  async function pdfGoToSearchPage(idx){
+    if(!pdfSearchPages.length) return;
+    pdfSearchPageIdx = ((idx % pdfSearchPages.length) + pdfSearchPages.length) % pdfSearchPages.length;
+    const targetPage = pdfSearchPages[pdfSearchPageIdx];
+    if(targetPage !== currentPdfPageNum){
+      currentPdfPageNum = targetPage;
+      await renderCurrentPdfPage(); // ya llama a pdfHighlightSearchMatches al final
+    } else {
+      pdfHighlightSearchMatches();
+    }
+    pdfUpdateSearchUI();
+  }
+  function pdfHighlightSearchMatches(){
+    if(!pdfTextLayerEl) return;
+    pdfTextLayerEl.querySelectorAll('.pdfSearchHit').forEach(el=>el.classList.remove('pdfSearchHit'));
+    if(!pdfSearchTerm) return;
+    const needle = pdfNormalizeForSearch(pdfSearchTerm);
+    let firstHit = null;
+    pdfTextLayerEl.querySelectorAll('span').forEach(span=>{
+      if(pdfNormalizeForSearch(span.textContent).indexOf(needle) !== -1){
+        span.classList.add('pdfSearchHit');
+        if(!firstHit) firstHit = span;
+      }
+    });
+    if(firstHit) firstHit.scrollIntoView({block:'center', inline:'center', behavior:'smooth'});
+  }
+  function pdfUpdateSearchUI(){
+    if(!pdfSearchCountEl) return;
+    if(!pdfSearchTerm){ pdfSearchCountEl.textContent=''; return; }
+    if(!currentPdfDoc){ pdfSearchCountEl.textContent=''; return; }
+    if(!pdfSearchPages.length){ pdfSearchCountEl.textContent='Sin resultados'; return; }
+    pdfSearchCountEl.textContent = (pdfSearchPageIdx+1)+' / '+pdfSearchPages.length+' pág. ('+pdfSearchTotalHits+')';
+  }
+  function openPdfSearchBar(){
+    pdfSearchBarEl.classList.add('open');
+    pdfSearchInputEl.focus();
+  }
+  function closePdfSearchBar(){
+    pdfSearchBarEl.classList.remove('open');
+    pdfResetSearch();
+  }
+  pdfSearchToggleBtn.addEventListener('click', ()=>{
+    if(pdfSearchBarEl.classList.contains('open')) closePdfSearchBar();
+    else openPdfSearchBar();
+  });
+  pdfSearchCloseBtn.addEventListener('click', closePdfSearchBar);
+  pdfSearchInputEl.addEventListener('input', ()=>{
+    clearTimeout(pdfSearchInputTimer);
+    const val = pdfSearchInputEl.value;
+    pdfSearchInputTimer = setTimeout(()=> pdfRunSearch(val), 350);
+  });
+  pdfSearchInputEl.addEventListener('keydown', (e)=>{
+    if(e.key === 'Enter'){
+      e.preventDefault();
+      clearTimeout(pdfSearchInputTimer);
+      if(pdfSearchTerm === pdfSearchInputEl.value.trim() && pdfSearchPages.length){
+        pdfGoToSearchPage(pdfSearchPageIdx + (e.shiftKey ? -1 : 1));
+      } else {
+        pdfRunSearch(pdfSearchInputEl.value);
+      }
+    } else if(e.key === 'Escape'){
+      e.preventDefault();
+      closePdfSearchBar();
+    }
+  });
+  pdfSearchPrevBtn.addEventListener('click', ()=> pdfGoToSearchPage(pdfSearchPageIdx - 1));
+  pdfSearchNextBtn.addEventListener('click', ()=> pdfGoToSearchPage(pdfSearchPageIdx + 1));
+
+  // ---------- Ir a una página escribiendo el número ----------
+  pdfPageLabelEl.title = 'Tocá para ir a una página';
+  pdfPageLabelEl.addEventListener('click', ()=>{
+    if(!currentPdfDoc) return;
+    const input = document.createElement('input');
+    input.type = 'number'; input.inputMode = 'numeric';
+    input.min = '1'; input.max = String(currentPdfDoc.numPages);
+    input.value = String(currentPdfPageNum);
+    input.className = 'pdfPageJumpInput';
+    pdfPageLabelEl.replaceWith(input);
+    input.focus(); input.select();
+    let settled = false;
+    function commit(){
+      if(settled) return; settled = true;
+      const n = clamp(parseInt(input.value,10)||currentPdfPageNum, 1, currentPdfDoc.numPages);
+      input.replaceWith(pdfPageLabelEl);
+      if(n !== currentPdfPageNum){ currentPdfPageNum = n; renderCurrentPdfPage(); }
+    }
+    function cancel(){
+      if(settled) return; settled = true;
+      input.replaceWith(pdfPageLabelEl);
+    }
+    input.addEventListener('keydown', e=>{
+      if(e.key==='Enter'){ e.preventDefault(); commit(); }
+      else if(e.key==='Escape'){ e.preventDefault(); cancel(); }
+    });
+    input.addEventListener('blur', commit);
+  });
+
+  // ---------- Navegación por teclado (flechas, RePág/AvPág, Inicio/Fin) ----------
+  // Solo cuando el panel de PDF está abierto y el foco no está en un campo de
+  // texto (búsqueda, "ir a página", el editor de la hoja, etc.) — si no, las
+  // flechas se usarían para escribir en vez de para pasar de página.
+  document.addEventListener('keydown', (e)=>{
+    if(!pdfPanelEl.classList.contains('open') || !currentPdfDoc) return;
+    const active = document.activeElement;
+    const tag = active && active.tagName;
+    if(tag==='INPUT' || tag==='TEXTAREA' || (active && active.isContentEditable)) return;
+    if(e.key==='ArrowRight' || e.key==='PageDown'){
+      if(currentPdfPageNum < currentPdfDoc.numPages){ e.preventDefault(); currentPdfPageNum++; renderCurrentPdfPage(); }
+    } else if(e.key==='ArrowLeft' || e.key==='PageUp'){
+      if(currentPdfPageNum > 1){ e.preventDefault(); currentPdfPageNum--; renderCurrentPdfPage(); }
+    } else if(e.key==='Home'){
+      if(currentPdfPageNum !== 1){ e.preventDefault(); currentPdfPageNum = 1; renderCurrentPdfPage(); }
+    } else if(e.key==='End'){
+      if(currentPdfPageNum !== currentPdfDoc.numPages){ e.preventDefault(); currentPdfPageNum = currentPdfDoc.numPages; renderCurrentPdfPage(); }
+    }
+  });
+
+  // ---------- Zoom con Ctrl+rueda (o pellizco de trackpad) y pellizco táctil ----------
+  pdfCanvasWrapEl.addEventListener('wheel', (e)=>{
+    if(!currentPdfDoc || !e.ctrlKey) return;
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.08 : 1/1.08;
+    pdfZoom = Math.max(0.4, Math.min(3, +(pdfZoom*factor).toFixed(3)));
+    renderCurrentPdfPage();
+  }, {passive:false});
+  (function setupPdfPinchZoom(){
+    const pointers = new Map();
+    let pinchInfo = null;
+    pdfCanvasWrapEl.addEventListener('pointerdown', (e)=>{
+      if(e.pointerType !== 'touch' || pdfInkCanvasEl.classList.contains('drawing')) return;
+      pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+      if(pointers.size === 2){
+        const pts = [...pointers.values()];
+        pinchInfo = { dist: Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y), zoom0: pdfZoom };
+      }
+    });
+    pdfCanvasWrapEl.addEventListener('pointermove', (e)=>{
+      if(!pointers.has(e.pointerId)) return;
+      pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+      if(pointers.size === 2 && pinchInfo && currentPdfDoc){
+        const pts = [...pointers.values()];
+        const dist = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
+        const newZoom = Math.max(0.4, Math.min(3, pinchInfo.zoom0 * (dist/pinchInfo.dist)));
+        if(Math.abs(newZoom - pdfZoom) > 0.02){ pdfZoom = +newZoom.toFixed(3); renderCurrentPdfPage(); }
+      }
+    });
+    function endPointer(e){ pointers.delete(e.pointerId); if(pointers.size<2) pinchInfo=null; }
+    pdfCanvasWrapEl.addEventListener('pointerup', endPointer);
+    pdfCanvasWrapEl.addEventListener('pointercancel', endPointer);
+  })();
+
   function openPdfPanel(){
     pdfPanelEl.classList.add('open');
     pdfResizeHandleEl.classList.add('open');
@@ -3796,6 +4182,8 @@ window.OcrEngine = (function(){
     currentPdfDoc = null; currentPdfMeta = null;
     pdfLibraryList.innerHTML = '';
     pdfLibraryBtnLabel.textContent = 'Elegí un PDF';
+    pdfSearchBarEl.classList.remove('open');
+    pdfResetSearch();
     showPdfEmpty();
   }
 
@@ -3967,7 +4355,7 @@ window.OcrEngine = (function(){
       sw.className = 'swatch' + (hex.toLowerCase()===active.toLowerCase() ? ' active':'');
       sw.style.background = hex; sw.title = name || hex;
       sw.addEventListener('click', ()=>{
-        if(usesMark) markColor = hex; else inkColor = hex;
+        if(usesMark) markColor = hex; else { inkColor = hex; inkColorIsDefault = false; }
         renderSwatches();
       });
       return sw;
@@ -3988,10 +4376,21 @@ window.OcrEngine = (function(){
     swatchesEl.appendChild(addSw);
   }
 
+  // Si el usuario todavía no eligió un color de tinta a mano (inkColorIsDefault),
+  // el color por defecto sigue al tema en vivo: pasar a oscuro pone tinta
+  // blanca, volver a claro la vuelve a poner grafito. Una vez que se elige un
+  // color explícitamente, este listener no vuelve a tocarlo.
+  window.addEventListener('cuaderno:themechange', (event)=>{
+    if(!inkColorIsDefault) return;
+    const isLight = !!(event.detail && event.detail.theme === 'light');
+    inkColor = isLight ? INK_DEFAULT_LIGHT : INK_DEFAULT_DARK;
+    renderSwatches();
+  });
+
   colorPickerInput.addEventListener('input', ()=>{
     const hex = colorPickerInput.value;
     const usesMark = !!colorPickerInput.dataset.usesMark;
-    if(usesMark) markColor = hex; else inkColor = hex;
+    if(usesMark) markColor = hex; else { inkColor = hex; inkColorIsDefault = false; }
     renderSwatches();
   });
   colorPickerInput.addEventListener('change', async ()=>{
@@ -4706,20 +5105,20 @@ window.OcrEngine = (function(){
   }
 
   // Funciones de bajo nivel: dibujan sobre cualquier contexto (visible, base o buffer)
-  function dotTo(targetCtx, stroke, style){
+  function dotTo(targetCtx, stroke, style, taperOpts){
     const p = stroke.points[0];
     targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, 0); targetCtx.globalCompositeOperation = style.composite;
     targetCtx.fillStyle = stroke.color;
     targetCtx.beginPath();
-    targetCtx.arc(p.x, p.y, widthForStroke(stroke, p.p) / 2, 0, Math.PI*2);
+    targetCtx.arc(p.x, p.y, widthForStroke(stroke, p.p, 0, taperOpts) / 2, 0, Math.PI*2);
     targetCtx.fill();
     targetCtx.globalAlpha = 1; targetCtx.globalCompositeOperation = 'source-over';
   }
-  function segmentTo(targetCtx, stroke, i0, i1, style){
+  function segmentTo(targetCtx, stroke, i0, i1, style, taperOpts){
     const p0 = stroke.points[i0], p1 = stroke.points[i1];
     targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, i1); targetCtx.globalCompositeOperation = style.composite;
     targetCtx.strokeStyle = stroke.color;
-    targetCtx.lineWidth = widthForStroke(stroke, p1.p);
+    targetCtx.lineWidth = widthForStroke(stroke, p1.p, i1, taperOpts);
     targetCtx.lineJoin = 'round'; targetCtx.lineCap = 'round';
     targetCtx.beginPath();
     targetCtx.moveTo(p0.x, p0.y);
@@ -4750,6 +5149,8 @@ window.OcrEngine = (function(){
     const pts = stroke.points;
     const n = pts.length;
     if(n < 2) return;
+    // Sin opts.end: el afinado final NO se aplica acá porque, en vivo, el
+    // trazo todavía puede seguir creciendo (ver nota en taperFactor).
     if(n === 2){ segmentTo(targetCtx, stroke, 0, 1, style); return; }
     const i = n - 2; // punto que ya tiene vecino anterior Y siguiente
     const p0 = pts[i-1], p1 = pts[i], p2 = pts[i+1];
@@ -4758,7 +5159,7 @@ window.OcrEngine = (function(){
     targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, i);
     targetCtx.globalCompositeOperation = style.composite;
     targetCtx.strokeStyle = stroke.color;
-    targetCtx.lineWidth = widthForStroke(stroke, p1.p);
+    targetCtx.lineWidth = widthForStroke(stroke, p1.p, i);
     targetCtx.lineJoin = 'round'; targetCtx.lineCap = 'round';
     targetCtx.beginPath();
     targetCtx.moveTo(start.x, start.y);
@@ -4775,7 +5176,7 @@ window.OcrEngine = (function(){
     targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, n-1);
     targetCtx.globalCompositeOperation = style.composite;
     targetCtx.strokeStyle = stroke.color;
-    targetCtx.lineWidth = widthForStroke(stroke, last.p);
+    targetCtx.lineWidth = widthForStroke(stroke, last.p, n-1, {end:true});
     targetCtx.lineJoin = 'round'; targetCtx.lineCap = 'round';
     targetCtx.beginPath();
     targetCtx.moveTo(start.x, start.y);
@@ -4788,7 +5189,7 @@ window.OcrEngine = (function(){
     const n = pts.length;
     if(n === 0) return;
     if(n === 1){ dotTo(targetCtx, stroke, style); return; }
-    if(n === 2){ segmentTo(targetCtx, stroke, 0, 1, style); return; }
+    if(n === 2){ segmentTo(targetCtx, stroke, 0, 1, style, {end:true}); return; }
     for(let i=1;i<n-1;i++){
       const p0 = pts[i-1], p1 = pts[i], p2 = pts[i+1];
       const start = (i === 1) ? p0 : midpoint(p0, p1);
@@ -4796,7 +5197,10 @@ window.OcrEngine = (function(){
       targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, i);
       targetCtx.globalCompositeOperation = style.composite;
       targetCtx.strokeStyle = stroke.color;
-      targetCtx.lineWidth = widthForStroke(stroke, p1.p);
+      // Acá sí se conoce el trazo COMPLETO y cerrado (redibujo final o de
+      // exportación), así que el afinado de ambas puntas (opts.end) es
+      // seguro: no hay riesgo de "cortar" un trazo que en realidad sigue.
+      targetCtx.lineWidth = widthForStroke(stroke, p1.p, i, {end:true});
       targetCtx.lineJoin = 'round'; targetCtx.lineCap = 'round';
       targetCtx.beginPath();
       targetCtx.moveTo(start.x, start.y);
@@ -5102,6 +5506,16 @@ window.OcrEngine = (function(){
       rawCopy(bufferCanvas, baseCtx, {clear:false, alpha:styleFor(t).alpha, composite:styleFor(t).composite});
       restoreFromBase();
       clearBuffer();
+    } else if(t === 'pen') {
+      // Al soltar es cuando por fin se conoce el trazo completo, así que
+      // recién acá se puede afinar la punta FINAL con seguridad (ver
+      // taperFactor). Se redibuja el trazo entero sobre una base limpia en
+      // vez de solo el último tramito: es un costo chico y único (una vez
+      // por trazo, no por movimiento) y garantiza que el afinado del inicio
+      // y del final se vean parejos con el resto de la curva.
+      restoreFromBase();
+      drawFreehandSmooth(ctx, currentStroke, styleFor(t));
+      rawCopy(canvas, baseCtx);
     } else if(t) {
       drawFreehandTail(ctx, currentStroke, styleFor(t));
       rawCopy(canvas, baseCtx);
@@ -5172,7 +5586,17 @@ window.OcrEngine = (function(){
     saveTimer = setTimeout(async ()=>{
       const ok = await savePageStrokes();
       showStatus(ok ? 'Guardado' : 'Sin conexión (solo en esta sesión)');
-      updateFolderThumbnail(currentFolderId);
+      // La miniatura no es urgente (es cosmética, para el listado de
+      // carpetas) y renderizar la hoja entera de nuevo puede tardar unos
+      // milisegundos en páginas con muchos trazos. Antes se hacía en el
+      // mismo tick que el guardado, justo cuando el usuario suele retomar
+      // el trazo siguiente — eso es lo que se sentía como una microtrabada
+      // al escribir rápido y seguido. requestIdleCallback la corre cuando
+      // el navegador de verdad está libre (con un tope de 1.5s por si el
+      // hilo principal está siempre ocupado, para que igual se actualice).
+      const genThumb = ()=> updateFolderThumbnail(currentFolderId);
+      if('requestIdleCallback' in window) requestIdleCallback(genThumb, {timeout:1500});
+      else setTimeout(genThumb, 300);
     }, 250);
   }
   function showStatus(text){
@@ -7129,6 +7553,13 @@ window.OcrEngine = (function(){
 
   vbBoard.addEventListener('pointerdown', e=>{
     if(vbView.style.display==='none') return;
+    // El panel de PDFs (biblioteca, visor, sus herramientas de lápiz/marcador/
+    // goma y los controles de página/zoom) vive anidado dentro de vbBoard en
+    // el DOM, así que sin este guard cada toque ahí burbujeaba hasta acá:
+    // vbBoard hacía setPointerCapture sobre sí mismo y "robaba" el puntero
+    // antes de que el botón llegara a disparar su click, dejando los botones
+    // del visor de PDF sin efecto aparente.
+    if(e.target.closest('#vbPdfPanel')) return;
     if(e.pointerType==='mouse' && e.button!==0) return;
     const isDrawingTool=vTool==='pen' || vTool==='highlighter' || vTool==='eraser';
     if(isDrawingTool && !vbDrawingPointerAllowed(e)) return;
@@ -7189,6 +7620,7 @@ window.OcrEngine = (function(){
   vbBoard.addEventListener('wheel', e=>{ e.preventDefault(); vbZoomAt(Math.exp(-e.deltaY*.0018), e.clientX, e.clientY); }, {passive:false});
 
   vbBoard.addEventListener('touchstart', e=>{
+    if(e.target.closest('#vbPdfPanel')) return;
     if(e.touches.length===2){
       e.preventDefault();
       const a=e.touches[0], b=e.touches[1];
@@ -8315,7 +8747,8 @@ window.OcrEngine = (function(){
         if(!firstAddedRecord) firstAddedRecord = record;
       }catch(err){
         console.error(err);
-        alert('No se pudo procesar "' + file.name + '". Probá con otro archivo.');
+        const detail = (err && (err.message || err.name)) ? (err.message || err.name) : String(err);
+        alert('No se pudo procesar "' + file.name + '".\n\nDetalle: ' + detail + '\n\nProbá con otro archivo.');
       }
     }
     vbPdfAddBtn.disabled = false;
