@@ -6,18 +6,6 @@
 <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
 <meta name="color-scheme" content="dark">
 <title>Mis Notas</title>
-<script>
-// Aplica el tema guardado ANTES de que se pinte nada: si esto se hiciera
-// más tarde (por ejemplo junto con el resto de la app), se vería un
-// parpadeo de un tema al otro apenas se carga la página.
-(function(){
-  try{
-    var t = localStorage.getItem('app-theme');
-    if(t !== 'light' && t !== 'dark') t = 'dark';
-    document.documentElement.setAttribute('data-theme', t);
-  }catch(e){}
-})();
-</script>
 
 <!-- PWA -->
 <link rel="manifest" href="manifest.json">
@@ -151,26 +139,13 @@ window.OcrEngine = (function(){
     const m = a.length, n = b.length;
     if(m === 0) return n;
     if(n === 0) return m;
-    // Costo de sustitución reducido entre letras que la letra cursiva
-    // confunde muy seguido entre sí (h/n/m/u: comparten la misma "silueta"
-    // de palitos y jorobas, y solo cambian en la altura del asta o en
-    // cuántas jorobas tienen). Así, una palabra mal leída por una de estas
-    // confusiones queda más cerca de la palabra correcta y es más fácil que
-    // la corrección por diccionario la enganche.
-    const CONFUSABLE = {h:'nm', n:'hmu', m:'hn', u:'n'};
-    function subCost(x, y){
-      if(x===y) return 0;
-      if((CONFUSABLE[x]||'').indexOf(y)!==-1) return 0.5;
-      if((CONFUSABLE[y]||'').indexOf(x)!==-1) return 0.5;
-      return 1;
-    }
     const dp = new Array(n+1);
     for(let j=0;j<=n;j++) dp[j] = j;
     for(let i=1;i<=m;i++){
       let prev = dp[0]; dp[0] = i;
       for(let j=1;j<=n;j++){
         const tmp = dp[j];
-        dp[j] = Math.min(prev + subCost(a[i-1], b[j-1]), dp[j] + 1, dp[j-1] + 1);
+        dp[j] = a[i-1]===b[j-1] ? prev : 1 + Math.min(prev, dp[j], dp[j-1]);
         prev = tmp;
       }
     }
@@ -352,43 +327,6 @@ window.OcrEngine = (function(){
 
   return { recognizeWord, recognizeAuto, binarizeImageData, preload, isEnabled, setEnabled, estimateSlant, correctWord, correctTextBlock };
 })();
-
-// ---------- Tema (claro/oscuro) ----------
-// Módulo mínimo, compartido por los distintos <script> de la app (cada uno
-// corre en su propio scope y no comparte variables entre sí — por eso vive
-// colgado de window, igual que OcrEngine). Guarda la preferencia en
-// localStorage, actualiza el atributo que activan las reglas CSS
-// (html[data-theme="light"]), sincroniza los meta tags de color de la barra
-// del navegador/PWA, y avisa por evento a quien esté escuchando para que
-// cada interruptor en pantalla (cuaderno, pizarra, inicio) se mantenga en
-// sincro sin importar desde dónde se cambió el tema.
-window.AppTheme = (function(){
-  const KEY = 'app-theme';
-  const COLORS = { dark:'#1B1D24', light:'#F7F5EF' };
-  function get(){
-    try{ return localStorage.getItem(KEY) === 'light' ? 'light' : 'dark'; }
-    catch(e){ return 'dark'; }
-  }
-  function set(theme){
-    const t = theme === 'light' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', t);
-    try{ localStorage.setItem(KEY, t); }catch(e){}
-    const color = COLORS[t];
-    const metaColor = document.querySelector('meta[name="theme-color"]');
-    const metaBg = document.querySelector('meta[name="background-color"]');
-    const metaScheme = document.querySelector('meta[name="color-scheme"]');
-    if(metaColor) metaColor.setAttribute('content', color);
-    if(metaBg) metaBg.setAttribute('content', color);
-    if(metaScheme) metaScheme.setAttribute('content', t);
-    try{ window.dispatchEvent(new CustomEvent('themeChange', {detail:{theme:t}})); }catch(e){}
-  }
-  function toggle(){ set(get()==='light' ? 'dark' : 'light'); }
-  // El <head> ya aplicó el atributo data-theme antes de pintar (para evitar
-  // el parpadeo); acá solo sincronizamos los meta tags con lo que haya
-  // quedado aplicado, sin volver a tocar el atributo.
-  set(get());
-  return { get, set, toggle };
-})();
 </script>
 <style>
   :root{
@@ -397,19 +335,6 @@ window.AppTheme = (function(){
     --cream:#EDEDF2; --cream-dim:#9799A6;
     --pine:#3448C5; --danger:#B23A48; --line-blue:#AFC4DA; --grid-line:#DCD3C0; --dot:#C7BCA5;
     --desk:#15161B;
-  }
-  /* ---------- Tema claro ----------
-     Solo se redefinen las variables de "cromado" de la app (fondos, texto,
-     bordes, acento): --paper, --grid-line, --line-blue, --dot e --ink
-     quedan IGUAL en los dos temas a propósito, porque representan el color
-     de LA HOJA (rayado, cuadriculado, punteado), que siempre es clara —
-     igual que en un cuaderno de papel real, no cambia con la luz del
-     cuarto. Lo que cambia es la interfaz alrededor de la hoja. */
-  html[data-theme="light"]{
-    --panel:#F7F5EF; --panel-2:#ECE9E0; --panel-edge:#D9D4C7;
-    --cream:#25262B; --cream-dim:#6C6F79;
-    --pine:#3448C5; --danger:#B23A48;
-    --desk:#E4E0D3;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
   button, .tab, .swatch, input[type=range], #kebabBtn, .zoombtn{ touch-action:manipulation; }
@@ -451,23 +376,64 @@ window.AppTheme = (function(){
     font-size:10px;letter-spacing:.18em;color:var(--cream-dim);font-weight:600;
     margin-bottom:5px;text-transform:uppercase;
   }
+  #homeBrand{display:flex;align-items:flex-start;gap:10px;min-width:0;}
+  #homeBrandText{min-width:0;}
   #homeHeader h1{
     font-family:'Source Serif 4',Georgia,serif;font-size:24px;font-weight:600;
     color:var(--cream);margin:0;
   }
+  #homeHeaderActions{display:flex;align-items:center;gap:8px;flex-shrink:0;}
+  #homeMenuBtn{
+    width:42px;height:42px;border:1px solid var(--panel-edge);border-radius:12px;
+    background:var(--panel-2);color:var(--cream);display:flex;align-items:center;justify-content:center;
+    cursor:pointer;transition:background .15s,border-color .15s,transform .15s;box-shadow:0 4px 12px rgba(0,0,0,.18);
+  }
+  #homeMenuBtn:hover{background:var(--panel-edge);border-color:var(--cream-dim);transform:translateY(-1px);}
+  #homeMenuBtn svg{width:20px;height:20px;}
+  #homeMenuBtn[aria-expanded="true"]{background:var(--pine);border-color:var(--pine);color:#fff;}
+  #folderDrawerBackdrop{
+    position:fixed;inset:0;z-index:68;background:rgba(0,0,0,.52);opacity:0;pointer-events:none;
+    transition:opacity .2s ease;backdrop-filter:blur(2px);
+  }
+  #folderDrawerBackdrop.open{opacity:1;pointer-events:auto;}
+  #folderDrawer{
+    position:fixed;z-index:69;top:0;left:0;bottom:0;width:min(360px,88vw);
+    padding:calc(14px + env(safe-area-inset-top)) 14px calc(14px + env(safe-area-inset-bottom));
+    background:linear-gradient(180deg,var(--panel-2),var(--panel));border-right:1px solid var(--panel-edge);
+    box-shadow:18px 0 42px rgba(0,0,0,.38);display:flex;flex-direction:column;gap:12px;
+    transform:translateX(-100%);visibility:hidden;pointer-events:none;
+    transition:transform .22s cubic-bezier(.2,.8,.2,1),visibility .22s;
+  }
+  #folderDrawer.open{transform:translateX(0);visibility:visible;pointer-events:auto;}
+  #folderDrawerHeader{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:2px 2px 10px;border-bottom:1px solid var(--panel-edge);}
+  #folderDrawerTitle{display:flex;align-items:center;gap:9px;color:var(--cream);font:600 15px 'Inter',sans-serif;}
+  #folderDrawerTitle svg{width:18px;height:18px;color:var(--pine);}
+  #folderDrawerClose{width:32px;height:32px;border:1px solid var(--panel-edge);border-radius:9px;background:transparent;color:var(--cream-dim);display:flex;align-items:center;justify-content:center;cursor:pointer;}
+  #folderDrawerClose:hover{background:var(--panel-edge);color:var(--cream);}
+  #folderDrawerClose svg{width:16px;height:16px;}
+  #folderDrawerHint{margin:0;color:var(--cream-dim);font-size:11.5px;line-height:1.45;}
+  #folderDrawerList{display:flex;flex-direction:column;gap:6px;overflow-y:auto;min-height:0;padding:2px;}
+  #folderDrawerList::-webkit-scrollbar{width:4px;}
+  #folderDrawerList::-webkit-scrollbar-thumb{background:var(--panel-edge);border-radius:6px;}
+  .folderDrawerItem{
+    width:100%;border:1px solid transparent;border-radius:11px;background:rgba(255,255,255,.035);color:var(--cream);
+    display:flex;align-items:center;gap:10px;padding:10px 10px;text-align:left;cursor:pointer;transition:background .15s,border-color .15s,transform .15s;
+  }
+  .folderDrawerItem:hover{background:rgba(255,255,255,.08);border-color:var(--panel-edge);transform:translateX(2px);}
+  .folderDrawerDot{width:10px;height:10px;border-radius:50%;flex:0 0 10px;box-shadow:0 0 0 3px rgba(255,255,255,.06);}
+  .folderDrawerIcon{width:30px;height:30px;border-radius:9px;background:var(--panel);display:flex;align-items:center;justify-content:center;font-size:17px;flex:0 0 30px;}
+  .folderDrawerText{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;}
+  .folderDrawerName{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .folderDrawerPath{font-size:10.5px;color:var(--cream-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .folderDrawerArrow{width:15px;height:15px;color:var(--cream-dim);flex:0 0 15px;}
+  #folderDrawerEmpty{display:none;margin:24px 8px;text-align:center;color:var(--cream-dim);font-size:12px;line-height:1.5;}
+  #folderDrawerEmpty.show{display:block;}
   #addFolderBtn{
     background:var(--pine);border:none;color:#fff;font-family:'Inter',sans-serif;
     font-weight:600;font-size:13px;padding:10px 16px;border-radius:10px;cursor:pointer;
     display:flex;align-items:center;gap:7px;flex-shrink:0;
   }
   #addFolderBtn:hover{opacity:.9;}
-  #themeToggleBtn{
-    background:var(--panel-2);border:1px solid var(--panel-edge);color:var(--cream-dim);
-    width:36px;height:36px;border-radius:10px;cursor:pointer;flex-shrink:0;
-    display:flex;align-items:center;justify-content:center;
-  }
-  #themeToggleBtn:hover{color:var(--cream);border-color:var(--pine);}
-  #themeToggleBtn svg{width:17px;height:17px;flex-shrink:0;}
   #folderBreadcrumb{
     display:none;align-items:center;flex-wrap:wrap;gap:5px;
     padding:0 16px 6px;font-size:12.5px;color:var(--cream-dim);
@@ -517,7 +483,6 @@ window.AppTheme = (function(){
     background:var(--accent, var(--pine));z-index:2;
   }
   .folderThumb img{width:100%;height:100%;object-fit:cover;object-position:top;display:block;}
-  .folderThumb .folderIcon{width:34%;height:34%;color:var(--dot);opacity:.6;}
   .folderThumbLines{
     position:absolute;left:22px;top:26px;right:14px;display:flex;
     flex-direction:column;gap:11px;z-index:1;
@@ -561,6 +526,18 @@ window.AppTheme = (function(){
     background-image:radial-gradient(var(--dot) 1.4px, transparent 1.4px);
     background-size:13px 13px; background-position:10px 11px;
   }
+  .folderThumb.style-paper{
+    background-color:var(--paper);
+    background-image:linear-gradient(115deg,rgba(255,255,255,.55),transparent 38%),repeating-linear-gradient(0deg,rgba(80,70,55,.05) 0 1px,transparent 1px 6px);
+  }
+  .folderThumb.style-gradient{
+    background:linear-gradient(145deg,var(--accent),rgba(255,255,255,.24) 48%,rgba(0,0,0,.22));
+  }
+  .folderThumb.style-waves{
+    background-color:var(--paper);
+    background-image:radial-gradient(ellipse at 0 100%,transparent 0 45%,var(--accent) 46% 52%,transparent 53%),radial-gradient(ellipse at 100% 0,transparent 0 45%,rgba(255,255,255,.48) 46% 52%,transparent 53%);
+    background-size:100% 62%,100% 62%;background-position:0 100%,0 0;background-repeat:no-repeat;
+  }
   .folderThumb .folderCoverIcon{
     font-size:38px;z-index:1;filter:drop-shadow(0 2px 5px rgba(0,0,0,.3));
   }
@@ -597,28 +574,37 @@ window.AppTheme = (function(){
     width:100%;background:var(--panel);border:1px solid var(--panel-edge);color:var(--cream);
     border-radius:8px;padding:10px 11px;font-family:'Inter',sans-serif;font-size:14px;
   }
-  #feNamePreviewWrap{display:flex;gap:14px;align-items:flex-start;margin-bottom:16px;}
-  #fePreviewThumb{width:64px;flex-shrink:0;box-shadow:0 4px 12px rgba(0,0,0,.35);}
-  #feSegmented{display:flex;gap:5px;background:var(--panel);border-radius:9px;padding:3px;}
+  #feNamePreviewWrap{display:flex;gap:14px;align-items:flex-start;margin-bottom:18px;}
+  #fePreviewColumn{display:flex;flex-direction:column;align-items:center;gap:5px;flex:0 0 74px;}
+  .fe-preview-label{font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--cream-dim);font-weight:700;}
+  #fePreviewThumb{width:68px;flex-shrink:0;box-shadow:0 5px 14px rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12);}
+  #feSegmented{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;background:transparent;border-radius:0;padding:0;}
   #feSegmented button{
-    flex:1;border:none;background:transparent;color:var(--cream-dim);font-family:'Inter',sans-serif;
-    font-size:12px;font-weight:600;padding:8px 6px;border-radius:7px;cursor:pointer;
+    min-height:70px;border:1px solid var(--panel-edge);background:var(--panel);color:var(--cream-dim);font-family:'Inter',sans-serif;
+    font-size:11px;font-weight:600;padding:9px 6px;border-radius:10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;transition:background .15s,border-color .15s,color .15s,transform .15s;
   }
-  #feSegmented button.active{background:var(--pine);color:#fff;}
+  #feSegmented button:hover{border-color:var(--cream-dim);transform:translateY(-1px);}
+  #feSegmented button.active{background:rgba(52,72,197,.22);border-color:var(--pine);color:var(--cream);box-shadow:0 4px 12px rgba(52,72,197,.16);}
+  #feSegmented button svg{width:21px;height:21px;color:var(--cream-dim);}
+  #feSegmented button.active svg{color:#8EA7FF;}
   .fe-swatchGrid{display:flex;flex-wrap:wrap;gap:9px;}
   .fe-colorSwatch{
     width:26px;height:26px;border-radius:50%;cursor:pointer;border:2px solid transparent;
     box-shadow:inset 0 0 0 1px rgba(0,0,0,.25);
   }
   .fe-colorSwatch.active{border-color:var(--cream);}
-  .fe-styleGrid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;}
+  .fe-styleGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
   .fe-styleOpt{
-    aspect-ratio:3/4;border-radius:7px;border:2px solid transparent;cursor:pointer;
-    background:var(--paper);position:relative;overflow:hidden;display:flex;
-    align-items:center;justify-content:center;
+    min-height:108px;border-radius:10px;border:1px solid var(--panel-edge);cursor:pointer;
+    background:var(--panel);position:relative;overflow:hidden;display:flex;flex-direction:column;gap:6px;
+    align-items:center;justify-content:center;padding:7px 5px;transition:border-color .15s,background .15s,transform .15s;
   }
-  .fe-styleOpt.active{border-color:var(--pine);}
+  .fe-styleOpt:hover{border-color:var(--cream-dim);transform:translateY(-1px);}
+  .fe-styleOpt.active{border-color:var(--pine);background:rgba(52,72,197,.16);box-shadow:0 4px 12px rgba(52,72,197,.14);}
+  .fe-styleOpt .folderThumb{width:52px;height:70px;aspect-ratio:auto;flex:0 0 auto;border-radius:6px;box-shadow:0 3px 8px rgba(0,0,0,.28);}
   .fe-styleOpt .folderCoverIcon{font-size:18px;}
+  .fe-styleLabel{font-size:10.5px;color:var(--cream-dim);font-weight:600;}
+  .fe-styleOpt.active .fe-styleLabel{color:var(--cream);}
   .fe-emojiGrid{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px;}
   .fe-emojiOpt{
     width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;
@@ -645,8 +631,51 @@ window.AppTheme = (function(){
   #feCancelBtn{background:var(--panel);color:var(--cream-dim);}
   #feSaveBtn{background:var(--pine);color:#fff;}
 
+  /* ---------- Selector de tema claro / oscuro ---------- */
+  :root[data-theme="light"]{
+    --panel:#F5F7FB; --panel-2:#FFFFFF; --panel-edge:#D9DFEA;
+    --cream:#202638; --cream-dim:#687187; --pine:#4864D8;
+    --danger:#B23A48; --desk:#E9EDF5;
+  }
+  :root[data-theme="light"] body{color-scheme:light;}
+  :root[data-theme="light"] #app{background:var(--panel);}
+  :root[data-theme="light"] #homeHeader,
+  :root[data-theme="light"] #homeView{background:var(--panel);}
+  #themeToggleBtn,
+  .themeToggleBtn{
+    width:42px;height:42px;border:1px solid var(--panel-edge);border-radius:12px;
+    background:var(--panel-2);color:var(--cream);display:flex;align-items:center;justify-content:center;
+    cursor:pointer;transition:background .18s ease,border-color .18s ease,transform .18s ease,box-shadow .18s ease;
+    box-shadow:0 4px 12px rgba(0,0,0,.14);flex-shrink:0;
+  }
+  #themeToggleBtn:hover,
+  .themeToggleBtn:hover{background:var(--panel-edge);border-color:var(--pine);transform:translateY(-1px);box-shadow:0 6px 15px rgba(0,0,0,.18);}
+  #themeToggleBtn:focus-visible,
+  .themeToggleBtn:focus-visible{outline:2px solid var(--pine);outline-offset:2px;}
+  #themeToggleBtn svg,
+  .themeToggleBtn svg{width:19px;height:19px;transition:transform .25s ease;}
+  #themeToggleBtn:hover svg,
+  .themeToggleBtn:hover svg{transform:rotate(18deg) scale(1.06);}
+  #themeToggleBtn .icon-moon,
+  .themeToggleBtn .icon-moon{display:block;}
+  #themeToggleBtn .icon-sun,
+  .themeToggleBtn .icon-sun{display:none;}
+  :root[data-theme="light"] #themeToggleBtn .icon-moon,
+  :root[data-theme="light"] .themeToggleBtn .icon-moon{display:none;}
+  :root[data-theme="light"] #themeToggleBtn .icon-sun,
+  :root[data-theme="light"] .themeToggleBtn .icon-sun{display:block;}
+
   @media (max-width:600px){
     #folderEditModal{padding:16px 16px calc(16px + env(safe-area-inset-bottom));}
+    #homeHeader{align-items:flex-start;padding:16px 12px 6px;}
+    #homeHeaderActions{gap:6px;}
+    #addFolderBtn{padding:10px 12px;}
+    #homeMenuBtn{width:40px;height:40px;}
+    #folderDrawer{width:min(340px,92vw);}
+    #feSegmented button{min-height:66px;font-size:10.5px;}
+    .fe-styleGrid{grid-template-columns:repeat(3,1fr);gap:6px;}
+    .fe-styleOpt{min-height:100px;}
+    .fe-styleOpt .folderThumb{width:46px;height:62px;}
   }
 
   #backHomeBtn{
@@ -720,15 +749,27 @@ window.AppTheme = (function(){
   .divider{width:1px;height:20px;background:var(--panel-edge);flex-shrink:0;}
 
   button.tool{
-    background:var(--panel-2);border:1px solid var(--panel-edge);
-    color:var(--cream-dim);width:30px;height:30px;border-radius:7px;
+    position:relative;overflow:hidden;
+    background:linear-gradient(145deg,var(--panel-2),var(--panel));
+    border:1px solid var(--panel-edge);color:var(--cream-dim);
+    width:32px;height:32px;border-radius:9px;
     cursor:pointer;display:flex;align-items:center;justify-content:center;
-    transition:background .15s,color .15s,border-color .15s;padding:0;flex-shrink:0;
-    touch-action:manipulation;
+    transition:background .18s ease,color .18s ease,border-color .18s ease,transform .18s ease,box-shadow .18s ease;
+    padding:0;flex-shrink:0;touch-action:manipulation;
+    box-shadow:0 2px 5px rgba(0,0,0,.16),inset 0 1px 0 rgba(255,255,255,.035);
   }
-  button.tool svg{width:16px;height:16px;}
-  button.tool:hover{color:var(--cream);}
-  button.tool.active{background:var(--pine);border-color:var(--pine);color:#fff;}
+  button.tool::after{
+    content:"";position:absolute;inset:1px;border-radius:8px;pointer-events:none;
+    background:linear-gradient(135deg,rgba(255,255,255,.07),transparent 45%);
+    opacity:0;transition:opacity .18s ease;
+  }
+  button.tool svg{width:18px;height:18px;position:relative;z-index:1;stroke-width:1.8;transition:transform .18s ease,filter .18s ease;}
+  button.tool:hover{color:var(--cream);border-color:var(--pine);transform:translateY(-1px);box-shadow:0 5px 12px rgba(0,0,0,.22),0 0 0 3px rgba(111,145,112,.10);}
+  button.tool:hover::after{opacity:1;}
+  button.tool:hover svg{transform:scale(1.07);filter:drop-shadow(0 2px 2px rgba(0,0,0,.2));}
+  button.tool.active{background:linear-gradient(145deg,var(--pine),#4e7356);border-color:#86ad89;color:#fff;box-shadow:0 4px 12px rgba(80,120,88,.32),inset 0 1px 0 rgba(255,255,255,.16);}
+  button.tool.active::after{opacity:1;background:linear-gradient(135deg,rgba(255,255,255,.14),transparent 52%);}
+  button.tool:focus-visible{outline:2px solid #b7d7b8;outline-offset:2px;}
   button.tool[disabled],button.icon[disabled],button.zoombtn[disabled]{
     opacity:.35;cursor:not-allowed;pointer-events:none;
   }
@@ -1347,17 +1388,38 @@ window.AppTheme = (function(){
   #vectorPanelView{
     display:none;position:fixed;inset:0;z-index:500;
     --vb-ui:#1B1D24;--vb-ui-2:#20222B;--vb-ink:#EEF0F5;--vb-muted:#9799A6;--vb-line:#2C2F38;--vb-accent:#4F7CFF;
-    --vb-float-bg:rgba(27,29,36,.94);--vb-float-bg-soft:rgba(27,29,36,.7);
+    --vb-board:#11141A;--vb-grid-line:#2A303B;--vb-grid-dot:#454B58;
     font-family:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    color-scheme:dark;background:var(--vb-board);
   }
-  /* Mismo criterio que el resto de la app: el tema claro solo cambia el
-     cromado de la interfaz de la pizarra, no el color de la hoja en sí
-     (#vbBoard sigue blanco en los dos temas, como el papel real). */
-  html[data-theme="light"] #vectorPanelView{
-    --vb-ui:#F7F5EF;--vb-ui-2:#ECE9E0;--vb-ink:#25262B;--vb-muted:#6C6F79;--vb-line:#D9D4C7;--vb-accent:#3448C5;
-    --vb-float-bg:rgba(255,255,255,.96);--vb-float-bg-soft:rgba(255,255,255,.8);
+  #vectorPanelView.vb-light{
+    --vb-ui:#FFFFFF;--vb-ui-2:#F3F5F9;--vb-ink:#20242D;--vb-muted:#6F7684;--vb-line:#DDE2EA;--vb-accent:#4169E1;
+    --vb-board:#F4F6FA;--vb-grid-line:#DCE2EB;--vb-grid-dot:#C4CCD8;
+    color-scheme:light;
   }
-  #vectorPanelView #vbBoard{position:fixed;left:0;right:0;bottom:0;top:var(--vb-board-top,var(--vb-header-h,108px));background:#fff;touch-action:none;cursor:crosshair;}
+  #vectorPanelView.vb-light #vbHeader{box-shadow:0 8px 24px rgba(35,45,65,.12);}
+  #vectorPanelView.vb-light #vbToolbar button:hover,
+  #vectorPanelView.vb-light #vbToolbar select:hover,
+  #vectorPanelView.vb-light #vbCloseBtn:hover,
+  #vectorPanelView.vb-light #vbUploadPdfBtn:hover,
+  #vectorPanelView.vb-light .vpTool:hover,
+  #vectorPanelView.vb-light #vbPdfPanelClose:hover{background:#E9EDF4;color:var(--vb-ink);}
+  #vectorPanelView.vb-light #vbSettingsPanel,
+  #vectorPanelView.vb-light .vbChoicePanel,
+  #vectorPanelView.vb-light #vbThicknessPanel,
+  #vectorPanelView.vb-light #vbPdfPanel{background:rgba(255,255,255,.98);box-shadow:0 14px 32px rgba(35,45,65,.18);}
+  #vectorPanelView.vb-light #vbSettingsPanel .vbs-switch-track{background:#C9D0DC;}
+  #vectorPanelView.vb-light #vbPatternGrid path{stroke:var(--vb-grid-line);}
+  #vectorPanelView.vb-light #vbPatternLined path{stroke:#CAD5E4;}
+  #vectorPanelView.vb-light #vbPatternDotted circle{fill:var(--vb-grid-dot);}
+  #vectorPanelView.vb-light #vbCloseBtn,
+  #vectorPanelView.vb-light #vbPageSelect,
+  #vectorPanelView.vb-light #vbAddPage{background:var(--vb-ui-2);color:var(--vb-ink);}
+  #vectorPanelView.vb-light select option{background:#fff;color:#20242D;}
+  #vectorPanelView #vbPatternGrid path{stroke:var(--vb-grid-line);}
+  #vectorPanelView #vbPatternDotted circle{fill:var(--vb-grid-dot);}
+  #vectorPanelView #vbPatternLined path{stroke:var(--vb-grid-line);}
+  #vectorPanelView #vbBoard{position:fixed;left:0;right:0;bottom:0;top:var(--vb-board-top,var(--vb-header-h,108px));background:var(--vb-board);touch-action:none;cursor:crosshair;}
   #vectorPanelView #vbSvg{position:absolute;inset:0;width:100%;height:100%;display:block;}
   #vectorPanelView #vbGrid{pointer-events:none;}
   #vectorPanelView #vbPageRect{pointer-events:none;}
@@ -1366,9 +1428,9 @@ window.AppTheme = (function(){
      nada y la goma quedaba sin efecto. */
   #vectorPanelView #vbObjects{pointer-events:auto;}
   #vectorPanelView #vbObjects .vb-selected{filter:drop-shadow(0 0 5px rgba(79,124,255,.95));stroke-dasharray:6 4;}
-  #vectorPanelView #vbSelectHint{position:fixed;z-index:22;display:none;left:50%;bottom:20px;transform:translateX(-50%);padding:7px 10px;border-radius:8px;background:var(--vb-float-bg);color:var(--vb-ink);font:11px Inter,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.3);}
+  #vectorPanelView #vbSelectHint{position:fixed;z-index:22;display:none;left:50%;bottom:20px;transform:translateX(-50%);padding:7px 10px;border-radius:8px;background:rgba(27,29,36,.94);color:var(--vb-ink);font:11px Inter,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.3);}
   #vectorPanelView #vbSelectHint.show{display:block;}
-  #vectorPanelView.vb-a4-mode #vbBoard{background:var(--desk,#15161B);}
+  #vectorPanelView.vb-a4-mode #vbBoard{background:var(--vb-board);}
   /* Encabezado único, sólido, fijo arriba: agrupa la barra de páginas y la
      barra de herramientas en dos filas dentro de la misma franja oscura,
      en vez de dos "píldoras" flotando sobre la hoja. */
@@ -1394,24 +1456,46 @@ window.AppTheme = (function(){
   @media (max-width:699px){
     #vectorPanelView #vbPageBar{padding:5px 8px 3px;}
     #vectorPanelView #vbToolbar{padding:3px 8px 5px;gap:4px;}
+    #vectorPanelView #vbToolbar button.vb-mode-btn{padding:0 7px;}
+    #vectorPanelView #vbToolbar button.vb-mode-btn span{display:none;}
     #vectorPanelView .vbChoicePanel,#vectorPanelView #vbThicknessPanel{max-width:calc(100vw - 16px);}
   }
-  #vectorPanelView #vbToolbar button, #vectorPanelView .vb-swatch{
+  #vectorPanelView #vbToolbar button{
     border:1px solid var(--vb-line);background:var(--vb-ui-2);color:var(--vb-ink);height:32px;min-width:32px;
     border-radius:9px;cursor:pointer;font-size:15px;display:inline-flex;align-items:center;justify-content:center;
     flex-shrink:0;
   }
-  #vectorPanelView #vbToolbar button:hover{background:var(--vb-line);}
+  #vectorPanelView #vbToolbar button:hover{background:#2A2D38;}
   #vectorPanelView #vbToolbar button.active{background:var(--vb-accent);color:#fff;border-color:var(--vb-accent);}
   #vectorPanelView #vbToolbar button svg{width:16px;height:16px;flex-shrink:0;}
+  #vectorPanelView #vbToolbar button.vb-tool-primary{position:relative;width:38px;min-width:38px;height:38px;border-radius:12px;background:linear-gradient(145deg,#2A3040,#20242F);border-color:#3A4354;box-shadow:0 3px 10px rgba(0,0,0,.18);}
+  #vectorPanelView #vbToolbar button.vb-tool-primary svg{width:20px;height:20px;filter:drop-shadow(0 1px 1px rgba(0,0,0,.22));}
+  #vectorPanelView #vbToolbar button.vb-tool-primary:hover{transform:translateY(-1px);}
+  #vectorPanelView #vbToolbar button.vb-tool-primary.active{background:linear-gradient(145deg,#5D86FF,#4169E1);border-color:#78A0FF;box-shadow:0 4px 14px rgba(65,105,225,.34);}
+  #vectorPanelView #vbToolbar button.vb-tool-primary[data-tool-tone="marker"]{background:linear-gradient(145deg,#3A3447,#292633);}
+  #vectorPanelView #vbToolbar button.vb-tool-primary[data-tool-tone="eraser"]{background:linear-gradient(145deg,#343A46,#292E39);}
+  #vectorPanelView #vbToolbar button.vb-mode-btn{height:32px;min-width:auto;padding:0 9px;gap:6px;border-radius:10px;font:600 11px Inter,sans-serif;color:var(--vb-muted);}
+  #vectorPanelView #vbToolbar button.vb-mode-btn svg{width:15px;height:15px;}
+  #vectorPanelView #vbToolbar button.vb-mode-btn.active{background:rgba(79,124,255,.16);border-color:rgba(79,124,255,.55);color:var(--vb-accent);}
+  #vectorPanelView.vb-light #vbToolbar button.vb-tool-primary{background:linear-gradient(145deg,#F7F9FC,#E8ECF4);border-color:#D7DDE8;box-shadow:0 3px 10px rgba(35,45,65,.12);}
+  #vectorPanelView.vb-light #vbToolbar button.vb-tool-primary.active{background:linear-gradient(145deg,#5D86FF,#4169E1);border-color:#6E92F5;color:#fff;}
+  #vectorPanelView.vb-light #vbToolbar button.vb-tool-primary[data-tool-tone="marker"]{background:linear-gradient(145deg,#F5F0FA,#E9E1F3);}
+  #vectorPanelView.vb-light #vbToolbar button.vb-tool-primary[data-tool-tone="eraser"]{background:linear-gradient(145deg,#F3F5F8,#E5E9F0);}
+  #vectorPanelView.vb-light #vbToolbar button.vb-mode-btn.active{background:#E5EBFF;border-color:#AABCF5;}
+  #vectorPanelView.vb-light .vbChoiceOpt:hover,
+  #vectorPanelView.vb-light .vbChoiceThickOpt:hover,
+  #vectorPanelView.vb-light .vb-thick-opt:hover{background:#E8EDF7;border-color:#AABCF5;color:#20242D;}
+  #vectorPanelView.vb-light .vbChoiceOpt.active,
+  #vectorPanelView.vb-light .vbChoiceThickOpt.active,
+  #vectorPanelView.vb-light .vb-thick-opt.active{color:#fff;}
   #vectorPanelView .vb-sep{width:1px;height:22px;background:var(--vb-line);margin:0 2px;flex:none;flex-shrink:0;}
   #vectorPanelView #vbSize{width:80px;accent-color:var(--vb-accent);flex-shrink:0;}
   #vectorPanelView #vbSizeQuickBtn,#vectorPanelView #vbSizeLabel,#vectorPanelView #vbSize{display:none !important;}
-  #vectorPanelView #vbThicknessPanel{display:none;position:fixed;z-index:30;min-width:220px;padding:10px;background:var(--vb-float-bg);border:1px solid var(--vb-line);border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.5);}
+  #vectorPanelView #vbThicknessPanel{display:none;position:fixed;z-index:30;min-width:220px;padding:10px;background:rgba(27,29,36,.98);border:1px solid var(--vb-line);border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.5);}
   #vectorPanelView #vbThicknessPanel.open{display:block;}
   #vectorPanelView #vbThicknessTitle{font-size:11px;color:var(--vb-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;}
   #vectorPanelView #vbThicknessPresets{display:flex;gap:6px;flex-wrap:wrap;}
-  #vectorPanelView .vb-thick-opt{border:1px solid var(--vb-line);background:var(--vb-ui-2);color:#fff;border-radius:8px;min-width:32px;height:30px;cursor:pointer;}
+  #vectorPanelView .vb-thick-opt{border:1px solid var(--vb-line);background:var(--vb-ui-2);color:var(--vb-ink);border-radius:8px;min-width:32px;height:30px;cursor:pointer;font-weight:600;}
   #vectorPanelView .vb-thick-opt.active{background:var(--vb-accent);border-color:var(--vb-accent);}
   #vectorPanelView #vbSizeLabel{
     display:inline-flex;align-items:center;justify-content:center;width:22px;height:32px;
@@ -1423,7 +1507,7 @@ window.AppTheme = (function(){
     border-radius:9px;cursor:pointer;font-size:12px;font-family:'Inter',sans-serif;
     padding:0 7px;max-width:128px;flex-shrink:0;
   }
-  #vectorPanelView select:hover{background:var(--vb-line);}
+  #vectorPanelView select:hover{background:#2A2D38;}
   #vectorPanelView select option{background:#20222B;color:var(--vb-ink);}
   #vectorPanelView #vbEraserCursor{
     display:none;position:fixed;z-index:9;pointer-events:none;
@@ -1438,7 +1522,7 @@ window.AppTheme = (function(){
     background:rgba(30,32,38,.35);border-radius:2px;
   }
   #vectorPanelView #vbZoom{display:none !important;
-    padding:6px;background:var(--vb-float-bg);border:1px solid var(--vb-line);border-radius:12px;
+    padding:6px;background:rgba(27,29,36,.96);border:1px solid var(--vb-line);border-radius:12px;
     box-shadow:0 5px 20px rgba(0,0,0,.3);
   }
   #vectorPanelView #vbZoom button{height:34px;min-width:34px;}
@@ -1446,22 +1530,35 @@ window.AppTheme = (function(){
   #vectorPanelView #vbZoomPct{width:56px;text-align:center;font-size:13px;color:var(--vb-muted);}
   #vectorPanelView #vbCloseBtn{
     position:static;z-index:20;height:32px;width:32px;min-width:32px;padding:0;
-    border:1px solid var(--vb-line);background:var(--vb-float-bg);color:var(--vb-ink);
+    border:1px solid var(--vb-line);background:rgba(27,29,36,.96);color:var(--vb-ink);
     border-radius:10px;box-shadow:0 5px 20px rgba(0,0,0,.3);cursor:pointer;
     font-family:Inter,sans-serif;font-weight:600;font-size:13px;
     display:flex;align-items:center;justify-content:center;gap:6px;flex:0 0 32px;
   }
-  #vectorPanelView #vbCloseBtn:hover{background:var(--vb-line);}
+  #vectorPanelView #vbCloseBtn:hover{background:#2A2D38;}
   #vectorPanelView #vbCloseBtn svg{width:14px;height:14px;flex-shrink:0;}
   #vectorPanelView #vbFolderName{display:none;}
-  #vectorPanelView #vbPageNav{display:flex;align-items:center;gap:6px;flex-shrink:0;}
-  #vectorPanelView #vbPageSelect{height:32px;max-width:140px;min-width:90px;padding:0 7px;border:1px solid var(--vb-line);border-radius:9px;background:var(--vb-float-bg);color:var(--vb-ink);font:12.5px Inter,system-ui,sans-serif;box-shadow:0 7px 28px rgba(0,0,0,.35);backdrop-filter:blur(12px);}
-  #vectorPanelView #vbAddPage{height:32px;padding:0 11px;border:1px dashed var(--vb-line);border-radius:9px;background:var(--vb-float-bg-soft);color:var(--vb-ink);font-size:12.5px;font-family:Inter,system-ui,sans-serif;line-height:1;cursor:pointer;white-space:nowrap;backdrop-filter:blur(12px);}
+  #vectorPanelView #vbPageNav{display:flex;align-items:center;gap:6px;min-width:0;flex-shrink:1;overflow:hidden;}
+  #vectorPanelView #vbPageTabs{display:flex;align-items:center;gap:6px;min-width:0;max-width:min(52vw,360px);overflow-x:auto;scrollbar-width:none;}
+  #vectorPanelView #vbPageTabs::-webkit-scrollbar{display:none;}
+  #vectorPanelView .vb-page-tab-wrap{position:relative;display:flex;flex:0 0 auto;}
+  #vectorPanelView .vb-page-tab{height:32px;max-width:150px;padding:0 28px 0 11px;border:1px solid var(--vb-line);border-radius:9px;background:var(--vb-ui-2);color:var(--vb-ink);font:600 12.5px Inter,system-ui,sans-serif;line-height:1;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  #vectorPanelView .vb-page-tab:hover{background:rgba(79,124,255,.14);border-color:var(--vb-accent);}
+  #vectorPanelView .vb-page-tab.active{background:var(--vb-accent);border-color:var(--vb-accent);color:#fff;box-shadow:0 4px 12px rgba(79,124,255,.25);}
+  #vectorPanelView .vb-page-close{position:absolute;right:4px;top:4px;width:24px;height:24px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--vb-muted);font-size:17px;line-height:1;cursor:pointer;z-index:1;}
+  #vectorPanelView .vb-page-tab.active + .vb-page-close{color:rgba(255,255,255,.78);}
+  #vectorPanelView .vb-page-close:hover{background:rgba(178,58,72,.16);color:#B23A48;}
+  #vectorPanelView .vb-page-tab.active + .vb-page-close:hover{color:#fff;background:rgba(0,0,0,.18);}
+  #vectorPanelView #vbAddPage{height:32px;padding:0 11px;border:1px dashed var(--vb-line);border-radius:9px;background:rgba(27,29,36,.7);color:var(--vb-ink);font-size:12.5px;font-family:Inter,system-ui,sans-serif;line-height:1;cursor:pointer;white-space:nowrap;backdrop-filter:blur(12px);}
   #vectorPanelView #vbAddPage:hover{background:var(--vb-accent);border-color:var(--vb-accent);border-style:solid;}
+  #vectorPanelView #vbDeletePage{height:32px;width:32px;padding:0;border:1px solid var(--vb-line);border-radius:9px;background:var(--vb-ui-2);color:var(--vb-muted);font-size:18px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;}
+  #vectorPanelView #vbDeletePage:hover{background:rgba(178,58,72,.14);border-color:#B23A48;color:#B23A48;}
+  #vectorPanelView #vbDeletePage:disabled{opacity:.4;cursor:not-allowed;pointer-events:none;}
+  #vectorPanelView.vb-light #vbDeletePage{background:var(--vb-ui-2);color:var(--vb-muted);}
   #vectorPanelView #vbPenStyleWrap,#vectorPanelView #vbMarkStyleWrap{position:relative;flex-shrink:0;}
   #vectorPanelView #vbPenStyle,#vectorPanelView #vbMarkStyle{
     display:none;position:fixed;z-index:16;width:180px;max-width:calc(100vw - 16px);
-    height:auto;top:calc(var(--vb-header-h,108px) + 6px);left:8px;padding:8px;background:var(--vb-float-bg);
+    height:auto;top:calc(var(--vb-header-h,108px) + 6px);left:8px;padding:8px;background:rgba(27,29,36,.98);
     border:1px solid var(--vb-line);border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.45);
   }
   #vectorPanelView #vbPenStyle.open,#vectorPanelView #vbMarkStyle.open{display:block;}
@@ -1470,7 +1567,7 @@ window.AppTheme = (function(){
   #vectorPanelView #vbMarkStyle{width:205px;}
   #vectorPanelView #vbToolStylePanel{position:fixed !important;display:none;visibility:hidden;pointer-events:none;}
   #vectorPanelView #vbToolStylePanel.open{display:block !important;visibility:visible;pointer-events:auto !important;}
-  #vectorPanelView .vbChoicePanel{display:none;position:fixed;z-index:50;min-width:220px;max-width:calc(100vw - 16px);padding:10px;background:var(--vb-float-bg);border:1px solid var(--vb-line);border-radius:12px;box-shadow:0 14px 32px rgba(0,0,0,.55);}
+  #vectorPanelView .vbChoicePanel{display:none;position:fixed;z-index:50;min-width:220px;max-width:calc(100vw - 16px);padding:10px;background:rgba(27,29,36,.99);border:1px solid var(--vb-line);border-radius:12px;box-shadow:0 14px 32px rgba(0,0,0,.55);}
   #vectorPanelView .vbChoicePanel.open{display:block;}
   #vectorPanelView .vbChoiceTitle{font-size:11px;color:var(--vb-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;}
   #vectorPanelView .vbChoiceOptions{display:flex;gap:6px;flex-wrap:wrap;}
@@ -1491,9 +1588,9 @@ window.AppTheme = (function(){
   #vectorPanelView .vbChoiceThicknessTitle{font-size:11px;color:var(--vb-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px;}
   #vectorPanelView #vbToolThicknessRange{width:100%;accent-color:var(--vb-accent);}
   #vectorPanelView #vbToolThicknessPresets{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;}
-  #vectorPanelView .vbChoiceThickOpt{border:1px solid var(--vb-line);background:var(--vb-ui-2);color:#fff;border-radius:7px;min-width:30px;height:28px;cursor:pointer;font-size:11px;}
+  #vectorPanelView .vbChoiceThickOpt{border:1px solid var(--vb-line);background:var(--vb-ui-2);color:var(--vb-ink);border-radius:7px;min-width:30px;height:28px;cursor:pointer;font-size:11px;font-weight:600;}
   #vectorPanelView .vbChoiceThickOpt.active{background:var(--vb-accent);border-color:var(--vb-accent);}
-  #vectorPanelView .vbChoiceOpt{border:1px solid var(--vb-line);background:var(--vb-ui-2);color:#fff;border-radius:8px;padding:8px 10px;cursor:pointer;white-space:nowrap;}
+  #vectorPanelView .vbChoiceOpt{border:1px solid var(--vb-line);background:var(--vb-ui-2);color:var(--vb-ink);border-radius:8px;padding:8px 10px;cursor:pointer;white-space:nowrap;font-weight:600;}
   #vectorPanelView .vbChoiceOpt.active{background:var(--vb-accent);border-color:var(--vb-accent);}
   #vectorPanelView #vbZoom{display:none !important;}
   #vectorPanelView #vbLiveRecognition{
@@ -1533,7 +1630,7 @@ window.AppTheme = (function(){
   #vectorPanelView #vbSettingsBackdrop.open{display:block;}
   #vectorPanelView #vbSettingsPanel{
     display:block;position:fixed;z-index:15;width:230px;
-    background:var(--vb-float-bg);border:1px solid var(--vb-line);border-radius:14px;
+    background:rgba(27,29,36,.98);border:1px solid var(--vb-line);border-radius:14px;
     box-shadow:0 12px 32px rgba(0,0,0,.4);padding:14px;
     opacity:0;visibility:hidden;pointer-events:none;
     transform:translateY(-8px);
@@ -1555,19 +1652,24 @@ window.AppTheme = (function(){
   #vectorPanelView .vbs-action svg{width:16px;height:16px;flex-shrink:0;}
   #vectorPanelView .vbs-switch{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--vb-muted);}
   #vectorPanelView .vbs-switch input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;}
-  #vectorPanelView .vbs-switch-track{position:relative;width:38px;height:22px;border-radius:11px;background:var(--vb-line);transition:background .15s ease;flex-shrink:0;}
+  #vectorPanelView .vbs-switch-track{position:relative;width:38px;height:22px;border-radius:11px;background:#3a3d48;transition:background .15s ease;flex-shrink:0;}
   #vectorPanelView .vbs-switch-thumb{position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .15s ease;}
   #vectorPanelView .vbs-switch input:checked + .vbs-switch-track{background:var(--vb-accent);}
   #vectorPanelView .vbs-switch input:checked + .vbs-switch-track .vbs-switch-thumb{transform:translateX(16px);}
+  #vectorPanelView .vbs-theme-toggle{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+  #vectorPanelView .vbs-theme-opt{height:34px;border:1px solid var(--vb-line);border-radius:9px;background:var(--vb-ui-2);color:var(--vb-muted);font:600 11px Inter,sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;}
+  #vectorPanelView .vbs-theme-opt svg{width:14px;height:14px;}
+  #vectorPanelView .vbs-theme-opt.active{background:var(--vb-accent);border-color:var(--vb-accent);color:#fff;}
+  #vectorPanelView .vbs-help{margin:6px 0 0;color:var(--vb-muted);font-size:10.5px;line-height:1.4;}
   #vectorPanelView #vbUploadPdfBtn{background:var(--vb-ui-2);border-color:var(--vb-line);color:var(--vb-ink);}
-  #vectorPanelView #vbUploadPdfBtn:hover{background:var(--vb-line);}
+  #vectorPanelView #vbUploadPdfBtn:hover{background:#2A2D38;}
   #vectorPanelView #vbUploadPdfBtn[disabled]{opacity:.6;cursor:default;pointer-events:none;}
 
   /* ---------- Panel lateral de PDFs (ventana en paralelo a la hoja) ---------- */
   #vectorPanelView #vbPdfPanel{
     position:fixed;z-index:17;top:calc(var(--vb-header-h,108px) + 8px);left:12px;right:auto;bottom:52px;
     width:min(560px,48vw);max-width:calc(100vw - 24px);
-    background:var(--vb-float-bg);border:1px solid var(--vb-line);border-radius:14px;
+    background:rgba(27,29,36,.98);border:1px solid var(--vb-line);border-radius:14px;
     box-shadow:0 12px 32px rgba(0,0,0,.4);
     display:flex;flex-direction:column;overflow:hidden;
     opacity:0;visibility:hidden;transform:translateX(12px);
@@ -1586,7 +1688,7 @@ window.AppTheme = (function(){
     width:26px;height:26px;border-radius:7px;border:none;background:transparent;
     color:var(--vb-muted);display:flex;align-items:center;justify-content:center;cursor:pointer;
   }
-  #vectorPanelView #vbPdfPanelClose:hover{background:var(--vb-line);color:var(--vb-ink);}
+  #vectorPanelView #vbPdfPanelClose:hover{background:#2A2D38;color:var(--vb-ink);}
   #vectorPanelView #vbPdfPanelClose svg{width:16px;height:16px;}
   #vectorPanelView #vbPdfPanelBody{flex:1;min-height:0;min-width:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px;box-sizing:border-box;display:flex;flex-direction:column;}
   #vectorPanelView #vbPdfAddBtn{margin-bottom:10px;}
@@ -1626,7 +1728,7 @@ window.AppTheme = (function(){
   #vectorPanelView #vbPdfViewer.show{display:flex;}
   #vectorPanelView #vbPdfViewerHead{display:flex;align-items:center;justify-content:space-between;gap:6px;color:var(--vb-muted);font-size:11px;}
   #vectorPanelView #vbPdfViewerTitle{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  #vectorPanelView #vbPdfViewerCanvasWrap{width:100%;min-width:0;min-height:120px;max-height:42vh;box-sizing:border-box;overflow:auto;background:var(--vb-ui-2);border-radius:7px;text-align:center;padding:6px;display:flex;justify-content:center;align-items:flex-start;}
+  #vectorPanelView #vbPdfViewerCanvasWrap{width:100%;min-width:0;min-height:120px;max-height:42vh;box-sizing:border-box;overflow:auto;background:#30323A;border-radius:7px;text-align:center;padding:6px;display:flex;justify-content:center;align-items:flex-start;}
   #vectorPanelView #vbPdfViewerCanvas{display:block;position:static!important;inset:auto!important;transform:none!important;float:none!important;flex:0 0 auto;max-width:100%;width:auto;height:auto;background:#fff;box-shadow:0 3px 10px rgba(0,0,0,.35);}
   #vectorPanelView #vbPdfViewerControls{width:100%;box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:6px;flex:0 0 auto;}
   #vectorPanelView #vbPdfViewerControls button{height:28px;min-width:28px;border:1px solid var(--vb-line);border-radius:7px;background:var(--vb-ui-2);color:var(--vb-ink);cursor:pointer;}
@@ -1641,7 +1743,7 @@ window.AppTheme = (function(){
   #vectorPanelView #vpDrawToolbar::-webkit-scrollbar{height:0;}
   #vectorPanelView .vpTool{height:30px;min-width:30px;border:1px solid var(--vb-line);background:var(--vb-ui-2);color:var(--vb-ink);border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;padding:0;}
   #vectorPanelView .vpTool svg{width:15px;height:15px;flex-shrink:0;}
-  #vectorPanelView .vpTool:hover{background:var(--vb-line);}
+  #vectorPanelView .vpTool:hover{background:#2A2D38;}
   #vectorPanelView .vpTool.active{background:var(--vb-accent);color:#fff;border-color:var(--vb-accent);}
   #vectorPanelView .vpDivider{width:1px;height:20px;background:var(--vb-line);margin:0 2px;flex-shrink:0;}
   #vectorPanelView #vpDrawDots{display:flex;align-items:center;gap:5px;flex-shrink:0;}
@@ -1657,7 +1759,7 @@ window.AppTheme = (function(){
 
   #vectorPanelView #vpSelToolbar{
     position:fixed;display:none;align-items:center;gap:6px;z-index:60;
-    background:var(--vb-float-bg);border:1px solid var(--vb-line);border-radius:9px;
+    background:rgba(27,29,36,.98);border:1px solid var(--vb-line);border-radius:9px;
     padding:6px 7px;box-shadow:0 8px 24px rgba(0,0,0,.45);
   }
   #vectorPanelView #vpSelToolbar.show{display:flex;}
@@ -1673,8 +1775,6 @@ window.AppTheme = (function(){
   #vectorPanelView #vbPdfNewFolder{width:34px;height:34px;border:1px solid var(--vb-line);border-radius:9px;background:var(--vb-ui-2);color:var(--vb-ink);font-size:18px;cursor:pointer;}
   #vectorPanelView #vbPdfNewFolder:hover{background:var(--vb-accent);border-color:var(--vb-accent);}
   #vectorPanelView #vbPdfList{width:100%;min-width:0;box-sizing:border-box;}
-  #vectorPanelView .vbPdfFolderGroup{margin:10px 0 8px;color:var(--vb-muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;}
-  #vectorPanelView .vbPdfFolderGroup:first-child{margin-top:0;}
   @media (max-width:760px){
     /* En mobile el panel se acopla arriba, en vez de tapar toda la pantalla:
        deja el resto de la altura visible para la hoja de apuntes (split real,
@@ -1691,14 +1791,19 @@ window.AppTheme = (function(){
 <div id="app">
   <div id="homeView">
     <div id="homeHeader">
-      <div>
-        <div id="homeEyebrow">Apuntes</div>
-        <h1>Mis carpetas</h1>
+      <div id="homeBrand">
+        <button id="homeMenuBtn" type="button" title="Mostrar todas las carpetas" aria-label="Mostrar todas las carpetas" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        </button>
+        <div id="homeBrandText">
+          <div id="homeEyebrow">Apuntes</div>
+          <h1>Mis carpetas</h1>
+        </div>
       </div>
-      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
-        <button id="themeToggleBtn" title="Cambiar a tema claro/oscuro">
-          <svg id="themeIconMoon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-          <svg id="themeIconSun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><circle cx="12" cy="12" r="4"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+      <div id="homeHeaderActions">
+        <button id="themeToggleBtn" type="button" title="Cambiar a modo claro" aria-label="Cambiar a modo claro" aria-pressed="false">
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 15.2A8.5 8.5 0 0 1 8.8 3.5 8.5 8.5 0 1 0 20.5 15.2Z"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
         </button>
         <button id="addFolderBtn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -1714,11 +1819,30 @@ window.AppTheme = (function(){
     <div id="folderGrid"></div>
   </div>
 
+  <div id="folderDrawerBackdrop"></div>
+  <aside id="folderDrawer" aria-label="Todas las carpetas" aria-hidden="true">
+    <div id="folderDrawerHeader">
+      <div id="folderDrawerTitle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/><path d="M3 9h18"/></svg>
+        <span>Mis carpetas</span>
+      </div>
+      <button id="folderDrawerClose" type="button" title="Cerrar panel" aria-label="Cerrar panel">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <p id="folderDrawerHint">Accedé rápidamente a cualquier carpeta desde cualquier nivel de organización.</p>
+    <div id="folderDrawerList"></div>
+    <p id="folderDrawerEmpty">Todavía no tenés carpetas. Creá una para verla acá.</p>
+  </aside>
+
   <div id="folderEditBackdrop"></div>
   <div id="folderEditModal">
     <h3>Editar carpeta</h3>
     <div id="feNamePreviewWrap">
-      <div id="fePreviewThumb" class="folderThumb"></div>
+      <div id="fePreviewColumn">
+        <div id="fePreviewThumb" class="folderThumb"></div>
+        <span class="fe-preview-label">Vista previa</span>
+      </div>
       <div class="fe-row" style="flex:1;margin-bottom:0;">
         <label class="field-label">Nombre</label>
         <input type="text" id="feNameInput" maxlength="60">
@@ -1737,10 +1861,19 @@ window.AppTheme = (function(){
 
     <div class="fe-row">
       <label class="field-label">Portada</label>
-      <div id="feSegmented">
-        <button type="button" data-mode="auto">Automática</button>
-        <button type="button" data-mode="pattern">Estilo</button>
-        <button type="button" data-mode="photo">Foto</button>
+      <div id="feSegmented" role="group" aria-label="Tipo de portada">
+        <button type="button" data-mode="auto" aria-label="Portada automática">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5v-9Z"/><path d="m8 9.7 4 2.3 4-2.3M12 12v5"/></svg>
+          <span>Automática</span>
+        </button>
+        <button type="button" data-mode="pattern" aria-label="Elegir diseño">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M10 4v16M4 16h16M16 4v16"/></svg>
+          <span>Diseño</span>
+        </button>
+        <button type="button" data-mode="photo" aria-label="Usar una foto">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m5 17 4.2-4.2 3 3 2-2 4.8 3.2"/></svg>
+          <span>Foto</span>
+        </button>
       </div>
     </div>
 
@@ -1782,6 +1915,10 @@ window.AppTheme = (function(){
     <button id="pdfToggleBtn" title="Ver un PDF al lado de la hoja">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
       PDF
+    </button>
+    <button id="folderThemeToggleBtn" class="themeToggleBtn" type="button" title="Cambiar a modo claro" aria-label="Cambiar a modo claro" aria-pressed="false">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 15.2A8.5 8.5 0 0 1 8.8 3.5 8.5 8.5 0 1 0 20.5 15.2Z"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
     </button>
   </div>
 
@@ -1867,9 +2004,6 @@ window.AppTheme = (function(){
       <div id="popoverBackdrop"></div>
       <div id="popover">
         <div class="row">
-          <label class="chk-label"><input type="checkbox" id="themeLightChk" autocomplete="off"> Tema claro</label>
-        </div>
-        <div class="row">
           <label class="field-label">Tipo de hoja</label>
           <select id="paperSelect">
             <option value="blanco">Blanca</option>
@@ -1892,13 +2026,9 @@ window.AppTheme = (function(){
             <option value="boligrafo">Bolígrafo</option>
             <option value="fina">Fina</option>
             <option value="estilografica">Estilográfica (lapicera)</option>
-            <option value="gel">Gel</option>
-            <option value="caligrafica">Caligráfica</option>
             <option value="marcador">Marcador seco</option>
             <option value="grafito">Lápiz grafito</option>
-            <option value="carbon">Carboncillo</option>
             <option value="pincel">Pincel</option>
-            <option value="pincelSeco">Pincel seco</option>
           </select>
         </div>
         <div class="row">
@@ -2154,14 +2284,6 @@ window.AppTheme = (function(){
         <filter id="vbPageShadow" x="-30%" y="-30%" width="160%" height="160%">
           <feDropShadow dx="0" dy="8" stdDeviation="14" flood-color="#000" flood-opacity="0.4"/>
         </filter>
-        <!-- Textura de grano real para el lápiz grafito y el pincel seco: la
-             turbulencia deforma apenas el borde del trazo (en vez de solo
-             bajarle la opacidad, como antes), simulando el rasguño irregular
-             de una punta seca sobre el papel. -->
-        <filter id="vbGrainFilter" x="-20%" y="-20%" width="140%" height="140%">
-          <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7" result="noise"/>
-          <feDisplacementMap in="SourceGraphic" in2="noise" scale="2.6" xChannelSelector="R" yChannelSelector="G"/>
-        </filter>
       </defs>
       <g id="vbCamera">
         <rect id="vbGrid" x="-1000000" y="-1000000" width="2000000" height="2000000" fill="url(#vbPatternGrid)"/>
@@ -2179,31 +2301,32 @@ window.AppTheme = (function(){
       <span id="vbFolderName">Carpetas</span>
     </button>
     <div id="vbPageNav" title="Páginas de esta carpeta">
-      <select id="vbPageSelect" aria-label="Página actual"></select>
+      <div id="vbPageTabs" role="tablist" aria-label="Páginas de esta carpeta"></div>
       <button id="vbAddPage" type="button" title="Agregar página">+ Página</button>
     </div>
+    <button id="vectorThemeToggleBtn" class="themeToggleBtn" type="button" title="Cambiar a modo claro" aria-label="Cambiar a modo claro" aria-pressed="false">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 15.2A8.5 8.5 0 0 1 8.8 3.5 8.5 8.5 0 1 0 20.5 15.2Z"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+    </button>
   </div>
 
   <div id="vbToolbar">
     <button id="vbSelect" title="Seleccionar y mover">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l7.5 17 2.5-7.5L21.5 11z"/><path d="M14 14l6 6"/></svg>
     </button>
-    <button id="vbPen" class="active" title="Lápiz">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+    <button id="vbPen" class="vb-tool-primary active" data-tool-tone="pen" title="Lápiz" aria-label="Lápiz" aria-pressed="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.1 19.9 5.7 15.1 16.4 4.4a2.3 2.3 0 0 1 3.2 0l.1.1a2.3 2.3 0 0 1 0 3.2L9 18l-4.9 1.9Z" fill="currentColor" fill-opacity=".16"/><path d="m14.9 5.9 3.2 3.2"/><path d="m5.7 15.1 3.3 3.3"/><path d="m4.1 19.9 1.6-4.8"/><path d="M4.1 19.9 8.9 18" fill="currentColor"/></svg>
     </button>
       <div id="vbPenStyleWrap">
       <select id="vbPenStyle" title="Estilo de lápiz">
       <option value="estandar">Estándar</option>
       <option value="boligrafo">Bolígrafo</option>
-      <option value="fina">Punta fina</option>
-      <option value="gel">Gel</option>
-      <option value="estilografica">Estilográfica</option>
       <option value="caligrafico">Caligráfico</option>
+      <option value="fina">Punta fina</option>
+      <option value="estilografica">Estilográfica</option>
       <option value="marcador">Marcador seco</option>
       <option value="grafito">Lápiz grafito</option>
-      <option value="carbon">Carboncillo</option>
       <option value="pincel">Pincel</option>
-      <option value="pincelSeco">Pincel seco</option>
           </select>
       </div>
       <div id="vbMarkStyleWrap">
@@ -2223,11 +2346,11 @@ window.AppTheme = (function(){
           <div id="vbToolThicknessPresets"></div>
         </div>
       </div>
-    <button id="vbHighlighter" title="Marcador">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21l1.5-4.5L15 6l3 3-10.5 10.5z"/><path d="M12 9l3 3"/><path d="M15 6l3-3 3 3-3 3"/></svg>
+    <button id="vbHighlighter" class="vb-tool-primary" data-tool-tone="marker" title="Marcador" aria-label="Marcador" aria-pressed="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5.1 15.2 8.8-8.8a2 2 0 0 1 2.8 0l1.1 1.1a2 2 0 0 1 0 2.8L9 19.1H5.1v-3.9Z" fill="currentColor" fill-opacity=".22"/><path d="m13.9 6.4 3.7 3.7"/><path d="M5.1 15.2v3.9H9"/><path d="M3.5 21h8.2"/><path d="m18 4 1.5-1.5M20 7h2" opacity=".75"/></svg>
     </button>
-    <button id="vbEraser" title="Borrador">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13l-6.5 6.5a2 2 0 0 1-2.83 0l-4.17-4.17a2 2 0 0 1 0-2.83L11 6l7 7z"/><path d="M8 21h11"/></svg>
+    <button id="vbEraser" class="vb-tool-primary" data-tool-tone="eraser" title="Borrador" aria-label="Borrador" aria-pressed="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4.5 14.2 8.8-8.8a2.3 2.3 0 0 1 3.2 0l3.1 3.1a2.3 2.3 0 0 1 0 3.2l-6.9 6.9H8.4l-3.9-3.9a.4.4 0 0 1 0-.5Z" fill="currentColor" fill-opacity=".17"/><path d="m12.7 19.2 6.9-6.9a2.3 2.3 0 0 0 0-3.2l-3.1-3.1a2.3 2.3 0 0 0-3.2 0l-8.8 8.8a.4.4 0 0 0 0 .5l3.9 3.9h4.3Z"/><path d="m8.5 14 4.8 4.8"/><path d="M4.4 20.5h15.2"/></svg>
     </button>
     <button id="vbText" title="Texto">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
@@ -2237,6 +2360,10 @@ window.AppTheme = (function(){
     </button>
     <button id="vbHand" title="Mover lienzo">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg>
+    </button>
+    <button id="vbPenOnlyBtn" class="vb-mode-btn" type="button" title="Ignorar los dedos al dibujar" aria-label="Solo lápiz" aria-pressed="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 11V6.8a1.7 1.7 0 0 1 3.4 0V11"/><path d="M9.9 10V5.3a1.7 1.7 0 0 1 3.4 0V11"/><path d="M13.3 10V6.5a1.7 1.7 0 0 1 3.4 0v6.1"/><path d="M16.7 11.3v-1a1.7 1.7 0 0 1 3.4 0v4.5c0 4-2.8 6.7-6.8 6.7h-.8c-2.2 0-3.4-1-4.7-2.3L4.6 15.8a1.7 1.7 0 0 1 2.4-2.4L9 15.4V11"/><path d="M3.5 3.5 20.5 20.5" opacity=".58"/></svg>
+      <span>Solo lápiz</span>
     </button>
     <div class="vb-sep"></div>
     <input id="vbColor" type="color" value="#17191c" title="Color">
@@ -2292,20 +2419,32 @@ window.AppTheme = (function(){
       </select>
     </div>
     <div class="vbs-row">
-      <label class="vbs-label" for="vbThemeToggle">Tema claro</label>
-      <label class="vbs-switch">
-        <input type="checkbox" id="vbThemeToggle">
-        <span class="vbs-switch-track"><span class="vbs-switch-thumb"></span></span>
-        <span id="vbThemeToggleText">Desactivado</span>
-      </label>
-    </div>
-    <div class="vbs-row">
       <label class="vbs-label" for="vbOcrToggle">Reconocimiento de escritura (OCR)</label>
       <label class="vbs-switch">
         <input type="checkbox" id="vbOcrToggle">
         <span class="vbs-switch-track"><span class="vbs-switch-thumb"></span></span>
         <span id="vbOcrToggleText">Activado</span>
       </label>
+    </div>
+    <div class="vbs-row">
+      <span class="vbs-label">Entrada para dibujar</span>
+      <label class="vbs-switch">
+        <input type="checkbox" id="vbPenOnlyToggle" autocomplete="off">
+        <span class="vbs-switch-track"><span class="vbs-switch-thumb"></span></span>
+        <span id="vbPenOnlyToggleText">Dedos permitidos</span>
+      </label>
+      <p class="vbs-help">Activá “Solo lápiz” para que el contacto con los dedos no cree trazos.</p>
+    </div>
+    <div class="vbs-row">
+      <span class="vbs-label">Apariencia</span>
+      <div class="vbs-theme-toggle" role="group" aria-label="Tema del panel vectorial">
+        <button type="button" class="vbs-theme-opt active" id="vbThemeDark" data-theme="dark">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 15.3A8.7 8.7 0 0 1 8.7 3.5 8.8 8.8 0 1 0 20.5 15.3Z"/></svg> Oscuro
+        </button>
+        <button type="button" class="vbs-theme-opt" id="vbThemeLight" data-theme="light">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg> Claro
+        </button>
+      </div>
     </div>
     <div class="vbs-row">
       <button id="vbExportPdf" class="vbs-action" title="Guardar como PDF">
@@ -2490,35 +2629,18 @@ window.AppTheme = (function(){
 
 
   // ---- Estilos de lápiz: cada uno define cómo varía el grosor con la presión y su opacidad ----
-  // Cada estilo define, además del grosor y la opacidad base, un modo de
-  // RENDERIZADO ('render') que cambia la técnica de dibujo, no solo el
-  // número: antes, todos los lápices se pintaban con el mismo trazo limpio
-  // de línea redondeada y solo cambiaban ancho/opacidad, así que en la
-  // práctica se veían todos parecidos. Ahora:
-  //  - 'grain'  (grafito, carboncillo, pincel seco): varias pasadas cortas
-  //    y desplazadas al azar en vez de una línea continua, como el grano
-  //    real de una punta que roza el papel.
-  //  - 'nib'    (caligráfica): punta plana de ángulo fijo — se engorda en
-  //    diagonal y se afina casi a la nada al moverse paralelo a la punta,
-  //    el efecto itálico clásico.
-  //  - 'brush'  (pincel): una pasada extra ancha y translúcida por debajo
-  //    del trazo, como el borde húmedo de un pincel real.
-  //  - 'gel'    (gel): además del trazo saturado, un brillo fino al medio.
-  //  - 'plain'  (el resto): trazo limpio de siempre, solo que ahora con
-  //    curvas de ancho más diferenciadas entre sí (una birome casi no
-  //    varía de grosor; una estilográfica sí, y mucho).
   const PEN_STYLES = {
-    estandar:      { name:'Estándar',              widthFn:(w,p)=> w*(0.4+p),              alpha:1,   render:'plain' },
-    boligrafo:     { name:'Bolígrafo',              widthFn:(w,p)=> w*(0.78+p*0.14),        alpha:1,   render:'plain' },
-    fina:          { name:'Fina',                   widthFn:(w,p)=> w*0.5*(0.55+p*0.5),     alpha:1,   render:'plain' },
-    estilografica: { name:'Estilográfica',          widthFn:(w,p)=> w*(0.2+p*1.4),          alpha:1,   render:'plain' },
-    gel:           { name:'Gel',                    widthFn:(w,p)=> w*(0.78+p*0.22),        alpha:1,   render:'gel' },
-    caligrafica:   { name:'Caligráfica',            widthFn:(w,p)=> w*(0.85+p*0.5),         alpha:1,   render:'nib' },
-    marcador:      { name:'Marcador seco',          widthFn:(w,p)=> w*1.9*(0.88+p*0.12),    alpha:.55, render:'plain', blend:'multiply' },
-    grafito:       { name:'Lápiz grafito',          widthFn:(w,p)=> w*(0.5+p*0.55),         alpha:.85, render:'grain' },
-    carbon:        { name:'Carboncillo',            widthFn:(w,p)=> w*(0.8+p*0.9),          alpha:.68, render:'grain' },
-    pincel:        { name:'Pincel',                 widthFn:(w,p)=> w*(0.2+p*1.7),          alpha:1,   render:'brush' },
-    pincelSeco:    { name:'Pincel seco',            widthFn:(w,p)=> w*(0.5+p*1.1),          alpha:.68, render:'grain' },
+    estandar:      { name:'Estándar',              widthFn:(w,p)=> w*(0.4+p),             alpha:1 },
+    boligrafo:     { name:'Bolígrafo',             widthFn:(w,p)=> w*(0.62+p*0.3),        alpha:1 },
+    fina:          { name:'Fina',                  widthFn:(w,p)=> w*0.55*(0.5+p*0.6),  alpha:1 },
+    estilografica: { name:'Estilográfica',         widthFn:(w,p)=> w*(0.3+p*1.1),        alpha:1 },
+    gel:           { name:'Gel',                   widthFn:(w,p)=> w*(0.72+p*0.18),      alpha:.95 },
+    caligrafica:   { name:'Caligráfica',           widthFn:(w,p)=> w*(0.28+p*1.35),      alpha:1 },
+    marcador:      { name:'Marcador seco',         widthFn:(w,p)=> w*1.9*(0.78+p*0.22), alpha:.82 },
+    grafito:       { name:'Lápiz grafito',         widthFn:(w,p)=> w*(0.5+p*0.55),       alpha:.92, grain:true },
+    carbon:        { name:'Carboncillo',            widthFn:(w,p)=> w*(0.72+p*0.8),       alpha:.62, grain:true },
+    pincel:        { name:'Pincel',                widthFn:(w,p)=> w*(0.25+p*1.4),       alpha:.95 },
+    pincelSeco:    { name:'Pincel seco',           widthFn:(w,p)=> w*(0.5+p*1.1),        alpha:.72, grain:true },
   };
   function widthForStroke(stroke, p){
     if(stroke.tool==='highlighter' || stroke.tool==='underline'){
@@ -2533,7 +2655,9 @@ window.AppTheme = (function(){
   function alphaForStroke(stroke, baseAlpha, idx){
     if(stroke.tool==='pen'){
       const ps = PEN_STYLES[stroke.penStyle] || PEN_STYLES.estandar;
-      return baseAlpha * (ps.alpha!=null ? ps.alpha : 1);
+      let a = baseAlpha * (ps.alpha!=null ? ps.alpha : 1);
+      if(ps.grain){ const g = 0.72 + (Math.abs(Math.sin((idx+1)*12.9898))%1)*0.28; a *= g; }
+      return a;
     }
     return baseAlpha;
   }
@@ -2761,13 +2885,16 @@ window.AppTheme = (function(){
     "#C43D3D", "#B5502E", "#C99A3C", "#7A5230", "#8A8580", "#2B2A28",
   ];
   const FOLDER_COVER_STYLES = [
-    {id:'lines', name:'Rayas'},
-    {id:'grid',  name:'Cuadros'},
-    {id:'dots',  name:'Puntos'},
-    {id:'plain', name:'Lisa'},
-    {id:'icon',  name:'Ícono'},
+    {id:'lines',    name:'Rayas'},
+    {id:'grid',     name:'Cuadros'},
+    {id:'dots',     name:'Puntos'},
+    {id:'plain',    name:'Lisa'},
+    {id:'paper',    name:'Papel'},
+    {id:'gradient', name:'Degradado'},
+    {id:'waves',    name:'Ondas'},
+    {id:'icon',     name:'Ícono'},
   ];
-  const FOLDER_ICONS = ['📓','📔','📕','📗','📘','📙','⭐','❤️','📌','🎯','📚','✏️','🎨','🔬','🎵','🌱'];
+  const FOLDER_ICONS = ['📓','📔','📕','📗','📘','📙','⭐','❤️','📌','🎯','📚','✏️','🎨','🔬','🎵','🌱','🧠','🧪','💡','🌙','🗂️','📝'];
   const TOOL_RANGE = {
     pen:{min:1,max:14,def:3}, eraser:{min:6,max:50,def:18},
     highlighter:{min:10,max:40,def:20}, underline:{min:2,max:12,def:5},
@@ -2808,23 +2935,6 @@ window.AppTheme = (function(){
   // apoyada) se descarta por completo, en vez de contarse como un segundo
   // dedo y disparar un pellizco/zoom accidental que corta el trazo.
   let activeDrawPointerId = null;
-  // Detección de lápiz "cerca" de la pantalla: en tablets con lápiz activo
-  // (Apple Pencil, S-Pen, etc.) el sistema suele reportar eventos de puntero
-  // tipo 'pen' apenas se acerca, incluso ANTES de tocar (hover). Usamos eso
-  // para saber que hay un lápiz en uso aunque todavía no esté "dibujando":
-  // así, si la palma se apoya un instante antes de que la punta toque la
-  // hoja, igual se la reconoce como palma y se la ignora — antes, el
-  // rechazo solo miraba si YA había un trazo en curso, y una palma apoyada
-  // *antes* del primer toque del lápiz se colaba como si fuera un segundo
-  // dedo (disparando un pellizco/zoom accidental que cortaba el trazo).
-  let penNearActive = false, penNearTimer = null;
-  function notePenNear(){
-    penNearActive = true;
-    clearTimeout(penNearTimer);
-    penNearTimer = setTimeout(()=>{ penNearActive = false; }, 700);
-  }
-  document.addEventListener('pointerdown', (e)=>{ if(e.pointerType==='pen') notePenNear(); }, true);
-  document.addEventListener('pointermove', (e)=>{ if(e.pointerType==='pen') notePenNear(); }, true);
 
   const homeView = document.getElementById('homeView');
   const notebookView = document.getElementById('notebookView');
@@ -2832,23 +2942,13 @@ window.AppTheme = (function(){
   const folderBreadcrumbEl = document.getElementById('folderBreadcrumb');
   const folderEmpty = document.getElementById('folderEmpty');
   const addFolderBtn = document.getElementById('addFolderBtn');
-  const themeToggleBtn = document.getElementById('themeToggleBtn');
-  const themeIconMoon = document.getElementById('themeIconMoon');
-  const themeIconSun = document.getElementById('themeIconSun');
-  function refreshThemeIcon(){
-    const light = window.AppTheme.get() === 'light';
-    // Ícono de LUNA cuando el tema es claro (invita a "pasar a oscuro") y de
-    // SOL cuando es oscuro (invita a "pasar a claro") — el ícono siempre
-    // muestra el destino del toque, no el estado actual.
-    if(themeIconMoon) themeIconMoon.style.display = light ? '' : 'none';
-    if(themeIconSun) themeIconSun.style.display = light ? 'none' : '';
-  }
-  if(themeToggleBtn){
-    refreshThemeIcon();
-    themeToggleBtn.addEventListener('click', ()=>{ window.AppTheme.toggle(); });
-    window.addEventListener('themeChange', refreshThemeIcon);
-  }
   const backHomeBtn = document.getElementById('backHomeBtn');
+  const homeMenuBtn = document.getElementById('homeMenuBtn');
+  const folderDrawer = document.getElementById('folderDrawer');
+  const folderDrawerBackdrop = document.getElementById('folderDrawerBackdrop');
+  const folderDrawerClose = document.getElementById('folderDrawerClose');
+  const folderDrawerList = document.getElementById('folderDrawerList');
+  const folderDrawerEmpty = document.getElementById('folderDrawerEmpty');
 
   const folderEditBackdrop = document.getElementById('folderEditBackdrop');
   const folderEditModal = document.getElementById('folderEditModal');
@@ -2908,16 +3008,6 @@ window.AppTheme = (function(){
   const penStyleSelect = document.getElementById('penStyleSelect');
   const tidyModeChk = document.getElementById('tidyMode');
   const penOnlyChk = document.getElementById('penOnly');
-  const themeLightChk = document.getElementById('themeLightChk');
-  if(themeLightChk){
-    themeLightChk.checked = window.AppTheme.get() === 'light';
-    themeLightChk.addEventListener('change', ()=>{
-      window.AppTheme.set(themeLightChk.checked ? 'light' : 'dark');
-    });
-    window.addEventListener('themeChange', (e)=>{
-      themeLightChk.checked = e.detail.theme === 'light';
-    });
-  }
   const textEditorBackdrop = document.getElementById('textEditorBackdrop');
   const textEditorPanel = document.getElementById('textEditorPanel');
   const textStyleBtns = [...document.querySelectorAll('.textStyleBtn')];
@@ -4454,10 +4544,29 @@ window.AppTheme = (function(){
     // Excepción: en hojas infinitas, "llenar la ventana" es la esencia del modo,
     // así que reencuadramos siempre que cambie el tamaño de la ventana (p. ej.
     // maximizarla), aunque ya se haya interactuado antes.
+    cachedViewportRect = null; // el tamaño/posición real puede haber cambiado
     const page = pages.find(p=>p.id===currentPageId);
     const isInfinite = !!page && page.sizeType === 'infinite';
     if(isInfinite || !hasInteracted || pageIsOffscreen()) fitToViewport();
   }).observe(viewport);
+
+  // getBoundingClientRect() del viewport, cacheado durante el trazo.
+  // Antes se pedía este rect en CADA pointermove (dos veces incluso:
+  // pageCoordsFromClient + autoScrollIfNeeded). Pedirlo fuerza al navegador a
+  // recalcular el layout si hay algo pendiente de invalidar — y cerca de los
+  // bordes de una hoja infinita eso pasa seguido, porque growPageIfNeeded
+  // cambia el tamaño de la hoja y autoScrollIfNeeded mueve el paneo, ambos
+  // DENTRO del mismo gesto de escritura. Ese ciclo lectura-escritura-lectura
+  // en cada evento es "layout thrashing": la causa más común de que un canvas
+  // se sienta trabado al escribir rápido o cerca de un borde. El rect del
+  // viewport (su posición y tamaño en pantalla) no cambia por escribir ni por
+  // el paneo/zoom interno — solo cambia si la ventana o el layout de la app
+  // se redimensionan, que ya está cubierto por el ResizeObserver de arriba.
+  let cachedViewportRect = null;
+  function getViewportRect(){
+    if(!cachedViewportRect) cachedViewportRect = viewport.getBoundingClientRect();
+    return cachedViewportRect;
+  }
 
   function applyPaperClass(type){
     pageEl.classList.remove('paper-blanco','paper-rayado','paper-cuadriculado','paper-punteado');
@@ -4539,7 +4648,7 @@ window.AppTheme = (function(){
   function autoScrollIfNeeded(clientX, clientY){
     const page = pages.find(p=>p.id===currentPageId);
     if(!page || page.sizeType !== 'infinite') return;
-    const rect = viewport.getBoundingClientRect();
+    const rect = getViewportRect();
     const edge = 70, speed = 16;
     let moved = false;
     if(clientY > rect.bottom - edge){
@@ -4567,7 +4676,7 @@ window.AppTheme = (function(){
   function clearBuffer(){ bufferCtx.save(); bufferCtx.setTransform(1,0,0,1,0,0); bufferCtx.clearRect(0,0,bufferCanvas.width,bufferCanvas.height); bufferCtx.restore(); }
 
   function pageCoordsFromClient(clientX, clientY){
-    const rect = viewport.getBoundingClientRect();
+    const rect = getViewportRect();
     return { x:(clientX-rect.left-panX)/zoom, y:(clientY-rect.top-panY)/zoom };
   }
   function shouldIgnoreForDraw(e){ return penOnly && e.pointerType === 'touch'; }
@@ -4597,147 +4706,26 @@ window.AppTheme = (function(){
   }
 
   // Funciones de bajo nivel: dibujan sobre cualquier contexto (visible, base o buffer)
-  // ---------- Motor de renderizado por técnica de lápiz ----------
-  // jitterSeed: un hash determinístico (no aleatorio de verdad) para que el
-  // "temblor" de las técnicas con grano sea siempre el mismo si el trazo se
-  // vuelve a dibujar (reabrir la página, exportar, etc.) — si usáramos
-  // Math.random() cada redibujado se vería distinto.
-  function jitterSeed(idx, salt){
-    const x = Math.sin(idx*12.9898 + salt*78.233) * 43758.5453;
-    return x - Math.floor(x);
-  }
-  // Ribbon de pluma itálica: la punta tiene un ángulo FIJO (NIB_ANGLE) y el
-  // grosor de la marca en cada tramo es la proyección de esa punta sobre la
-  // perpendicular a la dirección de avance — así se engorda en diagonal y
-  // se afina casi a la nada al moverse paralelo al filo, el efecto real de
-  // una pluma caligráfica (no simplemente "más ancho porque sí").
-  const NIB_ANGLE = Math.PI/4;
-  const NIB_NX = Math.cos(NIB_ANGLE), NIB_NY = Math.sin(NIB_ANGLE);
-  function drawNibRibbon(ctx, p0, pc, p1, baseWidth, color, alpha, composite){
-    const samples = 6;
-    const pts = [];
-    for(let i=0;i<=samples;i++){
-      const t = i/samples;
-      const it = 1-t;
-      pts.push({ x: it*it*p0.x + 2*it*t*pc.x + t*t*p1.x, y: it*it*p0.y + 2*it*t*pc.y + t*t*p1.y });
-    }
-    ctx.fillStyle = color; ctx.globalAlpha = alpha; ctx.globalCompositeOperation = composite;
-    const halfMin = baseWidth*0.14, halfMax = baseWidth*0.62;
-    ctx.beginPath();
-    for(let i=0;i<pts.length-1;i++){
-      const a=pts[i], b=pts[i+1];
-      let dx=b.x-a.x, dy=b.y-a.y; const len=Math.hypot(dx,dy)||1; dx/=len; dy/=len;
-      const cross = Math.abs(dx*NIB_NY - dy*NIB_NX);
-      const half = halfMin + (halfMax-halfMin)*cross;
-      const ox=-dy*half, oy=dx*half;
-      ctx.moveTo(a.x+ox, a.y+oy); ctx.lineTo(b.x+ox, b.y+oy);
-      ctx.lineTo(b.x-ox, b.y-oy); ctx.lineTo(a.x-ox, a.y-oy); ctx.closePath();
-    }
-    ctx.fill();
-    ctx.globalAlpha=1; ctx.globalCompositeOperation='source-over';
-  }
-  // Pinta un tramo de trazo (línea recta de 2 puntos, o curva cuadrática de
-  // 3: [inicio, punto de control real, fin]) según la TÉCNICA del estilo de
-  // lápiz — esta es la pieza central que hace que cada lápiz se sienta
-  // realmente distinto, no solo "más fino o más grueso".
-  function paintStrokePath(targetCtx, stroke, style, idx, pts){
-    const p0 = pts[0], p1 = pts[pts.length-1], pc = pts.length===3 ? pts[1] : null;
-    const pressureP = pc ? pc.p : p1.p;
-    const baseWidth = widthForStroke(stroke, pressureP);
-    const baseAlpha = alphaForStroke(stroke, style.alpha, idx);
-    const ps = stroke.tool==='pen' ? (PEN_STYLES[stroke.penStyle] || PEN_STYLES.estandar) : null;
-    const composite = (ps && ps.blend) ? ps.blend : style.composite;
-    const render = ps ? (ps.render || 'plain') : 'plain';
-    function tracePath(ctx, ox, oy){
-      ctx.moveTo(p0.x+ox, p0.y+oy);
-      if(pc) ctx.quadraticCurveTo(pc.x+ox, pc.y+oy, p1.x+ox, p1.y+oy);
-      else ctx.lineTo(p1.x+ox, p1.y+oy);
-    }
-    if(render==='nib'){
-      drawNibRibbon(targetCtx, p0, pc||p1, p1, baseWidth, stroke.color, baseAlpha, composite);
-      return;
-    }
-    if(render==='grain'){
-      // Grano real: en vez de UNA línea continua, varias pasadas cortas con
-      // posición, ancho y opacidad levemente distintos entre sí — como una
-      // punta que roza el papel en vez de deslizar tinta líquida pareja.
-      const passes = 4;
-      targetCtx.strokeStyle = stroke.color; targetCtx.lineJoin='round'; targetCtx.lineCap='round';
-      targetCtx.globalCompositeOperation = composite;
-      for(let k=0;k<passes;k++){
-        const jx = (jitterSeed(idx,k*3+1)-0.5) * baseWidth*0.55;
-        const jy = (jitterSeed(idx,k*3+2)-0.5) * baseWidth*0.55;
-        const wJ = Math.max(0.6, baseWidth*(0.5+jitterSeed(idx,k*3+3)*0.7));
-        targetCtx.globalAlpha = baseAlpha*(0.3+jitterSeed(idx,k*7+5)*0.35);
-        targetCtx.lineWidth = wJ;
-        targetCtx.beginPath(); tracePath(targetCtx, jx, jy); targetCtx.stroke();
-      }
-      targetCtx.globalAlpha=1; targetCtx.globalCompositeOperation='source-over';
-      return;
-    }
-    targetCtx.globalCompositeOperation = composite;
-    if(render==='brush'){
-      // Halo blando: una pasada extra, más ancha y bien translúcida, por
-      // debajo del trazo principal — el borde "mojado" típico de un pincel.
-      targetCtx.globalAlpha = baseAlpha*0.3; targetCtx.strokeStyle = stroke.color;
-      targetCtx.lineWidth = baseWidth*1.75; targetCtx.lineJoin='round'; targetCtx.lineCap='round';
-      targetCtx.beginPath(); tracePath(targetCtx,0,0); targetCtx.stroke();
-    }
-    targetCtx.globalAlpha = baseAlpha; targetCtx.strokeStyle = stroke.color;
-    targetCtx.lineWidth = baseWidth; targetCtx.lineJoin='round'; targetCtx.lineCap='round';
-    targetCtx.beginPath(); tracePath(targetCtx,0,0); targetCtx.stroke();
-    if(render==='gel'){
-      // Brillo: una línea fina y clara al medio del trazo, como el reflejo
-      // típico de una tinta de gel bien saturada.
-      targetCtx.globalAlpha = baseAlpha*0.32; targetCtx.strokeStyle = '#ffffff';
-      targetCtx.lineWidth = Math.max(0.5, baseWidth*0.22);
-      targetCtx.beginPath(); tracePath(targetCtx,0,0); targetCtx.stroke();
-    }
-    targetCtx.globalAlpha = 1; targetCtx.globalCompositeOperation = 'source-over';
-  }
   function dotTo(targetCtx, stroke, style){
     const p = stroke.points[0];
-    const ps = stroke.tool==='pen' ? (PEN_STYLES[stroke.penStyle] || PEN_STYLES.estandar) : null;
-    const baseWidth = widthForStroke(stroke, p.p);
-    const baseAlpha = alphaForStroke(stroke, style.alpha, 0);
-    const composite = (ps && ps.blend) ? ps.blend : style.composite;
-    const render = ps ? (ps.render || 'plain') : 'plain';
-    if(render==='grain'){
-      targetCtx.fillStyle = stroke.color; targetCtx.globalCompositeOperation = composite;
-      for(let k=0;k<4;k++){
-        const jx=(jitterSeed(0,k*3+1)-0.5)*baseWidth*0.5, jy=(jitterSeed(0,k*3+2)-0.5)*baseWidth*0.5;
-        targetCtx.globalAlpha = baseAlpha*(0.3+jitterSeed(0,k*7+5)*0.35);
-        targetCtx.beginPath(); targetCtx.arc(p.x+jx, p.y+jy, baseWidth*(0.3+jitterSeed(0,k*5+2)*0.25), 0, Math.PI*2); targetCtx.fill();
-      }
-      targetCtx.globalAlpha=1; targetCtx.globalCompositeOperation='source-over';
-      return;
-    }
-    if(render==='nib'){
-      targetCtx.save(); targetCtx.translate(p.x,p.y); targetCtx.rotate(NIB_ANGLE);
-      targetCtx.fillStyle = stroke.color; targetCtx.globalAlpha = baseAlpha; targetCtx.globalCompositeOperation = composite;
-      targetCtx.beginPath(); targetCtx.ellipse(0,0, baseWidth*0.62, baseWidth*0.16, 0, 0, Math.PI*2); targetCtx.fill();
-      targetCtx.restore();
-      targetCtx.globalAlpha=1; targetCtx.globalCompositeOperation='source-over';
-      return;
-    }
-    targetCtx.globalCompositeOperation = composite;
-    if(render==='brush'){
-      targetCtx.globalAlpha = baseAlpha*0.3; targetCtx.fillStyle = stroke.color;
-      targetCtx.beginPath(); targetCtx.arc(p.x, p.y, baseWidth*0.85, 0, Math.PI*2); targetCtx.fill();
-    }
-    targetCtx.globalAlpha = baseAlpha; targetCtx.fillStyle = stroke.color;
+    targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, 0); targetCtx.globalCompositeOperation = style.composite;
+    targetCtx.fillStyle = stroke.color;
     targetCtx.beginPath();
-    targetCtx.arc(p.x, p.y, baseWidth / 2, 0, Math.PI*2);
+    targetCtx.arc(p.x, p.y, widthForStroke(stroke, p.p) / 2, 0, Math.PI*2);
     targetCtx.fill();
-    if(render==='gel'){
-      targetCtx.globalAlpha = baseAlpha*0.32; targetCtx.fillStyle = '#ffffff';
-      targetCtx.beginPath(); targetCtx.arc(p.x, p.y, Math.max(0.5, baseWidth*0.16), 0, Math.PI*2); targetCtx.fill();
-    }
     targetCtx.globalAlpha = 1; targetCtx.globalCompositeOperation = 'source-over';
   }
   function segmentTo(targetCtx, stroke, i0, i1, style){
     const p0 = stroke.points[i0], p1 = stroke.points[i1];
-    paintStrokePath(targetCtx, stroke, style, i1, [p0, p1]);
+    targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, i1); targetCtx.globalCompositeOperation = style.composite;
+    targetCtx.strokeStyle = stroke.color;
+    targetCtx.lineWidth = widthForStroke(stroke, p1.p);
+    targetCtx.lineJoin = 'round'; targetCtx.lineCap = 'round';
+    targetCtx.beginPath();
+    targetCtx.moveTo(p0.x, p0.y);
+    targetCtx.lineTo(p1.x, p1.y);
+    targetCtx.stroke();
+    targetCtx.globalAlpha = 1; targetCtx.globalCompositeOperation = 'source-over';
   }
   // ---------- Trazo suavizado tipo Nebo ----------
   // El dibujado anterior unía los puntos crudos del puntero con líneas RECTAS
@@ -4767,7 +4755,16 @@ window.AppTheme = (function(){
     const p0 = pts[i-1], p1 = pts[i], p2 = pts[i+1];
     const start = (i === 1) ? p0 : midpoint(p0, p1);
     const end = midpoint(p1, p2);
-    paintStrokePath(targetCtx, stroke, style, i, [start, p1, end]);
+    targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, i);
+    targetCtx.globalCompositeOperation = style.composite;
+    targetCtx.strokeStyle = stroke.color;
+    targetCtx.lineWidth = widthForStroke(stroke, p1.p);
+    targetCtx.lineJoin = 'round'; targetCtx.lineCap = 'round';
+    targetCtx.beginPath();
+    targetCtx.moveTo(start.x, start.y);
+    targetCtx.quadraticCurveTo(p1.x, p1.y, end.x, end.y);
+    targetCtx.stroke();
+    targetCtx.globalAlpha = 1; targetCtx.globalCompositeOperation = 'source-over';
   }
   function drawFreehandTail(targetCtx, stroke, style){
     const pts = stroke.points;
@@ -4775,7 +4772,16 @@ window.AppTheme = (function(){
     if(n < 3) return; // con 2 puntos el segmento recto ya quedó completo
     const prev = pts[n-2], last = pts[n-1];
     const start = midpoint(prev, last);
-    paintStrokePath(targetCtx, stroke, style, n-1, [start, last]);
+    targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, n-1);
+    targetCtx.globalCompositeOperation = style.composite;
+    targetCtx.strokeStyle = stroke.color;
+    targetCtx.lineWidth = widthForStroke(stroke, last.p);
+    targetCtx.lineJoin = 'round'; targetCtx.lineCap = 'round';
+    targetCtx.beginPath();
+    targetCtx.moveTo(start.x, start.y);
+    targetCtx.lineTo(last.x, last.y);
+    targetCtx.stroke();
+    targetCtx.globalAlpha = 1; targetCtx.globalCompositeOperation = 'source-over';
   }
   function drawFreehandSmooth(targetCtx, stroke, style){
     const pts = stroke.points;
@@ -4787,9 +4793,18 @@ window.AppTheme = (function(){
       const p0 = pts[i-1], p1 = pts[i], p2 = pts[i+1];
       const start = (i === 1) ? p0 : midpoint(p0, p1);
       const end = midpoint(p1, p2);
-      paintStrokePath(targetCtx, stroke, style, i, [start, p1, end]);
+      targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, i);
+      targetCtx.globalCompositeOperation = style.composite;
+      targetCtx.strokeStyle = stroke.color;
+      targetCtx.lineWidth = widthForStroke(stroke, p1.p);
+      targetCtx.lineJoin = 'round'; targetCtx.lineCap = 'round';
+      targetCtx.beginPath();
+      targetCtx.moveTo(start.x, start.y);
+      targetCtx.quadraticCurveTo(p1.x, p1.y, end.x, end.y);
+      targetCtx.stroke();
     }
     drawFreehandTail(targetCtx, stroke, style);
+    targetCtx.globalAlpha = 1; targetCtx.globalCompositeOperation = 'source-over';
   }
   function lineSegmentTo(targetCtx, stroke, style){
     targetCtx.globalAlpha = style.alpha; targetCtx.globalCompositeOperation = style.composite;
@@ -4810,20 +4825,16 @@ window.AppTheme = (function(){
   viewport.addEventListener('pointerdown', (e)=>{
     if(e.target.closest('#liveRecognition')) return;
     hasInteracted = true;
+    cachedViewportRect = null; // medición fresca al arrancar cada trazo
 
-    // Rechazo de palma real: si "Ignorar dedos" está activo, cualquier
-    // puntero táctil se descarta por completo —no se agrega a
-    // activePointers, no se captura, no cuenta como dedo para pellizco—
-    // siempre que haya señales de que el lápiz está en juego: o ya hay un
-    // trazo en curso con OTRO puntero (activeDrawPointerId), o el lápiz
-    // estuvo "cerca" hace muy poco (penNearActive, ver más arriba). Esto
-    // cubre tanto la palma que se apoya MIENTRAS se escribe como la que se
-    // apoya un instante ANTES de que la punta toque la hoja — antes solo se
-    // cubría el primer caso, así que una palma apoyada de entrada se colaba
-    // como puntero normal y, al tocar el lápiz, sumaba un segundo puntero
-    // que el código de más abajo interpretaba como el arranque de un
-    // pellizco, cortando el trazo en vez de dejar escribir.
-    if(penOnly && e.pointerType === 'touch' && (penNearActive || (activeDrawPointerId !== null && activeDrawPointerId !== e.pointerId))){
+    // Rechazo de palma real: si "Ignorar dedos" está activo y ya hay un
+    // puntero (lápiz) escribiendo, cualquier OTRO puntero táctil que aparezca
+    // (la palma apoyada sobre la pantalla) se ignora del todo: no se agrega a
+    // activePointers, no se captura, no cuenta como segundo dedo. Sin esto,
+    // la palma sumaba un segundo puntero y el código de más abajo lo trataba
+    // como el arranque de un pellizco, cortando el trazo en curso — que es
+    // justo el "no ignora los dedos" que se estaba viendo.
+    if(penOnly && e.pointerType === 'touch' && activeDrawPointerId !== null && activeDrawPointerId !== e.pointerId){
       return;
     }
 
@@ -4926,102 +4937,139 @@ window.AppTheme = (function(){
     }
 
     if(!drawing || shouldIgnoreForDraw(e)) return;
-    const pt = pageCoordsFromClient(e.clientX, e.clientY);
-    pt.p = e.pressure && e.pressure > 0 ? e.pressure : 0.5;
 
-    // Firmeza del pulso: suaviza el punto nuevo contra los últimos puntos del
-    // trazo (promedio móvil), en vez de dibujar la posición cruda del dedo/lápiz.
-    // El suavizado ahora es ADAPTATIVO a la velocidad del gesto, además de al
-    // grosor elegido:
-    //  - Movimiento LENTO (mano quieta, apoyada): es justo ahí donde más se
-    //    nota el microtemblor, así que se suaviza fuerte para que la línea
-    //    salga firme en vez de "peluda".
-    //  - Movimiento RÁPIDO (trazo intencional, gesto de la letra): se suaviza
-    //    poco, para no sentirse pegajoso ni redondear las puntas y ángulos
-    //    propios de la letra.
-    //  - Lapicera fina: el temblor se nota más a bajo grosor, así que parte
-    //    de un piso de suavizado más alto que la gruesa.
-    // Con "Suavizar el trazo" (tidyMode) activo se suma firmeza extra y, en
-    // hojas rayadas, se alinea además al renglón más cercano.
-    if(tool === 'pen' && currentStroke && currentStroke.points.length){
-      const pts = currentStroke.points;
-      const last = pts[pts.length-1];
-      const prev = pts.length > 1 ? pts[pts.length-2] : last;
-      const w = currentStroke.width || widths.pen;
-      // Antes 't' se calculaba a partir del ancho crudo del control (w), pero
-      // cada estilo de lapicera dibuja mucho más fino o más grueso que ese
-      // valor crudo (por ej. "Fina" multiplica el ancho por ~0.3-0.6). Un
-      // trazo fino tiembla más a la vista con el mismo pulso, así que hay que
-      // firmarlo más — pero el cálculo viejo ignoraba esa diferencia y trataba
-      // "Fina" y "Estilográfica" igual que "Bolígrafo" al mismo w. Ahora se usa
-      // el ancho EFECTIVO ya renderizado (con la fórmula propia de cada
-      // estilo, a una presión media de referencia) para que la firmeza se
-      // ajuste a lo que realmente se ve en la hoja.
-      const ps = PEN_STYLES[currentStroke.penStyle] || PEN_STYLES.estandar;
-      const effectiveW = ps.widthFn(w, 0.55);
-      const t = clamp((effectiveW - 1) / 13, 0, 1); // 0 = muy fina, 1 = muy gruesa
+    // Subrayado y forma: arrastran un solo punto (inicio→actual), no
+    // acumulan curva, así que no necesitan las muestras intermedias de
+    // getCoalescedEvents — se procesan con la posición final del evento,
+    // igual que antes.
+    if(currentStroke && (currentStroke.tool === 'underline' || currentStroke.tool === 'shape')){
+      const pt = pageCoordsFromClient(e.clientX, e.clientY);
+      pt.p = e.pressure && e.pressure > 0 ? e.pressure : 0.5;
+      growPageIfNeeded(pt);
+      autoScrollIfNeeded(e.clientX, e.clientY);
+      if(currentStroke.tool === 'underline'){
+        currentStroke.points[1] = pt;
+        clearBuffer();
+        lineSegmentTo(bufferCtx, currentStroke, SILHOUETTE_STYLE);
+        restoreFromBase();
+        overlayBuffer('underline');
+      } else {
+        currentStroke.x1 = pt.x;
+        currentStroke.y1 = pt.y;
+        restoreFromBase();
+        drawShapeStroke(ctx, currentStroke);
+      }
+      return;
+    }
 
-      // Velocidad del gesto: distancia entre la posición cruda y el último
-      // punto ya suavizado, normalizada a un rango típico de trazo a mano.
-      const rawDist = Math.hypot(pt.x-last.x, pt.y-last.y);
-      const speedT = clamp(rawDist / (16/zoom), 0, 1); // 0 = casi quieto, 1 = gesto rápido
+    // ---------- Trazo a mano alzada (lápiz, marcador, goma) ----------
+    // getCoalescedEvents(): un solo evento "pointermove" puede representar
+    // VARIAS muestras reales del lápiz/dedo que el navegador agrupó (pasa
+    // sobre todo con Apple Pencil y styli que muestrean a más Hz que la
+    // pantalla). Antes solo se procesaba la posición final de cada evento,
+    // así que en un trazo rápido se perdían puntos intermedios y la curva
+    // salía más angulosa aunque el suavizado estuviera bien calculado — no
+    // había suficientes puntos reales para suavizar. Procesando también las
+    // muestras "coalesced" (si el navegador las expone) el trazo sigue la
+    // mano con toda la fidelidad con la que el hardware la reportó, sin
+    // trabajo de más: son las mismas muestras que el dispositivo ya generó,
+    // antes se descartaban.
+    let rawEvents = (typeof e.getCoalescedEvents === 'function') ? e.getCoalescedEvents() : null;
+    if(!rawEvents || !rawEvents.length) rawEvents = [e];
 
-      // Peso del punto nuevo: más bajo = más suavizado/firme. Interpolamos
-      // entre un piso (quieto/tembloroso) y un techo (gesto rápido) según speedT.
-      // Piso general un poco más bajo que antes (más firmeza de base en todos
-      // los estilos), sin tocar el techo: los trazos rápidos siguen sintiéndose
-      // igual de sueltos, solo se afirma el micro-temblor de la mano quieta.
-      const slowWeight = tidyMode ? 0.20 : 0.28;
-      const fastWeight = tidyMode ? 0.60 : 0.72;
-      const floor = clamp(slowWeight - (1 - t) * 0.10, 0.11, slowWeight);
-      const ceil = clamp(fastWeight - (1 - t) * 0.08, floor + 0.1, fastWeight);
-      const newWeight = floor + (ceil - floor) * speedT;
-      const midWeight = (1 - newWeight) * 0.35;
-      const oldWeight = 1 - newWeight - midWeight;
-      pt.x = last.x*oldWeight + prev.x*midWeight + pt.x*newWeight;
-      pt.y = last.y*oldWeight + prev.y*midWeight + pt.y*newWeight;
-      if(tidyMode){
-        const page = pages.find(p=>p.id===currentPageId);
-        if(page && page.paperType === 'rayado'){
-          const lineSpacing = 35, lineOffset = 34;
-          const nearestLine = Math.round((pt.y-lineOffset)/lineSpacing)*lineSpacing + lineOffset;
-          if(Math.abs(pt.y-nearestLine) < 10) pt.y = pt.y*0.7 + nearestLine*0.3;
+    let lastPt = null;
+    for(let k=0;k<rawEvents.length;k++){
+      const rawEvent = rawEvents[k];
+      const pt = pageCoordsFromClient(rawEvent.clientX, rawEvent.clientY);
+      pt.p = rawEvent.pressure && rawEvent.pressure > 0 ? rawEvent.pressure : 0.5;
+
+      // Firmeza del pulso: suaviza el punto nuevo contra los últimos puntos del
+      // trazo (promedio móvil), en vez de dibujar la posición cruda del dedo/lápiz.
+      // El suavizado ahora es ADAPTATIVO a la velocidad del gesto, además de al
+      // grosor elegido:
+      //  - Movimiento LENTO (mano quieta, apoyada): es justo ahí donde más se
+      //    nota el microtemblor, así que se suaviza fuerte para que la línea
+      //    salga firme en vez de "peluda".
+      //  - Movimiento RÁPIDO (trazo intencional, gesto de la letra): se suaviza
+      //    poco, para no sentirse pegajoso ni redondear las puntas y ángulos
+      //    propios de la letra.
+      //  - Lapicera fina: el temblor se nota más a bajo grosor, así que parte
+      //    de un piso de suavizado más alto que la gruesa.
+      // Con "Suavizar el trazo" (tidyMode) activo se suma firmeza extra y, en
+      // hojas rayadas, se alinea además al renglón más cercano.
+      if(tool === 'pen' && currentStroke && currentStroke.points.length){
+        const pts = currentStroke.points;
+        const last = pts[pts.length-1];
+        const prev = pts.length > 1 ? pts[pts.length-2] : last;
+        const w = currentStroke.width || widths.pen;
+        // Antes 't' se calculaba a partir del ancho crudo del control (w), pero
+        // cada estilo de lapicera dibuja mucho más fino o más grueso que ese
+        // valor crudo (por ej. "Fina" multiplica el ancho por ~0.3-0.6). Un
+        // trazo fino tiembla más a la vista con el mismo pulso, así que hay que
+        // firmarlo más — pero el cálculo viejo ignoraba esa diferencia y trataba
+        // "Fina" y "Estilográfica" igual que "Bolígrafo" al mismo w. Ahora se usa
+        // el ancho EFECTIVO ya renderizado (con la fórmula propia de cada
+        // estilo, a una presión media de referencia) para que la firmeza se
+        // ajuste a lo que realmente se ve en la hoja.
+        const ps = PEN_STYLES[currentStroke.penStyle] || PEN_STYLES.estandar;
+        const effectiveW = ps.widthFn(w, 0.55);
+        const t = clamp((effectiveW - 1) / 13, 0, 1); // 0 = muy fina, 1 = muy gruesa
+
+        // Velocidad del gesto: distancia entre la posición cruda y el último
+        // punto ya suavizado, normalizada a un rango típico de trazo a mano.
+        const rawDist = Math.hypot(pt.x-last.x, pt.y-last.y);
+        const speedT = clamp(rawDist / (16/zoom), 0, 1); // 0 = casi quieto, 1 = gesto rápido
+
+        // Peso del punto nuevo: más bajo = más suavizado/firme. Interpolamos
+        // entre un piso (quieto/tembloroso) y un techo (gesto rápido) según speedT.
+        // Piso general un poco más bajo que antes (más firmeza de base en todos
+        // los estilos), sin tocar el techo: los trazos rápidos siguen sintiéndose
+        // igual de sueltos, solo se afirma el micro-temblor de la mano quieta.
+        const slowWeight = tidyMode ? 0.20 : 0.28;
+        const fastWeight = tidyMode ? 0.60 : 0.72;
+        const floor = clamp(slowWeight - (1 - t) * 0.10, 0.11, slowWeight);
+        const ceil = clamp(fastWeight - (1 - t) * 0.08, floor + 0.1, fastWeight);
+        const newWeight = floor + (ceil - floor) * speedT;
+        const midWeight = (1 - newWeight) * 0.35;
+        const oldWeight = 1 - newWeight - midWeight;
+        pt.x = last.x*oldWeight + prev.x*midWeight + pt.x*newWeight;
+        pt.y = last.y*oldWeight + prev.y*midWeight + pt.y*newWeight;
+        if(tidyMode){
+          const page = pages.find(p=>p.id===currentPageId);
+          if(page && page.paperType === 'rayado'){
+            const lineSpacing = 35, lineOffset = 34;
+            const nearestLine = Math.round((pt.y-lineOffset)/lineSpacing)*lineSpacing + lineOffset;
+            if(Math.abs(pt.y-nearestLine) < 10) pt.y = pt.y*0.7 + nearestLine*0.3;
+          }
         }
       }
+
+      lastPt = pt;
+      const pts = currentStroke.points;
+      const last = pts[pts.length-1];
+      if(Math.hypot(pt.x-last.x, pt.y-last.y) < 0.6/zoom) continue;
+      pts.push(pt);
+
+      if(currentStroke.tool === 'highlighter'){
+        // Solo se dibuja sobre el buffer offscreen (barato). La copia
+        // completa de la hoja (restoreFromBase + overlayBuffer, la parte
+        // cara: copia el canvas entero) se hace UNA sola vez por evento más
+        // abajo, no por cada muestra agrupada — repetirla por muestra sería
+        // justo el desperdicio que se quiere evitar.
+        drawFreehandIncrement(bufferCtx, currentStroke, SILHOUETTE_STYLE);
+      } else {
+        drawFreehandIncrement(ctx, currentStroke, styleFor(currentStroke.tool));
+      }
     }
-    growPageIfNeeded(pt);
+
+    if(!lastPt) return;
+    growPageIfNeeded(lastPt);
     autoScrollIfNeeded(e.clientX, e.clientY);
 
-    if(currentStroke && currentStroke.tool === 'underline'){
-      currentStroke.points[1] = pt;
-      clearBuffer();
-      lineSegmentTo(bufferCtx, currentStroke, SILHOUETTE_STYLE);
-      restoreFromBase();
-      overlayBuffer('underline');
-      return;
-    }
-
-    if(currentStroke && currentStroke.tool === 'shape'){
-      currentStroke.x1 = pt.x;
-      currentStroke.y1 = pt.y;
-      restoreFromBase();
-      drawShapeStroke(ctx, currentStroke);
-      return;
-    }
-
-    const pts = currentStroke.points;
-    const last = pts[pts.length-1];
-    if(Math.hypot(pt.x-last.x, pt.y-last.y) < 0.6/zoom) return;
-    pts.push(pt);
-
     if(currentStroke.tool === 'highlighter'){
-      drawFreehandIncrement(bufferCtx, currentStroke, SILHOUETTE_STYLE);
       restoreFromBase();
       overlayBuffer('highlighter');
-      return;
     }
-
-    drawFreehandIncrement(ctx, currentStroke, styleFor(currentStroke.tool));
   });
 
   function finishStroke(){
@@ -5247,6 +5295,73 @@ window.AppTheme = (function(){
   function folderChildren(parentId){
     return folders.filter(f=> (f.parentId||null) === (parentId||null));
   }
+
+  function folderDrawerPathLabel(folder){
+    const ancestors = folderAncestors(folder.id);
+    return ancestors.length ? ancestors.map(f=>f.name).concat(folder.name).join(' / ') : 'Carpeta principal';
+  }
+  function renderFolderDrawer(){
+    if(!folderDrawerList) return;
+    folderDrawerList.innerHTML = '';
+    const list = folders.map(normalizeFolder).sort((a,b)=>{
+      const pathA = folderDrawerPathLabel(a), pathB = folderDrawerPathLabel(b);
+      return pathA.localeCompare(pathB, 'es') || a.name.localeCompare(b.name, 'es');
+    });
+    if(folderDrawerEmpty) folderDrawerEmpty.classList.toggle('show', list.length===0);
+    list.forEach(folder=>{
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'folderDrawerItem';
+      item.title = 'Abrir ' + folder.name;
+      const dot = document.createElement('span');
+      dot.className = 'folderDrawerDot';
+      dot.style.background = folder.color || FOLDER_COLORS[0];
+      const icon = document.createElement('span');
+      icon.className = 'folderDrawerIcon';
+      icon.textContent = folder.coverIcon || FOLDER_ICONS[0];
+      const text = document.createElement('span');
+      text.className = 'folderDrawerText';
+      const name = document.createElement('span');
+      name.className = 'folderDrawerName';
+      name.textContent = folder.name;
+      const path = document.createElement('span');
+      path.className = 'folderDrawerPath';
+      path.textContent = folderDrawerPathLabel(folder);
+      text.appendChild(name); text.appendChild(path);
+      const arrow = document.createElementNS('http://www.w3.org/2000/svg','svg');
+      arrow.classList.add('folderDrawerArrow');
+      arrow.setAttribute('viewBox','0 0 24 24');
+      arrow.setAttribute('fill','none'); arrow.setAttribute('stroke','currentColor');
+      arrow.setAttribute('stroke-width','2'); arrow.setAttribute('stroke-linecap','round'); arrow.setAttribute('stroke-linejoin','round');
+      arrow.innerHTML = '<path d="m9 18 6-6-6-6"/>';
+      item.appendChild(dot); item.appendChild(icon); item.appendChild(text); item.appendChild(arrow);
+      item.addEventListener('click', ()=>{
+        closeFolderDrawer();
+        openFolder(folder);
+      });
+      folderDrawerList.appendChild(item);
+    });
+  }
+  function openFolderDrawer(){
+    renderFolderDrawer();
+    folderDrawer.classList.add('open');
+    folderDrawerBackdrop.classList.add('open');
+    folderDrawer.setAttribute('aria-hidden','false');
+    homeMenuBtn.setAttribute('aria-expanded','true');
+  }
+  function closeFolderDrawer(){
+    folderDrawer.classList.remove('open');
+    folderDrawerBackdrop.classList.remove('open');
+    folderDrawer.setAttribute('aria-hidden','true');
+    homeMenuBtn.setAttribute('aria-expanded','false');
+  }
+  if(homeMenuBtn) homeMenuBtn.addEventListener('click', ()=>{
+    if(folderDrawer.classList.contains('open')) closeFolderDrawer(); else openFolderDrawer();
+  });
+  if(folderDrawerClose) folderDrawerClose.addEventListener('click', closeFolderDrawer);
+  if(folderDrawerBackdrop) folderDrawerBackdrop.addEventListener('click', closeFolderDrawer);
+  document.addEventListener('keydown', ev=>{ if(ev.key==='Escape' && folderDrawer.classList.contains('open')) closeFolderDrawer(); });
+
   // Devuelve la cadena de carpetas ancestras desde la raíz hasta `id` (sin
   // incluir `id`), para pintar las migas de pan.
   function folderAncestors(id){
@@ -5303,6 +5418,7 @@ window.AppTheme = (function(){
 
   async function renderHome(){
     renderFolderBreadcrumb();
+    renderFolderDrawer();
     folderGrid.innerHTML = '';
     const list = folderChildren(currentGroupParentId);
     folderEmpty.classList.toggle('show', list.length === 0);
@@ -5475,8 +5591,15 @@ window.AppTheme = (function(){
       } else if(s.id === 'icon'){
         mini.innerHTML = '<span class="folderCoverIcon" style="font-size:16px;">' + (feDraft.coverIcon||FOLDER_ICONS[0]) + '</span>';
       }
-      opt.appendChild(mini);
-      opt.addEventListener('click', ()=>{
+              opt.appendChild(mini);
+        const label = document.createElement('span');
+        label.className = 'fe-styleLabel';
+        label.textContent = s.name;
+        opt.appendChild(label);
+        opt.setAttribute('aria-label', 'Portada ' + s.name);
+        opt.setAttribute('role', 'button');
+        opt.addEventListener('click', ()=>{
+
         feDraft.coverStyle = s.id;
         feEmojiGrid.style.display = s.id === 'icon' ? 'flex' : 'none';
         feRenderStyleGrid();
@@ -5676,11 +5799,13 @@ window.AppTheme = (function(){
   }
 
   async function openFolder(folder){
+    closeFolderDrawer();
     resetPdfPanelForFolder();
     if(window.openVectorPanelForFolder) window.openVectorPanelForFolder(folder);
   }
 
   async function backHome(){
+    closeFolderDrawer();
     hideTidyUndoToast();
     if(currentFolderId){
       await savePageStrokes();
@@ -6074,23 +6199,11 @@ window.AppTheme = (function(){
       // (mismo promedio móvil que usa "Emprolijar letra"): el microtemblor
       // de mano no aporta información a la forma de la letra y sí puede
       // confundir al reconocedor, que interpreta mejor un trazo limpio que
-      // uno entrecortado. Además forzamos color negro sólido y estilo
-      // "estándar" (sin veteado ni opacidad reducida de marcador/grafito)
-      // para el mejor contraste posible.
-      //
-      // El grosor mínimo/máximo se calcula como PROPORCIÓN de la altura de
-      // la palabra (h), no como un valor fijo: antes era un mínimo fijo
-      // (2.8), y al escalarse junto con letra chica (donde la escala sube
-      // mucho para llegar al piso de resolución) terminaba siendo
-      // desproporcionadamente grueso. Eso hacía que, por ejemplo, las tres
-      // patas de la "m" se pegaran entre sí y se leyeran como "n", o que el
-      // asta de la "h" se engordara y perdiera la forma que la distingue de
-      // "n"/"m". Con un grosor relativo a la altura real de lo escrito, la
-      // proporción del trazo se mantiene sin importar si la letra es chica
-      // o grande.
-      const minW = Math.max(1.2, h*0.035), maxW = Math.max(minW+0.5, h*0.13);
+      // uno entrecortado. Además forzamos color negro sólido, estilo
+      // "estándar" (sin veteado ni opacidad reducida de marcador/grafito) y
+      // un grosor mínimo, para el mejor contraste posible.
       const smoothedPoints = smoothStrokePoints(b.stroke.points);
-      const forced = Object.assign({}, b.stroke, { color:'#000000', penStyle:'estandar', width: Math.min(maxW, Math.max(b.stroke.width, minW)), points: smoothedPoints });
+      const forced = Object.assign({}, b.stroke, { color:'#000000', penStyle:'estandar', width: Math.max(b.stroke.width, 2.8), points: smoothedPoints });
       if(forced.points.length < 2) dotTo(octx, forced, SILHOUETTE_STYLE);
       else for(let i=1;i<forced.points.length;i++) segmentTo(octx, forced, i-1, i, SILHOUETTE_STYLE);
     });
@@ -6635,23 +6748,15 @@ window.AppTheme = (function(){
   let vStroke=null, vPoints=[], vGesture=null, vTouchInfo=null, vSelected=null;
   let vHistory=[], vFuture=[], vSaved='';
   // ---- Estilos de trazo del lápiz (bolígrafo, caligráfico, etc.) ----
-  // Cada estilo, además de ancho/opacidad, puede pedir una mezcla real
-  // ('blend': cómo se combina con lo que ya está dibujado debajo) y/o un
-  // filtro de textura ('filter': una deformación real del trazo, no solo
-  // menos opacidad) — así el marcador oscurece de verdad donde se pisa a
-  // sí mismo, y el grafito/pincel seco tienen un borde rugoso genuino.
   const VB_PEN_STYLES = {
     estandar:      { name:'Estándar',        widthMul:1,    alpha:1,   linecap:'round',  blend:false },
-    boligrafo:     { name:'Bolígrafo',        widthMul:.75,  alpha:1,   linecap:'round',  blend:false },
+    boligrafo:     { name:'Bolígrafo',        widthMul:.7,   alpha:1,   linecap:'round',  blend:false },
+    caligrafico:   { name:'Caligráfico',      widthMul:1.9,  alpha:.94, linecap:'square', blend:false },
     fina:          { name:'Punta fina',       widthMul:.45,  alpha:1,   linecap:'round',  blend:false },
-    gel:           { name:'Gel',              widthMul:.85,  alpha:1,   linecap:'round',  blend:false },
     estilografica: { name:'Estilográfica',    widthMul:1.15, alpha:.92, linecap:'round',  blend:false },
-    caligrafico:   { name:'Caligráfico',      widthMul:2.1,  alpha:1,   linecap:'square', blend:false },
-    marcador:      { name:'Marcador seco',    widthMul:2.4,  alpha:.55, linecap:'round',  blend:'multiply' },
-    grafito:       { name:'Lápiz grafito',    widthMul:.95,  alpha:.75, linecap:'round',  blend:true, filter:'vbGrainFilter' },
-    carbon:        { name:'Carboncillo',      widthMul:1.5,  alpha:.62, linecap:'round',  blend:true, filter:'vbGrainFilter' },
+    marcador:      { name:'Marcador seco',    widthMul:2.4,  alpha:.5,  linecap:'round',  blend:false },
+    grafito:       { name:'Lápiz grafito',    widthMul:.95,  alpha:.75, linecap:'round',  blend:true  },
     pincel:        { name:'Pincel',           widthMul:2.8,  alpha:.88, linecap:'round',  blend:false },
-    pincelSeco:    { name:'Pincel seco',      widthMul:1.6,  alpha:.6,  linecap:'round',  blend:true, filter:'vbGrainFilter' },
   };
   let vPenStyle='estandar';
   let vMarkStyle='translucido';
@@ -6664,6 +6769,67 @@ window.AppTheme = (function(){
   // Grosor recordado por separado para lápiz/marcador y para la goma.
   let vPenSize=3, vEraserSize=14;
   let vEraseDirty=false;
+  let vPenOnly=false;
+  let vTheme='dark';
+  const vbPenOnlyBtn=document.getElementById('vbPenOnlyBtn');
+  const vbPenOnlyToggle=document.getElementById('vbPenOnlyToggle');
+  const vbPenOnlyToggleText=document.getElementById('vbPenOnlyToggleText');
+  const vbThemeDark=document.getElementById('vbThemeDark');
+  const vbThemeLight=document.getElementById('vbThemeLight');
+  const VB_PEN_ONLY_KEY='cuaderno:vectorPenOnly';
+  // El inicio y la carpeta comparten una única preferencia de tema.
+  const VB_THEME_KEY='cuaderno:theme';
+  function vbLoadPreference(key, fallback){
+    try{ const value=localStorage.getItem(key); return value===null ? fallback : value; }catch(e){ return fallback; }
+  }
+  function vbSyncPenOnlyUI(){
+    const on=!!vPenOnly;
+    if(vbPenOnlyBtn){
+      vbPenOnlyBtn.classList.toggle('active',on);
+      vbPenOnlyBtn.setAttribute('aria-pressed',String(on));
+      vbPenOnlyBtn.title=on?'Solo lápiz activo: los dedos no dibujan':'Solo lápiz inactivo: los dedos pueden dibujar';
+    }
+    if(vbPenOnlyToggle){
+      vbPenOnlyToggle.checked=on;
+      vbPenOnlyToggle.setAttribute('aria-checked',String(on));
+    }
+    if(vbPenOnlyToggleText) vbPenOnlyToggleText.textContent=on?'Solo lápiz activo':'Dedos permitidos';
+  }
+  function vbSetPenOnly(on,persist=true){
+    vPenOnly=!!on;
+    if(persist){ try{ localStorage.setItem(VB_PEN_ONLY_KEY,vPenOnly?'1':'0'); }catch(e){} }
+    vbSyncPenOnlyUI();
+  }
+  function vbSetTheme(theme,persist=true){
+    vTheme=theme==='light'?'light':'dark';
+    // Única fuente de verdad: document + cuaderno:theme + evento compartido.
+    document.documentElement.dataset.theme=vTheme;
+    vbView.classList.toggle('vb-light',vTheme==='light');
+    if(vbThemeDark) vbThemeDark.classList.toggle('active',vTheme==='dark');
+    if(vbThemeLight) vbThemeLight.classList.toggle('active',vTheme==='light');
+    document.querySelectorAll('#themeToggleBtn, .themeToggleBtn').forEach(button=>{
+      button.setAttribute('aria-pressed',String(vTheme==='light'));
+      button.setAttribute('title',vTheme==='light'?'Cambiar a modo oscuro':'Cambiar a modo claro');
+      button.setAttribute('aria-label',vTheme==='light'?'Cambiar a modo oscuro':'Cambiar a modo claro');
+    });
+    if(persist){ try{ localStorage.setItem(VB_THEME_KEY,vTheme); }catch(e){} }
+    window.dispatchEvent(new CustomEvent('cuaderno:themechange',{detail:{theme:vTheme}}));
+  }
+  window.addEventListener('cuaderno:themechange', event=>{
+    const theme=event.detail && event.detail.theme;
+    if((theme==='light'||theme==='dark') && theme!==vTheme) vbSetTheme(theme,false);
+  });
+  function vbInitVisualPreferences(){
+    vbSetPenOnly(vbLoadPreference(VB_PEN_ONLY_KEY,'0')==='1',false);
+    let savedTheme=null;
+    try{ savedTheme=localStorage.getItem(VB_THEME_KEY); }catch(e){}
+    const current=document.documentElement.dataset.theme;
+    const theme=savedTheme==='light'||savedTheme==='dark' ? savedTheme : (current==='light'||current==='dark' ? current : 'dark');
+    vbSetTheme(theme,false);
+  }
+  // Permite que el selector global de inicio sincronice también esta vista.
+  window.vbSetTheme = vbSetTheme;
+  vbInitVisualPreferences();
 
   const NS='http://www.w3.org/2000/svg';
 
@@ -6799,18 +6965,34 @@ window.AppTheme = (function(){
   function vbSetTool(t){
     vTool=t;
     vbView.querySelectorAll('#vbToolbar button').forEach(b=>b.classList.remove('active'));
-    document.getElementById('vb'+t.charAt(0).toUpperCase()+t.slice(1))?.classList.add('active');
+    const activeButton=document.getElementById('vb'+t.charAt(0).toUpperCase()+t.slice(1));
+    activeButton?.classList.add('active');
+    ['vbPen','vbHighlighter','vbEraser'].forEach(id=>{
+      const button=document.getElementById(id);
+      if(button) button.setAttribute('aria-pressed',String(button===activeButton));
+    });
     vbBoard.style.cursor = t==='pen'||t==='highlighter' ? 'crosshair' : t==='text' ? 'text' : t==='eraser' ? 'none' : t==='select' ? 'default' : 'grab';
     vbSelectHint.classList.toggle('show',t==='select');
     vbSyncSizeUI();
     vbUpdateEraserCursorSize();
     if(vbThicknessPanel) vbRenderThicknessPanel();
     vbEraserCursor.style.display = (t==='eraser') ? 'block' : 'none';
+    vbSyncPenOnlyUI();
   }
   ['select','pen','highlighter','eraser','text','hand'].forEach(x=>{
-    document.getElementById('vb'+x.charAt(0).toUpperCase()+x.slice(1)).onclick=()=>vbSetTool(x);
+    const button=document.getElementById('vb'+x.charAt(0).toUpperCase()+x.slice(1));
+    if(button) button.onclick=()=>vbSetTool(x);
+  });
+  if(vbPenOnlyBtn) vbPenOnlyBtn.addEventListener('click',()=>vbSetPenOnly(!vPenOnly));
+  if(vbPenOnlyToggle) vbPenOnlyToggle.addEventListener('change',()=>vbSetPenOnly(vbPenOnlyToggle.checked));
+  [vbThemeDark,vbThemeLight].forEach(button=>{
+    if(button) button.addEventListener('click',()=>vbSetTheme(button.dataset.theme));
   });
 
+  function vbDrawingPointerAllowed(e){
+    if(!vPenOnly) return true;
+    return e.pointerType==='pen' || e.pointerType==='mouse';
+  }
   function vbStabilizePoint(raw){
     if(!vPoints.length) return raw;
     const last=vPoints[vPoints.length-1];
@@ -6856,7 +7038,6 @@ window.AppTheme = (function(){
       vStroke.setAttribute('stroke-linecap', style.linecap);
       vStroke.setAttribute('stroke-linejoin', style.linecap==='square' ? 'miter' : 'round');
       if(style.blend) vStroke.style.mixBlendMode='multiply';
-      if(style.filter) vStroke.style.filter=`url(#${style.filter})`;
     }
     vbObjects.appendChild(vStroke);
   }
@@ -6949,30 +7130,35 @@ window.AppTheme = (function(){
   vbBoard.addEventListener('pointerdown', e=>{
     if(vbView.style.display==='none') return;
     if(e.pointerType==='mouse' && e.button!==0) return;
+    const isDrawingTool=vTool==='pen' || vTool==='highlighter' || vTool==='eraser';
+    if(isDrawingTool && !vbDrawingPointerAllowed(e)) return;
     vbBoard.setPointerCapture(e.pointerId);
     const p=vbClientWorldPoint(e.clientX, e.clientY);
-    if(vSpace || vTool==='hand'){ vGesture={sx:e.clientX, sy:e.clientY, tx:vTx, ty:vTy}; return; }
+    if(vSpace || vTool==='hand'){ vGesture={pointerId:e.pointerId,sx:e.clientX, sy:e.clientY, tx:vTx, ty:vTy}; return; }
     if(vTool==='select'){
       const hit=document.elementFromPoint(e.clientX,e.clientY);
       const target=hit && hit.closest ? hit.closest('[data-obj]') : null;
       if(vSelected) vSelected.classList.remove('vb-selected');
       vSelected=target && vbObjects.contains(target) ? target : null;
-      if(vSelected){ vSelected.classList.add('vb-selected'); vGesture={select:true,sx:e.clientX,sy:e.clientY,tx:0,ty:0}; }
+      if(vSelected){ vSelected.classList.add('vb-selected'); vGesture={pointerId:e.pointerId,select:true,sx:e.clientX,sy:e.clientY,tx:0,ty:0}; }
       else vGesture=null;
       return;
     }
-    if(vTool==='eraser'){ vEraseDirty=false; vbEraseCircleAt(e.clientX, e.clientY); vGesture={erase:true}; return; }
+    if(vTool==='eraser'){ vEraseDirty=false; vbEraseCircleAt(e.clientX, e.clientY); vGesture={pointerId:e.pointerId,erase:true}; return; }
     if(vTool==='text'){
       vbTextBox.value=''; vbTextBox.dataset.x=p.x; vbTextBox.dataset.y=p.y;
       vbTextBox.style.left=e.clientX+'px'; vbTextBox.style.top=e.clientY+'px'; vbTextBox.style.display='block'; vbTextBox.focus(); return;
     }
-    if(vTool==='pen' || vTool==='highlighter'){ vPoints=[p]; vbNewStroke(); vGesture={draw:true}; }
+    if(vTool==='pen' || vTool==='highlighter'){ vPoints=[p]; vbNewStroke(); vGesture={pointerId:e.pointerId,draw:true}; }
   });
   vbBoard.addEventListener('pointermove', e=>{
-    if(vTool==='eraser'){
+    const isDrawingTool=vTool==='pen' || vTool==='highlighter' || vTool==='eraser';
+    if(isDrawingTool && !vbDrawingPointerAllowed(e)) return;
+    if(vTool==='eraser' && (!vPenOnly || vbDrawingPointerAllowed(e))){
       vbEraserCursor.style.left=e.clientX+'px'; vbEraserCursor.style.top=e.clientY+'px';
     }
     if(!vGesture) return;
+    if(vGesture.pointerId!=null && e.pointerId!==vGesture.pointerId) return;
     if(vGesture.draw){
       const raw=vbClientWorldPoint(e.clientX, e.clientY), p=vbStabilizePoint(raw), q=vPoints[vPoints.length-1];
       if(Math.hypot(p.x-q.x, p.y-q.y) > .25/Math.max(vScale,.1)){ vPoints.push(p); vStroke.setAttribute('d', vbSmoothPath(vPoints)); }
@@ -6985,8 +7171,9 @@ window.AppTheme = (function(){
       vTx=vGesture.tx+(e.clientX-vGesture.sx); vTy=vGesture.ty+(e.clientY-vGesture.sy); vbTransform();
     }
   });
-  vbBoard.addEventListener('pointerup', ()=>{
+  vbBoard.addEventListener('pointerup', e=>{
     if(!vGesture) return;
+    if(vGesture.pointerId!=null && e.pointerId!==vGesture.pointerId) return;
     if(vGesture.draw){
       if(vPoints.length<2) vStroke.remove();
       else { vStroke.dataset.pts = JSON.stringify(vPoints); vbCommit(); vbScheduleLiveRecognition(); }
@@ -6995,7 +7182,7 @@ window.AppTheme = (function(){
     if(vGesture.select && vSelected){ vbCommit(); }
     vGesture=null; vStroke=null; vPoints=[];
   });
-  vbBoard.addEventListener('pointercancel', ()=>{ vGesture=null; vStroke=null; vPoints=[]; });
+  vbBoard.addEventListener('pointercancel', e=>{ if(vGesture && vGesture.pointerId!=null && e.pointerId!==vGesture.pointerId) return; vGesture=null; vStroke=null; vPoints=[]; });
   vbBoard.addEventListener('pointerleave', ()=>{ vbEraserCursor.style.display = (vTool==='eraser' && vbView.style.display!=='none') ? 'block' : 'none'; });
   vbBoard.addEventListener('pointerenter', ()=>{ if(vTool==='eraser') vbEraserCursor.style.display='block'; });
 
@@ -7197,17 +7384,9 @@ window.AppTheme = (function(){
     ctx.lineCap='round'; ctx.lineJoin='round';
     strokes.forEach(s=>{
       const pts=vbSmoothPoints(s.pts);
-      // Mismo criterio que el cuaderno: el grosor se acota como proporción
-      // de la altura real de la palabra (h), no con el ancho del trazo tal
-      // cual. Sin un piso, un trazo muy fino se puede desdibujar con el
-      // desenfoque previo y perder el asta de la "h" o el enganche entre
-      // las patas de la "m"; sin un techo, un trazo grueso puede pegar esas
-      // mismas patas entre sí y confundirse con "n". Ambos casos mejoran
-      // atándolo al tamaño real de la letra en vez de a un valor fijo.
-      const minW = Math.max(1.2, h*0.035), maxW = Math.max(minW+0.5, h*0.13);
-      ctx.lineWidth=Math.min(maxW, Math.max(s.width, minW));
+      ctx.lineWidth=s.width;
       if(pts.length<2){
-        ctx.beginPath(); ctx.arc(pts[0].x,pts[0].y,ctx.lineWidth/2,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(pts[0].x,pts[0].y,s.width/2,0,Math.PI*2); ctx.fill();
       }else{
         ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
         for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x,pts[i].y);
@@ -8178,21 +8357,6 @@ window.AppTheme = (function(){
   const vbSettingsBackdrop = document.getElementById('vbSettingsBackdrop');
   const vbOcrToggle = document.getElementById('vbOcrToggle');
   const vbOcrToggleText = document.getElementById('vbOcrToggleText');
-  const vbThemeToggle = document.getElementById('vbThemeToggle');
-  const vbThemeToggleText = document.getElementById('vbThemeToggleText');
-  function refreshVbThemeToggle(){
-    if(!vbThemeToggle) return;
-    const light = window.AppTheme.get() === 'light';
-    vbThemeToggle.checked = light;
-    if(vbThemeToggleText) vbThemeToggleText.textContent = light ? 'Activado' : 'Desactivado';
-  }
-  if(vbThemeToggle){
-    refreshVbThemeToggle();
-    vbThemeToggle.addEventListener('change', ()=>{
-      window.AppTheme.set(vbThemeToggle.checked ? 'light' : 'dark');
-    });
-    window.addEventListener('themeChange', refreshVbThemeToggle);
-  }
   function refreshVbOcrToggle(){
     if(!vbOcrToggle) return;
     const on = window.OcrEngine.isEnabled();
@@ -8210,7 +8374,6 @@ window.AppTheme = (function(){
   }
   function vbOpenSettings(){
     refreshVbOcrToggle();
-    refreshVbThemeToggle();
     const rect = vbSettingsBtn.getBoundingClientRect();
     const panelWidth = 230;
     let left = rect.right - panelWidth;
@@ -8241,7 +8404,7 @@ window.AppTheme = (function(){
 
   // ---- Páginas generales dentro de cada carpeta ----
   const vbFolderNameEl = document.getElementById('vbFolderName');
-  const vbPageSelect = document.getElementById('vbPageSelect');
+  const vbPageTabs = document.getElementById('vbPageTabs');
   const vbAddPage = document.getElementById('vbAddPage');
   function vbLoadPages(){
     try{
@@ -8252,10 +8415,24 @@ window.AppTheme = (function(){
   }
   function vbSavePages(){ try{ localStorage.setItem(vbPagesKey(),JSON.stringify(vPages)); }catch(e){} }
   function vbRenderPageNav(){
-    if(!vbPageSelect) return;
-    vbPageSelect.innerHTML='';
-    vPages.forEach((p,i)=>{ const o=document.createElement('option'); o.value=p.id; o.textContent=p.name||('Página '+(i+1)); vbPageSelect.appendChild(o); });
-    vbPageSelect.value=vCurrentPageId;
+    if(!vbPageTabs) return;
+    vbPageTabs.innerHTML='';
+    vPages.forEach((p,i)=>{
+      const wrap=document.createElement('div'); wrap.className='vb-page-tab-wrap';
+      const b=document.createElement('button');
+      b.type='button'; b.className='vb-page-tab'+(p.id===vCurrentPageId?' active':'');
+      b.setAttribute('role','tab'); b.setAttribute('aria-selected',String(p.id===vCurrentPageId));
+      b.title=p.name||('Página '+(i+1)); b.textContent=p.name||('Página '+(i+1));
+      b.addEventListener('click',()=>{ if(p.id===vCurrentPageId) return; vbCommit(); vCurrentPageId=p.id; vbLoadCurrentPage(); vbRenderPageNav(); vbTransform(); });
+      const close=document.createElement('button');
+      close.type='button'; close.className='vb-page-close'; close.textContent='×';
+      const canDelete=vPages.length>1;
+      close.disabled=!canDelete;
+      close.title=canDelete?'Borrar '+(p.name||('Página '+(i+1))):'No se puede borrar la única página';
+      close.setAttribute('aria-label',close.title);
+      close.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();vbDeletePageById(p.id);});
+      wrap.appendChild(b); wrap.appendChild(close); vbPageTabs.appendChild(wrap);
+    });
   }
   function vbLoadCurrentPage(){
     let raw=null;
@@ -8274,7 +8451,23 @@ window.AppTheme = (function(){
     const page={id:'page_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),name:name.trim()||('Página '+n)};
     vPages.push(page); vCurrentPageId=page.id; vbSavePages(); vbRenderPageNav(); vbLoadCurrentPage(); vbTransform();
   }
-  if(vbPageSelect) vbPageSelect.addEventListener('change',()=>{ vbCommit(); vCurrentPageId=vbPageSelect.value; vbLoadCurrentPage(); vbRenderPageNav(); vbTransform(); });
+  function vbDeletePageById(pageId){
+    if(!vCurrentFolder || vPages.length<=1) return;
+    const current=vPages.find(p=>p.id===pageId);
+    if(!current) return;
+    const label=current.name || 'esta página';
+    if(!confirm('¿Borrar "'+label+'"? Esta acción no se puede deshacer.')) return;
+    if(pageId===vCurrentPageId) vbCommit();
+    const oldId=pageId;
+    const index=vPages.findIndex(p=>p.id===oldId);
+    vPages=vPages.filter(p=>p.id!==oldId);
+    if(vCurrentPageId===oldId) vCurrentPageId=vPages[Math.max(0,Math.min(index,vPages.length-1))].id;
+    try{ localStorage.removeItem(vbPageBoardKey(oldId)); }catch(e){}
+    vbSavePages();
+    vbRenderPageNav();
+    vbLoadCurrentPage();
+    vbTransform();
+  }
   if(vbAddPage) vbAddPage.addEventListener('click',vbAddGeneralPage);
 
   // ---- Apertura / cierre del panel como contenido de una carpeta ----
@@ -8297,6 +8490,7 @@ window.AppTheme = (function(){
     vbClosePdfPanel();
 
     vbLoadCurrentPage();
+    vbInitVisualPreferences();
 
     let penSt = 'estandar';
     try{ penSt = localStorage.getItem(vbPenStyleKey()) || 'estandar'; }catch(e){}
@@ -8342,6 +8536,39 @@ window.AppTheme = (function(){
     }
     if('requestIdleCallback' in window) requestIdleCallback(go, {timeout:5000});
     else setTimeout(go, 2500);
+  })();
+</script>
+<script>
+  // Tema visual: se aplica antes de que la interfaz sea visible y se conserva entre sesiones.
+  (function(){
+    const themeKey = 'cuaderno:theme';
+    const root = document.documentElement;
+    const buttons = document.querySelectorAll('#themeToggleBtn, .themeToggleBtn');
+    const vectorThemeButtons = document.querySelectorAll('#vbThemeDark, #vbThemeLight');
+    const savedTheme = (()=>{ try { return localStorage.getItem(themeKey); } catch(e){ return null; } })();
+    const initialTheme = savedTheme === 'light' || savedTheme === 'dark'
+      ? savedTheme
+      : (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    function applyTheme(theme){
+      const isLight = theme === 'light';
+      root.dataset.theme = isLight ? 'light' : 'dark';
+      // El evento compartido actualiza también la vista de carpeta aunque todavía esté oculta.
+      window.dispatchEvent(new CustomEvent('cuaderno:themechange',{detail:{theme:isLight ? 'light' : 'dark'}}));
+      buttons.forEach(button=>{
+        button.setAttribute('aria-pressed', String(isLight));
+        button.setAttribute('title', isLight ? 'Cambiar a modo oscuro' : 'Cambiar a modo claro');
+        button.setAttribute('aria-label', isLight ? 'Cambiar a modo oscuro' : 'Cambiar a modo claro');
+      });
+      try { localStorage.setItem(themeKey, isLight ? 'light' : 'dark'); } catch(e){}
+      window.dispatchEvent(new CustomEvent('cuaderno:themechange',{detail:{theme:isLight ? 'light' : 'dark'}}));
+    }
+    applyTheme(initialTheme);
+    buttons.forEach(button=>button.addEventListener('click', ()=>{
+      applyTheme(root.dataset.theme === 'light' ? 'dark' : 'light');
+    }));
+    vectorThemeButtons.forEach(button=>button.addEventListener('click', ()=>{
+      applyTheme(button.dataset.theme || (root.dataset.theme === 'light' ? 'dark' : 'light'));
+    }));
   })();
 </script>
 </body>
