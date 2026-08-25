@@ -2122,9 +2122,13 @@ window.OcrEngine = (function(){
             <option value="boligrafo">Bolígrafo</option>
             <option value="fina">Fina</option>
             <option value="estilografica">Estilográfica (lapicera)</option>
+            <option value="gel">Gel</option>
+            <option value="caligrafico">Caligráfico</option>
             <option value="marcador">Marcador seco</option>
             <option value="grafito">Lápiz grafito</option>
+            <option value="carbon">Carboncillo</option>
             <option value="pincel">Pincel</option>
+            <option value="pincelSeco">Pincel seco</option>
           </select>
         </div>
         <div class="row">
@@ -2395,6 +2399,15 @@ window.OcrEngine = (function(){
         </pattern>
         <filter id="vbPageShadow" x="-30%" y="-30%" width="160%" height="160%">
           <feDropShadow dx="0" dy="8" stdDeviation="14" flood-color="#000" flood-opacity="0.4"/>
+        </filter>
+        <!-- Textura granulada para el estilo "Lápiz grafito": sin esto, el
+             grafito se veía como una línea lisa cualquiera (apenas más fina
+             y transparente), indistinguible de un trazo estándar. La
+             turbulencia + desplazamiento le da un borde irregular, como el
+             de un lápiz real, en vez de una línea vectorial perfecta. -->
+        <filter id="vbGrafitoTexture" x="-20%" y="-20%" width="140%" height="140%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7" result="grafitoNoise"/>
+          <feDisplacementMap in="SourceGraphic" in2="grafitoNoise" scale="2.6" xChannelSelector="R" yChannelSelector="G"/>
         </filter>
       </defs>
       <g id="vbCamera">
@@ -2740,19 +2753,29 @@ window.OcrEngine = (function(){
   // la memoria/CPU en dispositivos con dpr ya alto (celulares).
 
 
-  // ---- Estilos de lápiz: cada uno define cómo varía el grosor con la presión y su opacidad ----
+  // ---- Estilos de lápiz: cada uno define cómo varía el grosor con la presión, su opacidad y su textura ----
+  // 'cap': forma de la punta (redonda vs. cuadrada/plana — clave para que el
+  // caligráfico se sienta como una pluma de punta ancha en vez de un trazo
+  // redondo genérico).
+  // 'tint': mezcla el color de tinta elegido hacia un gris neutro, para que
+  // el grafito y el carboncillo se vean como esos materiales de verdad
+  // aunque el usuario tenga elegido negro puro u otro color — antes todos
+  // los estilos pintaban con el color tal cual, así que "Lápiz grafito"
+  // terminaba viéndose casi idéntico al Estándar (apenas algo más fino).
+  // 'widthJitter': variación aleatoria extra del grosor punto a punto, para
+  // simular la textura irregular de un lápiz/carboncillo real.
   const PEN_STYLES = {
-    estandar:      { name:'Estándar',              widthFn:(w,p)=> w*(0.4+p),             alpha:1 },
-    boligrafo:     { name:'Bolígrafo',             widthFn:(w,p)=> w*(0.62+p*0.3),        alpha:1 },
-    fina:          { name:'Fina',                  widthFn:(w,p)=> w*0.55*(0.5+p*0.6),  alpha:1 },
-    estilografica: { name:'Estilográfica',         widthFn:(w,p)=> w*(0.3+p*1.1),        alpha:1 },
-    gel:           { name:'Gel',                   widthFn:(w,p)=> w*(0.72+p*0.18),      alpha:.95 },
-    caligrafica:   { name:'Caligráfica',           widthFn:(w,p)=> w*(0.28+p*1.35),      alpha:1 },
-    marcador:      { name:'Marcador seco',         widthFn:(w,p)=> w*1.9*(0.78+p*0.22), alpha:.82 },
-    grafito:       { name:'Lápiz grafito',         widthFn:(w,p)=> w*(0.5+p*0.55),       alpha:.92, grain:true },
-    carbon:        { name:'Carboncillo',            widthFn:(w,p)=> w*(0.72+p*0.8),       alpha:.62, grain:true },
-    pincel:        { name:'Pincel',                widthFn:(w,p)=> w*(0.25+p*1.4),       alpha:.95 },
-    pincelSeco:    { name:'Pincel seco',           widthFn:(w,p)=> w*(0.5+p*1.1),        alpha:.72, grain:true },
+    fina:          { name:'Fina',                  widthFn:(w,p)=> w*(0.18+p*0.2),   alpha:1,   cap:'round'  },
+    boligrafo:     { name:'Bolígrafo',             widthFn:(w,p)=> w*(0.55+p*0.4),   alpha:1,   cap:'round'  },
+    estandar:      { name:'Estándar',              widthFn:(w,p)=> w*(0.5+p*1.0),    alpha:1,   cap:'round'  },
+    gel:           { name:'Gel',                   widthFn:(w,p)=> w*(0.75+p*0.8),   alpha:.97, cap:'round'  },
+    estilografica: { name:'Estilográfica',         widthFn:(w,p)=> w*(0.35+p*1.9),   alpha:.94, cap:'round'  },
+    caligrafico:   { name:'Caligráfico',           widthFn:(w,p)=> w*(1.0+p*2.6),    alpha:.97, cap:'square' },
+    marcador:      { name:'Marcador seco',         widthFn:(w,p)=> w*(2.0+p*2.4),    alpha:.55, cap:'square', grain:true },
+    grafito:       { name:'Lápiz grafito',         widthFn:(w,p)=> w*(0.65+p*0.8),   alpha:.55, cap:'round',  grain:true, tint:.7,  widthJitter:.4 },
+    carbon:        { name:'Carboncillo',           widthFn:(w,p)=> w*(1.1+p*1.4),    alpha:.32, cap:'round',  grain:true, tint:.9,  widthJitter:.5 },
+    pincel:        { name:'Pincel',                widthFn:(w,p)=> w*(0.6+p*2.0),    alpha:.96, cap:'round'  },
+    pincelSeco:    { name:'Pincel seco',           widthFn:(w,p)=> w*(0.7+p*1.2),    alpha:.48, cap:'round',  grain:true, tint:.15, widthJitter:.45 },
   };
   // ---------- Afinado de puntas (como Nebo/tinta real) ----------
   // Un trazo de tinta real nunca empieza y termina con el ancho completo:
@@ -2788,6 +2811,13 @@ window.OcrEngine = (function(){
     } else if(stroke.tool==='pen'){
       const ps = PEN_STYLES[stroke.penStyle] || PEN_STYLES.estandar;
       w = ps.widthFn(stroke.width, p);
+      // Textura: pequeña variación aleatoria (determinística según el índice
+      // del punto, para que redibujar el mismo trazo se vea siempre igual)
+      // que simula lo irregular de un lápiz/carboncillo real.
+      if(ps.widthJitter && idx!=null){
+        const j = 1 + (((Math.abs(Math.sin((idx+1)*78.233))%1) - 0.5) * 2) * ps.widthJitter;
+        w *= Math.max(0.15, j);
+      }
     } else {
       w = stroke.width * (0.4 + p);
     }
@@ -2797,10 +2827,49 @@ window.OcrEngine = (function(){
     if(stroke.tool==='pen'){
       const ps = PEN_STYLES[stroke.penStyle] || PEN_STYLES.estandar;
       let a = baseAlpha * (ps.alpha!=null ? ps.alpha : 1);
-      if(ps.grain){ const g = 0.72 + (Math.abs(Math.sin((idx+1)*12.9898))%1)*0.28; a *= g; }
+      if(ps.grain && idx!=null){ const g = 0.35 + (Math.abs(Math.sin((idx+1)*12.9898))%1)*0.65; a *= g; }
       return a;
     }
     return baseAlpha;
+  }
+  // ---- Color y punta según el estilo de lápiz ----
+  // mixHexColor: mezcla un color hex hacia otro un "amount" (0-1) dado.
+  function mixHexColor(hex, targetHex, amount){
+    const c = (hex||'#000000').replace('#',''), t = targetHex.replace('#','');
+    if(c.length<6 || t.length<6) return hex;
+    const r1=parseInt(c.substr(0,2),16), g1=parseInt(c.substr(2,2),16), b1=parseInt(c.substr(4,2),16);
+    const r2=parseInt(t.substr(0,2),16), g2=parseInt(t.substr(2,2),16), b2=parseInt(t.substr(4,2),16);
+    const r=Math.round(r1+(r2-r1)*amount), g=Math.round(g1+(g2-g1)*amount), b=Math.round(b1+(b2-b1)*amount);
+    return '#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join('');
+  }
+  // relLuminance: luminancia relativa aproximada (0=negro, 1=blanco). Se usa
+  // para decidir si una tinta elegida a mano quedaría invisible al cambiar
+  // de tema (p. ej. tinta casi negra sobre hoja oscura).
+  function relLuminance(hex){
+    const c = (hex||'#000000').replace('#','');
+    if(c.length<6) return 0;
+    const r=parseInt(c.substr(0,2),16)/255, g=parseInt(c.substr(2,2),16)/255, b=parseInt(c.substr(4,2),16)/255;
+    return 0.2126*r + 0.7152*g + 0.0722*b;
+  }
+  // colorForStroke: el color con el que hay que pintar el trazo. Para
+  // estilos con 'tint' (grafito, carboncillo) mezcla la tinta elegida hacia
+  // un gris neutro, así se ven como esos materiales y no como tinta negra
+  // lisa — antes usaban el color tal cual y por eso "Lápiz grafito" no se
+  // distinguía de "Estándar".
+  function colorForStroke(stroke){
+    if(stroke.tool==='pen'){
+      const ps = PEN_STYLES[stroke.penStyle] || PEN_STYLES.estandar;
+      if(ps.tint) return mixHexColor(stroke.color, '#4a4844', ps.tint);
+    }
+    return stroke.color;
+  }
+  // capForStroke: forma de la punta/unión de línea según el estilo.
+  function capForStroke(stroke){
+    if(stroke.tool==='pen'){
+      const ps = PEN_STYLES[stroke.penStyle] || PEN_STYLES.estandar;
+      return ps.cap || 'round';
+    }
+    return 'round';
   }
 
   // ---- Herramienta Texto: estilos de letra "prolijos" ----
@@ -4379,11 +4448,23 @@ window.OcrEngine = (function(){
   // Si el usuario todavía no eligió un color de tinta a mano (inkColorIsDefault),
   // el color por defecto sigue al tema en vivo: pasar a oscuro pone tinta
   // blanca, volver a claro la vuelve a poner grafito. Una vez que se elige un
-  // color explícitamente, este listener no vuelve a tocarlo.
+  // color explícitamente, en general lo respetamos tal cual (si eligió azul,
+  // sigue en azul al cambiar de tema) — PERO si ese color queda prácticamente
+  // invisible sobre el nuevo fondo (tinta casi negra al pasar a modo oscuro,
+  // o casi blanca al pasar a modo claro) lo corregimos igual, porque una
+  // tinta que "desaparece" de la hoja se siente como que el lápiz no anda.
   window.addEventListener('cuaderno:themechange', (event)=>{
-    if(!inkColorIsDefault) return;
     const isLight = !!(event.detail && event.detail.theme === 'light');
-    inkColor = isLight ? INK_DEFAULT_LIGHT : INK_DEFAULT_DARK;
+    if(inkColorIsDefault){
+      inkColor = isLight ? INK_DEFAULT_LIGHT : INK_DEFAULT_DARK;
+    } else {
+      const lum = relLuminance(inkColor);
+      const invisibleOnDark = !isLight && lum < 0.22;
+      const invisibleOnLight = isLight && lum > 0.85;
+      if(invisibleOnDark || invisibleOnLight){
+        inkColor = isLight ? INK_DEFAULT_LIGHT : INK_DEFAULT_DARK;
+      }
+    }
     renderSwatches();
   });
 
@@ -5108,7 +5189,7 @@ window.OcrEngine = (function(){
   function dotTo(targetCtx, stroke, style, taperOpts){
     const p = stroke.points[0];
     targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, 0); targetCtx.globalCompositeOperation = style.composite;
-    targetCtx.fillStyle = stroke.color;
+    targetCtx.fillStyle = colorForStroke(stroke);
     targetCtx.beginPath();
     targetCtx.arc(p.x, p.y, widthForStroke(stroke, p.p, 0, taperOpts) / 2, 0, Math.PI*2);
     targetCtx.fill();
@@ -5116,10 +5197,11 @@ window.OcrEngine = (function(){
   }
   function segmentTo(targetCtx, stroke, i0, i1, style, taperOpts){
     const p0 = stroke.points[i0], p1 = stroke.points[i1];
+    const cap = capForStroke(stroke);
     targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, i1); targetCtx.globalCompositeOperation = style.composite;
-    targetCtx.strokeStyle = stroke.color;
+    targetCtx.strokeStyle = colorForStroke(stroke);
     targetCtx.lineWidth = widthForStroke(stroke, p1.p, i1, taperOpts);
-    targetCtx.lineJoin = 'round'; targetCtx.lineCap = 'round';
+    targetCtx.lineJoin = cap==='square' ? 'miter' : 'round'; targetCtx.lineCap = cap;
     targetCtx.beginPath();
     targetCtx.moveTo(p0.x, p0.y);
     targetCtx.lineTo(p1.x, p1.y);
@@ -5156,11 +5238,12 @@ window.OcrEngine = (function(){
     const p0 = pts[i-1], p1 = pts[i], p2 = pts[i+1];
     const start = (i === 1) ? p0 : midpoint(p0, p1);
     const end = midpoint(p1, p2);
+    const cap0 = capForStroke(stroke);
     targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, i);
     targetCtx.globalCompositeOperation = style.composite;
-    targetCtx.strokeStyle = stroke.color;
+    targetCtx.strokeStyle = colorForStroke(stroke);
     targetCtx.lineWidth = widthForStroke(stroke, p1.p, i);
-    targetCtx.lineJoin = 'round'; targetCtx.lineCap = 'round';
+    targetCtx.lineJoin = cap0==='square' ? 'miter' : 'round'; targetCtx.lineCap = cap0;
     targetCtx.beginPath();
     targetCtx.moveTo(start.x, start.y);
     targetCtx.quadraticCurveTo(p1.x, p1.y, end.x, end.y);
@@ -5173,11 +5256,12 @@ window.OcrEngine = (function(){
     if(n < 3) return; // con 2 puntos el segmento recto ya quedó completo
     const prev = pts[n-2], last = pts[n-1];
     const start = midpoint(prev, last);
+    const cap1 = capForStroke(stroke);
     targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, n-1);
     targetCtx.globalCompositeOperation = style.composite;
-    targetCtx.strokeStyle = stroke.color;
+    targetCtx.strokeStyle = colorForStroke(stroke);
     targetCtx.lineWidth = widthForStroke(stroke, last.p, n-1, {end:true});
-    targetCtx.lineJoin = 'round'; targetCtx.lineCap = 'round';
+    targetCtx.lineJoin = cap1==='square' ? 'miter' : 'round'; targetCtx.lineCap = cap1;
     targetCtx.beginPath();
     targetCtx.moveTo(start.x, start.y);
     targetCtx.lineTo(last.x, last.y);
@@ -5194,14 +5278,15 @@ window.OcrEngine = (function(){
       const p0 = pts[i-1], p1 = pts[i], p2 = pts[i+1];
       const start = (i === 1) ? p0 : midpoint(p0, p1);
       const end = midpoint(p1, p2);
+      const capS = capForStroke(stroke);
       targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, i);
       targetCtx.globalCompositeOperation = style.composite;
-      targetCtx.strokeStyle = stroke.color;
+      targetCtx.strokeStyle = colorForStroke(stroke);
       // Acá sí se conoce el trazo COMPLETO y cerrado (redibujo final o de
       // exportación), así que el afinado de ambas puntas (opts.end) es
       // seguro: no hay riesgo de "cortar" un trazo que en realidad sigue.
       targetCtx.lineWidth = widthForStroke(stroke, p1.p, i, {end:true});
-      targetCtx.lineJoin = 'round'; targetCtx.lineCap = 'round';
+      targetCtx.lineJoin = capS==='square' ? 'miter' : 'round'; targetCtx.lineCap = capS;
       targetCtx.beginPath();
       targetCtx.moveTo(start.x, start.y);
       targetCtx.quadraticCurveTo(p1.x, p1.y, end.x, end.y);
@@ -7112,6 +7197,31 @@ window.OcrEngine = (function(){
     });
   }
   const vbColor=document.getElementById('vbColor'), vbSize=document.getElementById('vbSize');
+  // Igual que en el cuaderno principal: mientras el usuario no toque el
+  // selector de color a mano, la tinta por defecto sigue el tema (blanca en
+  // oscuro, casi negra en claro). Si ya la cambió a mano, se respeta su
+  // elección salvo que quede invisible sobre el nuevo fondo.
+  const VB_INK_DEFAULT_LIGHT = '#17191c';
+  const VB_INK_DEFAULT_DARK  = '#f4f2ec';
+  let vInkColorIsDefault = true;
+  function vbRelLuminance(hex){
+    const c=(hex||'#000000').replace('#','');
+    if(c.length<6) return 0;
+    const r=parseInt(c.substr(0,2),16)/255, g=parseInt(c.substr(2,2),16)/255, b=parseInt(c.substr(4,2),16)/255;
+    return 0.2126*r+0.7152*g+0.0722*b;
+  }
+  function vbSyncInkColorToTheme(isLight){
+    if(!vbColor) return;
+    if(vInkColorIsDefault){
+      vbColor.value = isLight ? VB_INK_DEFAULT_LIGHT : VB_INK_DEFAULT_DARK;
+      return;
+    }
+    const lum = vbRelLuminance(vbColor.value);
+    const invisibleOnDark = !isLight && lum < 0.22;
+    const invisibleOnLight = isLight && lum > 0.85;
+    if(invisibleOnDark || invisibleOnLight) vbColor.value = isLight ? VB_INK_DEFAULT_LIGHT : VB_INK_DEFAULT_DARK;
+  }
+  if(vbColor) vbColor.addEventListener('input', ()=>{ vInkColorIsDefault = false; });
   const vbSizeLabel=document.getElementById('vbSizeLabel');
   const vbSizeQuickBtn=document.getElementById('vbSizeQuickBtn');
   const vbThicknessPanel=document.getElementById('vbThicknessPanel');
@@ -7172,15 +7282,19 @@ window.OcrEngine = (function(){
   let vStroke=null, vPoints=[], vGesture=null, vTouchInfo=null, vSelected=null;
   let vHistory=[], vFuture=[], vSaved='';
   // ---- Estilos de trazo del lápiz (bolígrafo, caligráfico, etc.) ----
+  // 'tint': mezcla el color elegido hacia un gris grafito (antes el grafito
+  // pintaba con el color de tinta tal cual, así que se veía casi idéntico
+  // al Estándar). 'texture': aplica el filtro de grano SVG definido arriba
+  // para que el trazo tenga un borde irregular, como un lápiz de verdad.
   const VB_PEN_STYLES = {
+    fina:          { name:'Punta fina',      widthMul:.35,  alpha:1,   linecap:'round',  blend:false },
+    boligrafo:     { name:'Bolígrafo',        widthMul:.6,   alpha:1,   linecap:'round',  blend:false },
     estandar:      { name:'Estándar',        widthMul:1,    alpha:1,   linecap:'round',  blend:false },
-    boligrafo:     { name:'Bolígrafo',        widthMul:.7,   alpha:1,   linecap:'round',  blend:false },
-    caligrafico:   { name:'Caligráfico',      widthMul:1.9,  alpha:.94, linecap:'square', blend:false },
-    fina:          { name:'Punta fina',       widthMul:.45,  alpha:1,   linecap:'round',  blend:false },
-    estilografica: { name:'Estilográfica',    widthMul:1.15, alpha:.92, linecap:'round',  blend:false },
-    marcador:      { name:'Marcador seco',    widthMul:2.4,  alpha:.5,  linecap:'round',  blend:false },
-    grafito:       { name:'Lápiz grafito',    widthMul:.95,  alpha:.75, linecap:'round',  blend:true  },
-    pincel:        { name:'Pincel',           widthMul:2.8,  alpha:.88, linecap:'round',  blend:false },
+    estilografica: { name:'Estilográfica',    widthMul:1.55, alpha:.88, linecap:'round',  blend:false },
+    caligrafico:   { name:'Caligráfico',      widthMul:2.8,  alpha:.94, linecap:'square', blend:false },
+    marcador:      { name:'Marcador seco',    widthMul:3.6,  alpha:.5,  linecap:'round',  blend:false },
+    grafito:       { name:'Lápiz grafito',    widthMul:1.15, alpha:.55, linecap:'round',  blend:true, tint:.7, texture:true },
+    pincel:        { name:'Pincel',           widthMul:1.8,  alpha:.95, linecap:'round',  blend:false },
   };
   let vPenStyle='estandar';
   let vMarkStyle='translucido';
@@ -7236,6 +7350,7 @@ window.OcrEngine = (function(){
       button.setAttribute('title',vTheme==='light'?'Cambiar a modo oscuro':'Cambiar a modo claro');
       button.setAttribute('aria-label',vTheme==='light'?'Cambiar a modo oscuro':'Cambiar a modo claro');
     });
+    vbSyncInkColorToTheme(vTheme==='light');
     if(persist){ try{ localStorage.setItem(VB_THEME_KEY,vTheme); }catch(e){} }
     window.dispatchEvent(new CustomEvent('cuaderno:themechange',{detail:{theme:vTheme}}));
   }
@@ -7425,8 +7540,14 @@ window.OcrEngine = (function(){
     const speed= Math.max(0, Math.min(1, d/18));
     // Los pesos suman exactamente 1. Antes podían superar 1 y producir
     // un desplazamiento visible respecto del punto real del lápiz.
-    const rawWeight=.58 + speed*.30;
-    const prevWeight=.10*(1-speed);
+    // Antes el peso del punto crudo arrancaba en .58 (hasta 42% de mezcla con
+    // puntos viejos a velocidad baja), lo que generaba un lag perceptible
+    // entre el lápiz real y la tinta ("pesado") y redondeaba las esquinas de
+    // las letras hasta verse borroneadas ("tosco"). Se sube el peso base y se
+    // reduce la mezcla con el punto anterior para que el trazo siga de cerca
+    // al puntero sin perder el filtrado de temblor.
+    const rawWeight=.82 + speed*.14;
+    const prevWeight=.03*(1-speed);
     const lastWeight=1-rawWeight-prevWeight;
     return {x:last.x*lastWeight + prev.x*prevWeight + raw.x*rawWeight, y:last.y*lastWeight + prev.y*prevWeight + raw.y*rawWeight};
   }
@@ -7441,12 +7562,44 @@ window.OcrEngine = (function(){
     const p=a[a.length-1]; d+=` T ${p.x} ${p.y}`;
     return d;
   }
+  // ---- Crecimiento incremental del trazo ----
+  // Antes, cada pointermove llamaba a vbSmoothPath(vPoints) y reconstruía el
+  // atributo "d" ENTERO desde el primer punto: para un trazo de N puntos eso
+  // es O(N) por evento y O(N²) en total a lo largo del trazo. En una palabra
+  // o frase larga (cientos de puntos) esto se sentía cada vez más pesado y
+  // con lag notorio a medida que crecía el trazo. vbGrowStrokePath agrega
+  // SOLO el segmento nuevo (igual que hace drawFreehandIncrement del lienzo
+  // de tinta), manteniendo el resto del "d" ya calculado sin tocarlo.
+  let vStrokeDBase='';
+  function vbGrowStrokePath(){
+    const n=vPoints.length;
+    if(n<2) return;
+    if(n===2){
+      vStroke.setAttribute('d', vStrokeDBase+` L ${vPoints[1].x} ${vPoints[1].y}`);
+      return;
+    }
+    const i=n-2, cp=vPoints[i], nx=vPoints[i+1];
+    const mx=(cp.x+nx.x)/2, my=(cp.y+nx.y)/2;
+    vStrokeDBase+=` Q ${cp.x} ${cp.y} ${mx} ${my}`;
+    const last=vPoints[n-1];
+    vStroke.setAttribute('d', vStrokeDBase+` T ${last.x} ${last.y}`);
+  }
+  function vbMixHexColor(hex, targetHex, amount){
+    const c=(hex||'#000000').replace('#',''), t=targetHex.replace('#','');
+    if(c.length<6 || t.length<6) return hex;
+    const r1=parseInt(c.substr(0,2),16), g1=parseInt(c.substr(2,2),16), b1=parseInt(c.substr(4,2),16);
+    const r2=parseInt(t.substr(0,2),16), g2=parseInt(t.substr(2,2),16), b2=parseInt(t.substr(4,2),16);
+    const r=Math.round(r1+(r2-r1)*amount), g=Math.round(g1+(g2-g1)*amount), b=Math.round(b1+(b2-b1)*amount);
+    return '#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join('');
+  }
   function vbNewStroke(){
     vStroke=document.createElementNS(NS,'path');
     vStroke.setAttribute('fill','none'); vStroke.setAttribute('d',`M ${vPoints[0].x} ${vPoints[0].y}`);
-    vStroke.setAttribute('stroke', vbColor.value);
+    vStrokeDBase=`M ${vPoints[0].x} ${vPoints[0].y}`;
     const w = +vbSize.value;
     const style = VB_PEN_STYLES[vPenStyle] || VB_PEN_STYLES.estandar;
+    const strokeColor = (vTool!=='highlighter' && style.tint) ? vbMixHexColor(vbColor.value, '#4a4844', style.tint) : vbColor.value;
+    vStroke.setAttribute('stroke', strokeColor);
     vStroke.setAttribute('vector-effect','non-scaling-stroke');
     vStroke.dataset.obj='stroke';
     vStroke.dataset.tool=vTool; // usado por el OCR para ignorar trazos de marcador
@@ -7457,11 +7610,13 @@ window.OcrEngine = (function(){
       vStroke.setAttribute('stroke-linecap','round'); vStroke.setAttribute('stroke-linejoin','round');
       vStroke.style.mixBlendMode=ms.blend;
     } else {
+      vStroke.dataset.baseWidth=String(Math.max(.4, w*style.widthMul));
       vStroke.setAttribute('stroke-width', Math.max(.4, w*style.widthMul));
       vStroke.setAttribute('stroke-opacity', style.alpha);
       vStroke.setAttribute('stroke-linecap', style.linecap);
       vStroke.setAttribute('stroke-linejoin', style.linecap==='square' ? 'miter' : 'round');
       if(style.blend) vStroke.style.mixBlendMode='multiply';
+      vStroke.style.filter = style.texture ? 'url(#vbGrafitoTexture)' : '';
     }
     vbObjects.appendChild(vStroke);
   }
@@ -7591,8 +7746,20 @@ window.OcrEngine = (function(){
     if(!vGesture) return;
     if(vGesture.pointerId!=null && e.pointerId!==vGesture.pointerId) return;
     if(vGesture.draw){
-      const raw=vbClientWorldPoint(e.clientX, e.clientY), p=vbStabilizePoint(raw), q=vPoints[vPoints.length-1];
-      if(Math.hypot(p.x-q.x, p.y-q.y) > .25/Math.max(vScale,.1)){ vPoints.push(p); vStroke.setAttribute('d', vbSmoothPath(vPoints)); }
+      // getCoalescedEvents: en un trazo rápido (firma, garabato) el dispositivo
+      // suele reportar varias muestras reales por cada evento "pointermove" que
+      // el navegador entrega. Antes solo se usaba la posición final de cada
+      // evento, así que un gesto rápido perdía puntos intermedios y salía poco
+      // sensible/anguloso aunque el suavizado estuviera bien. Se procesan todas
+      // las muestras disponibles, igual que ya hace el otro lienzo de tinta.
+      let rawEvents = (typeof e.getCoalescedEvents === 'function') ? e.getCoalescedEvents() : null;
+      if(!rawEvents || !rawEvents.length) rawEvents = [e];
+      for(let k=0;k<rawEvents.length;k++){
+        const raw=vbClientWorldPoint(rawEvents[k].clientX, rawEvents[k].clientY), p=vbStabilizePoint(raw), q=vPoints[vPoints.length-1];
+        // Umbral más bajo (antes .25) para que un gesto rápido no "salte"
+        // segmentos: más puntos capturados = curva más fiel y fluida.
+        if(Math.hypot(p.x-q.x, p.y-q.y) > .12/Math.max(vScale,.1)){ vPoints.push(p); vbGrowStrokePath(); }
+      }
     } else if(vGesture.erase){
       vbEraseCircleAt(e.clientX, e.clientY);
     } else if(vGesture.select && vSelected){
@@ -7607,7 +7774,7 @@ window.OcrEngine = (function(){
     if(vGesture.pointerId!=null && e.pointerId!==vGesture.pointerId) return;
     if(vGesture.draw){
       if(vPoints.length<2) vStroke.remove();
-      else { vStroke.dataset.pts = JSON.stringify(vPoints); vbCommit(); vbScheduleLiveRecognition(); }
+      else { vStroke.setAttribute('d', vbSmoothPath(vPoints)); vStroke.dataset.pts = JSON.stringify(vPoints); vbCommit(); vbScheduleLiveRecognition(); }
     }
     if(vGesture.erase && vEraseDirty){ vbCommit(); vEraseDirty=false; }
     if(vGesture.select && vSelected){ vbCommit(); }
@@ -7941,7 +8108,7 @@ window.OcrEngine = (function(){
   document.getElementById('vbPlus').onclick=()=>vbZoomAt(1.3, innerWidth/2, innerHeight/2);
   document.getElementById('vbMinus').onclick=()=>vbZoomAt(.77, innerWidth/2, innerHeight/2);
   document.getElementById('vbReset').onclick=()=>{ vScale=1; vTx=innerWidth/2; vTy=(vbSyncHeaderHeight()+innerHeight)/2; vbTransform(); };
-  vbView.querySelectorAll('.vb-dot').forEach(d=>d.onclick=()=>vbColor.value=d.dataset.c);
+  vbView.querySelectorAll('.vb-dot').forEach(d=>d.onclick=()=>{ vbColor.value=d.dataset.c; vInkColorIsDefault=false; });
 
   // ---------- Tipo de hoja ----------
   const VB_PATTERNS = { cuadriculado:'vbPatternGrid', rayado:'vbPatternLined', punteado:'vbPatternDotted' };
@@ -8361,13 +8528,23 @@ window.OcrEngine = (function(){
     if(vpTextLayerTask){ try{ vpTextLayerTask.cancel(); }catch(e){} }
     vpTextLayerEl.innerHTML = '';
     vpTextLayerEl.style.setProperty('--scale-factor', viewport.scale);
+    let pageHasText = true;
     try{
       const textContent = await page.getTextContent();
+      pageHasText = !!(textContent.items && textContent.items.length);
       const tlTask = pdfjsLib.renderTextLayer({ textContentSource: textContent, container: vpTextLayerEl, viewport });
       vpTextLayerTask = tlTask;
       await tlTask.promise;
     }catch(e){ if(!(e && e.name === 'RenderingCancelledException')) console.error(e); }
     if(vpTextLayerTask) vpTextLayerTask = null;
+    // Sin texto real (escaneo/foto) no hay nada que seleccionar, así que el
+    // modo "Seleccionar" (el que arranca activo por defecto) no responde a
+    // ningún toque: por eso "no dejaba remarcar" en PDFs subidos como
+    // imagen. Se pasa a lápiz automáticamente para que trazar funcione ya
+    // mismo, sin que el usuario tenga que descubrir el botón de herramienta.
+    if(!pageHasText && vpDrawTool === 'select'){
+      setVpTool('pen');
+    }
     renderVpMarksLayer();
     renderVpInkLayer();
   }
@@ -8561,7 +8738,9 @@ window.OcrEngine = (function(){
     vpCurrentStroke = {
       tool: toolName, markStyle: toolName === 'highlighter' ? currentMarkStyle : undefined, color: vpDrawColor,
       width: toolName === 'pen' ? PDF_PEN_WIDTH : PDF_MARKER_WIDTH,
-      penStyle: toolName === 'pen' ? 'estandar' : undefined,
+      // Antes quedaba fijo en 'estandar' sin importar el estilo elegido en la
+      // barra: por eso todos los lápices se veían iguales al marcar un PDF.
+      penStyle: toolName === 'pen' ? vPenStyle : undefined,
       points: [pt],
     };
     dotTo(vpInkCanvasEl.getContext('2d'), vpCurrentStroke, styleFor(toolName));
@@ -8569,14 +8748,19 @@ window.OcrEngine = (function(){
   vpInkCanvasEl.addEventListener('pointermove', (e)=>{
     if(!vpDrawing || e.pointerId !== vpDrawPointerId) return;
     const rect = vpInkCanvasEl.getBoundingClientRect();
-    const pt = { x:e.clientX-rect.left, y:e.clientY-rect.top, p: e.pressure && e.pressure>0 ? e.pressure : 0.5 };
-    if(vpDrawTool === 'eraser'){ vpEraseAt(pt); return; }
+    if(vpDrawTool === 'eraser'){ const pt = { x:e.clientX-rect.left, y:e.clientY-rect.top, p:0.5 }; vpEraseAt(pt); return; }
     if(!vpCurrentStroke) return;
-    const pts = vpCurrentStroke.points;
-    const last = pts[pts.length-1];
-    if(Math.hypot(pt.x-last.x, pt.y-last.y) < 0.8) return;
-    pts.push(pt);
-    drawFreehandIncrement(vpInkCanvasEl.getContext('2d'), vpCurrentStroke, styleFor(vpCurrentStroke.tool));
+    let rawEvents = (typeof e.getCoalescedEvents === 'function') ? e.getCoalescedEvents() : null;
+    if(!rawEvents || !rawEvents.length) rawEvents = [e];
+    for(let k=0;k<rawEvents.length;k++){
+      const ev=rawEvents[k];
+      const pt = { x:ev.clientX-rect.left, y:ev.clientY-rect.top, p: ev.pressure && ev.pressure>0 ? ev.pressure : 0.5 };
+      const pts = vpCurrentStroke.points;
+      const last = pts[pts.length-1];
+      if(Math.hypot(pt.x-last.x, pt.y-last.y) < 0.5) continue;
+      pts.push(pt);
+      drawFreehandIncrement(vpInkCanvasEl.getContext('2d'), vpCurrentStroke, styleFor(vpCurrentStroke.tool));
+    }
   });
   function endVpDraw(e){
     if(!vpDrawing || (e && e.pointerId !== vpDrawPointerId)) return;
@@ -8993,7 +9177,6 @@ window.OcrEngine = (function(){
         button.setAttribute('aria-label', isLight ? 'Cambiar a modo oscuro' : 'Cambiar a modo claro');
       });
       try { localStorage.setItem(themeKey, isLight ? 'light' : 'dark'); } catch(e){}
-      window.dispatchEvent(new CustomEvent('cuaderno:themechange',{detail:{theme:isLight ? 'light' : 'dark'}}));
     }
     applyTheme(initialTheme);
     buttons.forEach(button=>button.addEventListener('click', ()=>{
