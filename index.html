@@ -946,7 +946,7 @@ window.OcrEngine = (function(){
 
   /* ---------- Panel de PDF (al lado de la hoja) ---------- */
   #pdfPanel{
-    display:none;flex-direction:column;width:42%;min-width:230px;max-width:78%;
+    display:none;flex-direction:column;width:50%;min-width:230px;max-width:78%;
     background:var(--panel);border-right:1px solid var(--panel-edge);flex-shrink:0;
   }
   #pdfPanel.open{display:flex;}
@@ -1078,7 +1078,7 @@ window.OcrEngine = (function(){
 
   @media (max-width:700px){
     #workArea{flex-direction:column;}
-    #pdfPanel{width:100% !important;max-width:100%;height:42vh;border-right:none;border-bottom:1px solid var(--panel-edge);}
+    #pdfPanel{width:100% !important;max-width:100%;height:50vh;border-right:none;border-bottom:1px solid var(--panel-edge);}
     #pdfResizeHandle{display:none !important;}
   }
 
@@ -1764,7 +1764,7 @@ window.OcrEngine = (function(){
   /* ---------- Panel lateral de PDFs (ventana en paralelo a la hoja) ---------- */
   #vectorPanelView #vbPdfPanel{
     position:fixed;z-index:17;top:calc(var(--vb-header-h,108px) + 8px);left:12px;right:auto;bottom:52px;
-    width:min(560px,48vw);max-width:calc(100vw - 24px);
+    width:50vw;max-width:calc(100vw - 24px);
     background:rgba(27,29,36,.98);border:1px solid var(--vb-line);border-radius:14px;
     box-shadow:0 12px 32px rgba(0,0,0,.4);
     display:flex;flex-direction:column;overflow:hidden;
@@ -1877,7 +1877,7 @@ window.OcrEngine = (function(){
        no una ventana flotante encima de todo). */
     #vectorPanelView #vbPdfPanel{
       top:calc(var(--vb-header-h,100px) + 6px);left:8px;right:8px;bottom:auto;
-      width:auto;max-width:none;height:44vh;max-height:420px;min-height:230px;
+      width:auto;max-width:none;height:50vh;max-height:none;min-height:230px;
     }
     #vectorPanelView #vbPdfViewerCanvasWrap{max-height:22vh;}
   }
@@ -6343,6 +6343,20 @@ window.OcrEngine = (function(){
   textSizeDown.addEventListener('click', ()=>{ widths.text = Math.max(TEXT_SIZE_MIN, widths.text - TEXT_SIZE_STEP); updateTextSizeUI(); if(widthRange.min==TEXT_SIZE_MIN) widthRange.value = widths.text; });
   textSizeUp.addEventListener('click', ()=>{ widths.text = Math.min(TEXT_SIZE_MAX, widths.text + TEXT_SIZE_STEP); updateTextSizeUI(); if(widthRange.min==TEXT_SIZE_MIN) widthRange.value = widths.text; });
 
+  // Color más frecuente entre un grupo de trazos (por si hay letra escrita
+  // con más de un color en la misma selección): así la transcripción respeta
+  // la tinta original en vez de tomar el color que esté activo en ese momento
+  // en la herramienta de texto.
+  function mostCommonStrokeColor(strokesArr){
+    const counts = new Map();
+    (strokesArr||[]).forEach(s=>{
+      const c = s && s.color; if(!c) return;
+      counts.set(c, (counts.get(c)||0)+1);
+    });
+    let best=null, bestCount=0;
+    counts.forEach((count,c)=>{ if(count>bestCount){ bestCount=count; best=c; } });
+    return best;
+  }
   function openTextEditor(){
     closePopover();
     textInputArea.value = '';
@@ -6460,7 +6474,7 @@ window.OcrEngine = (function(){
       strokes = strokes.filter(s=>!toRemove.has(s));
     }
     growPageIfNeeded({ x: pt.x, y: pt.y + widths.text });
-    const stroke = { tool:'text', x: pt.x, y: pt.y, text: txt, font: textStyle, size: widths.text, color: inkColor };
+    const stroke = { tool:'text', x: pt.x, y: pt.y, text: txt, font: textStyle, size: widths.text, color: (tidyInfo && tidyInfo.color) || inkColor };
     strokes.push(stroke);
     redoStack = [];
     redrawAll(); updateHistoryButtons();
@@ -6824,7 +6838,7 @@ window.OcrEngine = (function(){
       if(Object.keys(dict).length>=OCR_DICT_MIN_ENTRIES)recognized=window.OcrEngine.correctWord(recognized,dict);
       else recognized=window.OcrEngine.correctWord(recognized,null);
       if(!recognized)return;
-      liveRecCandidate={text:recognized,strokes:candidate.strokeRefs,x:candidate.word.minX,y:candidate.word.minY,medianH:candidate.medianH};
+      liveRecCandidate={text:recognized,strokes:candidate.strokeRefs,x:candidate.word.minX,y:candidate.word.minY,medianH:candidate.medianH,color:mostCommonStrokeColor(candidate.strokeRefs)};
       liveRecWord.textContent=recognized;
       liveRecWord.className='liveRecWord f-'+liveRecStyle;
       liveRecMeta.textContent='Tocá Convertir';
@@ -6847,7 +6861,7 @@ window.OcrEngine = (function(){
     // completamente distinto.
     const size=clamp(Math.round(c.medianH), TEXT_SIZE_MIN, TEXT_SIZE_MAX), y=c.y+size;
     growPageIfNeeded({x:c.x,y:y});
-    strokes.push({tool:'text',x:c.x,y:y,text:c.text,font:liveRecStyle,size:size,color:inkColor});
+    strokes.push({tool:'text',x:c.x,y:y,text:c.text,font:liveRecStyle,size:size,color:c.color||inkColor});
     redoStack=[]; hideLiveRecognition(); redrawAll(); scheduleSave(); learnVocabularyFromText(c.text);
   }
   liveRecConvert.addEventListener('click',insertLiveRecognizedText);
@@ -6957,7 +6971,11 @@ window.OcrEngine = (function(){
 
       const insertMinX = Math.min(...boxes.map(b=>b.minX));
       const insertMinY = Math.min(...boxes.map(b=>b.minY));
-      pendingTidy = { strokesToRemove: penStrokes };
+      // El texto transcripto debe salir del mismo color que la tinta manuscrita
+      // que se está reemplazando, no del color que haya quedado seleccionado
+      // en la herramienta "Texto". Si hubiera trazos de más de un color (poco
+      // común), se usa el más frecuente entre ellos.
+      pendingTidy = { strokesToRemove: penStrokes, color: mostCommonStrokeColor(penStrokes) };
       // El texto transcripto debe salir del mismo tamaño que la letra manuscrita
       // original (medianH), no del tamaño que haya quedado configurado en la
       // herramienta "Texto" de otra sesión. Igual que ya se hace con el estilo
@@ -8023,7 +8041,13 @@ window.OcrEngine = (function(){
         // que vive en otro almacenamiento, pero esto ya ayuda con los
         // errores más típicos en palabras cortas y frecuentes).
         text=window.OcrEngine.correctWord(text,null);
-        vbLiveCandidate={text,box:pack.box,rawH:pack.rawH};
+        // El texto transcripto respeta el color de la tinta manuscrita que
+        // reemplaza, no el color activo en el selector de la pizarra.
+        const colorCounts=new Map();
+        paths.forEach(p=>{ const c=p.getAttribute('stroke'); if(c) colorCounts.set(c,(colorCounts.get(c)||0)+1); });
+        let recColor=null, recColorCount=0;
+        colorCounts.forEach((count,c)=>{ if(count>recColorCount){ recColorCount=count; recColor=c; } });
+        vbLiveCandidate={text,box:pack.box,rawH:pack.rawH,color:recColor};
         vbLiveWord.textContent=text; vbLiveWord.className='f-impMin';
         vbPositionLiveRecognition(pack.box);
       }
@@ -8042,12 +8066,12 @@ window.OcrEngine = (function(){
   vbLiveDismiss.addEventListener('click',vbHideLiveRecognition);
   vbLiveConvert.addEventListener('click',()=>{
     if(!vbLiveCandidate) return;
-    const {text,box,rawH}=vbLiveCandidate;
+    const {text,box,rawH,color}=vbLiveCandidate;
     // El tamaño del texto insertado respeta el tamaño real de la letra
     // manuscrita (rawH) en vez de un valor fijo, con los mismos topes que
     // usa la herramienta de texto del resto de la app.
     const size=Math.max(16, Math.min(96, Math.round(rawH || 28)));
-    const t=document.createElementNS(NS,'text'); t.setAttribute('x',box.x); t.setAttribute('y',box.b+Math.max(10,size*0.35)); t.setAttribute('font-size',String(size)); t.setAttribute('font-family','Patrick Hand, sans-serif'); t.setAttribute('fill',vbColor.value); t.dataset.obj='text'; t.textContent=text; vbObjects.appendChild(t); vbCommit(); vbHideLiveRecognition();
+    const t=document.createElementNS(NS,'text'); t.setAttribute('x',box.x); t.setAttribute('y',box.b+Math.max(10,size*0.35)); t.setAttribute('font-size',String(size)); t.setAttribute('font-family','Patrick Hand, sans-serif'); t.setAttribute('fill',color||vbColor.value); t.dataset.obj='text'; t.textContent=text; vbObjects.appendChild(t); vbCommit(); vbHideLiveRecognition();
   });
 
   let vbRecognizer=null, vbRecognizing=false, vbDictationBase='';
@@ -9039,8 +9063,14 @@ window.OcrEngine = (function(){
       const b=document.createElement('button');
       b.type='button'; b.className='vb-page-tab'+(p.id===vCurrentPageId?' active':'');
       b.setAttribute('role','tab'); b.setAttribute('aria-selected',String(p.id===vCurrentPageId));
-      b.title=p.name||('Página '+(i+1)); b.textContent=p.name||('Página '+(i+1));
+      b.title=(p.name||('Página '+(i+1)))+' (doble clic para renombrar)';
+      b.textContent=p.name||('Página '+(i+1));
       b.addEventListener('click',()=>{ if(p.id===vCurrentPageId) return; vbCommit(); vCurrentPageId=p.id; vbLoadCurrentPage(); vbRenderPageNav(); vbTransform(); });
+      b.addEventListener('dblclick',e=>{ e.preventDefault(); e.stopPropagation(); vbRenamePageById(p.id); });
+      let pressTimer=null;
+      b.addEventListener('touchstart',()=>{ pressTimer=setTimeout(()=>{ pressTimer=null; vbRenamePageById(p.id); },550); },{passive:true});
+      b.addEventListener('touchend',()=>{ if(pressTimer) clearTimeout(pressTimer); });
+      b.addEventListener('touchmove',()=>{ if(pressTimer){ clearTimeout(pressTimer); pressTimer=null; } });
       const close=document.createElement('button');
       close.type='button'; close.className='vb-page-close'; close.textContent='×';
       const canDelete=vPages.length>1;
@@ -9058,6 +9088,18 @@ window.OcrEngine = (function(){
       if(!raw && vCurrentPageId==='page_1') raw=localStorage.getItem('cuaderno:vectorBoard:'+(vCurrentFolder?vCurrentFolder.id:'scratch'));
     }catch(e){}
     vbObjects.innerHTML=raw||''; vSaved=raw||''; vHistory=[]; vFuture=[];
+  }
+  function vbRenamePageById(pageId){
+    const page=vPages.find(p=>p.id===pageId);
+    if(!page) return;
+    const i=vPages.findIndex(p=>p.id===pageId);
+    const current=page.name||('Página '+(i+1));
+    const nuevo=prompt('Nuevo nombre para la página:',current);
+    if(nuevo===null) return; // canceló
+    const limpio=nuevo.trim();
+    page.name=limpio||('Página '+(i+1));
+    vbSavePages();
+    vbRenderPageNav();
   }
   function vbAddGeneralPage(){
     if(!vCurrentFolder) return;
