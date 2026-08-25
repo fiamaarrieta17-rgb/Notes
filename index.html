@@ -217,6 +217,13 @@ window.OcrEngine = (function(){
   // resultado del OCR tal cual, para no inventar palabras.
   function correctWord(word, personalDict){
     if(!word || word.length<2) return word;
+    // Antes de cualquier otra cosa: si el usuario ya corrigió ESTA MISMA
+    // lectura cruda alguna vez (en cualquiera de las dos superficies de OCR
+    // de la app, cuaderno o pizarra, porque este mapa es compartido), esa
+    // corrección puntual vale más que cualquier heurística genérica — es
+    // literalmente lo que su letra le dictó a Tesseract la última vez.
+    const learned = lookupCorrection(word);
+    if(learned) return learned;
     const lower = word.toLowerCase();
     if(COMMON_WORDS_SET.has(lower)) return word;
     if(personalDict && personalDict[lower]) return word;
@@ -264,6 +271,81 @@ window.OcrEngine = (function(){
     return text.split('\n').map(line=>
       line.split(' ').map(w => w ? correctWord(w, personalDict) : w).join(' ')
     ).join('\n');
+  }
+
+  // ---------- Memoria de correcciones: "entrenamiento" liviano por usuario ----------
+  // Esto no reentrena el modelo de Tesseract (eso no es viable corriendo en
+  // el navegador) pero cumple el mismo propósito práctico: cada vez que el
+  // usuario elige o escribe una palabra distinta a lo que Tesseract leyó
+  // primero, guardamos esa asociación (lectura cruda → palabra correcta) en
+  // este dispositivo. La próxima vez que Tesseract vuelva a leer lo mismo
+  // (algo muy común: cada persona tiende a repetir los mismos "errores"
+  // porque su letra tiene rasgos propios), correctWord ya lo intercepta
+  // arriba antes de aplicar ninguna otra heurística. Es compartida entre el
+  // cuaderno y la pizarra vectorial (misma clave), así que aprender en una
+  // ayuda también en la otra.
+  const CORRECTION_KEY = 'cuaderno:ocrCorrections';
+  const CORRECTION_MAX_ENTRIES = 500;
+  let correctionCache = null;
+  function loadCorrections(){
+    if(!correctionCache){
+      try{ correctionCache = JSON.parse(localStorage.getItem(CORRECTION_KEY)) || {}; }
+      catch(e){ correctionCache = {}; }
+    }
+    return correctionCache;
+  }
+  function lookupCorrection(raw){
+    if(!raw) return null;
+    const hit = loadCorrections()[raw.toLowerCase()];
+    return hit ? hit.word : null;
+  }
+  function recordCorrection(raw, corrected){
+    if(!raw || !corrected) return;
+    const rawLower = raw.toLowerCase();
+    // Si lo que finalmente se usó es igual a lo que Tesseract ya había leído,
+    // no hay nada nuevo que aprender.
+    if(rawLower === corrected.toLowerCase()) return;
+    try{
+      const map = loadCorrections();
+      map[rawLower] = { word: corrected, count: (map[rawLower] && map[rawLower].count || 0) + 1 };
+      let entries = Object.entries(map);
+      if(entries.length > CORRECTION_MAX_ENTRIES){
+        // Poda: se queda con las correcciones más repetidas, que son las que
+        // más probablemente sigan siendo útiles (rasgos recurrentes de la
+        // letra de esta persona, no errores de una sola vez).
+        entries.sort((a,b)=>(b[1].count||0)-(a[1].count||0));
+        correctionCache = Object.fromEntries(entries.slice(0,350));
+      } else {
+        correctionCache = map;
+      }
+      localStorage.setItem(CORRECTION_KEY, JSON.stringify(correctionCache));
+    }catch(e){ /* aprender es una mejora, nunca debe romper la transcripción */ }
+  }
+  function forgetCorrections(){
+    correctionCache = {};
+    try{ localStorage.removeItem(CORRECTION_KEY); }catch(e){}
+  }
+
+  // Arma una pequeña lista de transcripciones alternativas a partir de UNA
+  // lectura cruda de Tesseract: la corrección aprendida de este usuario (si
+  // existe), la corrección por diccionario, y la lectura cruda tal cual,
+  // sin repetir (comparando sin mayúsculas/minúsculas). Se usa en el popup
+  // de reconocimiento en vivo para que, si la primera opción no es la
+  // palabra correcta, cerrarla ofrezca la siguiente en vez de no ofrecer
+  // nada más.
+  function buildCandidates(raw, personalDict){
+    if(!raw) return [];
+    const seen = new Set(); const out = [];
+    function add(w){
+      if(!w) return;
+      const k = w.toLowerCase();
+      if(seen.has(k)) return;
+      seen.add(k); out.push(w);
+    }
+    add(lookupCorrection(raw));
+    add(correctWord(raw, personalDict||null));
+    add(raw);
+    return out;
   }
 
   let scriptPromise=null, workerPromise=null;
@@ -400,7 +482,7 @@ window.OcrEngine = (function(){
     return (data && data.text) || '';
   }
 
-  return { recognizeWord, recognizeAuto, binarizeImageData, preload, isEnabled, setEnabled, estimateSlant, correctWord, correctTextBlock };
+  return { recognizeWord, recognizeAuto, binarizeImageData, preload, isEnabled, setEnabled, estimateSlant, correctWord, correctTextBlock, buildCandidates, recordCorrection, lookupCorrection, forgetCorrections };
 })();
 </script>
 <style>
@@ -1757,6 +1839,11 @@ window.OcrEngine = (function(){
   #vectorPanelView .vbs-theme-opt svg{width:14px;height:14px;}
   #vectorPanelView .vbs-theme-opt.active{background:var(--vb-accent);border-color:var(--vb-accent);color:#fff;}
   #vectorPanelView .vbs-help{margin:6px 0 0;color:var(--vb-muted);font-size:10.5px;line-height:1.4;}
+  #vectorPanelView .vbs-secondary-btn{
+    margin-top:8px;height:32px;padding:0 12px;border:1px solid var(--vb-line);border-radius:8px;
+    background:var(--vb-ui-2);color:var(--vb-ink);font:600 11.5px Inter,sans-serif;cursor:pointer;
+  }
+  #vectorPanelView .vbs-secondary-btn:hover{background:#2A2D38;}
   #vectorPanelView #vbUploadPdfBtn{background:var(--vb-ui-2);border-color:var(--vb-line);color:var(--vb-ink);}
   #vectorPanelView #vbUploadPdfBtn:hover{background:#2A2D38;}
   #vectorPanelView #vbUploadPdfBtn[disabled]{opacity:.6;cursor:default;pointer-events:none;}
@@ -2550,6 +2637,8 @@ window.OcrEngine = (function(){
         <span class="vbs-switch-track"><span class="vbs-switch-thumb"></span></span>
         <span id="vbOcrToggleText">Activado</span>
       </label>
+      <p class="vbs-help">El OCR va recordando las correcciones que hacés para leer mejor tu letra la próxima vez.</p>
+      <button type="button" id="vbOcrForgetBtn" class="vbs-secondary-btn">Olvidar lo aprendido</button>
     </div>
     <div class="vbs-row">
       <span class="vbs-label">Entrada para dibujar</span>
@@ -6835,13 +6924,16 @@ window.OcrEngine = (function(){
       if(seq!==liveRecSeq)return;
       if(!recognized)return;
       const dict=await loadPersonalDict();
-      if(Object.keys(dict).length>=OCR_DICT_MIN_ENTRIES)recognized=window.OcrEngine.correctWord(recognized,dict);
-      else recognized=window.OcrEngine.correctWord(recognized,null);
-      if(!recognized)return;
-      liveRecCandidate={text:recognized,strokes:candidate.strokeRefs,x:candidate.word.minX,y:candidate.word.minY,medianH:candidate.medianH,color:mostCommonStrokeColor(candidate.strokeRefs)};
-      liveRecWord.textContent=recognized;
+      const dictReady=Object.keys(dict).length>=OCR_DICT_MIN_ENTRIES;
+      // En vez de quedarnos con una sola opción, armamos hasta 3 candidatas
+      // (aprendida > corregida por diccionario > lectura cruda) para poder
+      // ofrecer la siguiente si la primera no es la palabra correcta.
+      const candidates=window.OcrEngine.buildCandidates(recognized, dictReady?dict:null);
+      if(!candidates.length)return;
+      liveRecCandidate={candidates,idx:0,rawGuess:recognized,strokes:candidate.strokeRefs,x:candidate.word.minX,y:candidate.word.minY,medianH:candidate.medianH,color:mostCommonStrokeColor(candidate.strokeRefs)};
+      liveRecWord.textContent=candidates[0];
       liveRecWord.className='liveRecWord f-'+liveRecStyle;
-      liveRecMeta.textContent='Tocá Convertir';
+      liveRecMeta.textContent=candidates.length>1?'Convertir · × para otra opción':'Tocá Convertir';
       positionLiveRecognition(candidate);
     }catch(err){}
   }
@@ -6852,7 +6944,9 @@ window.OcrEngine = (function(){
   }
   function insertLiveRecognizedText(){
     const c=liveRecCandidate;
-    if(!c||!c.text)return;
+    if(!c||!c.candidates||!c.candidates.length)return;
+    const chosen=c.candidates[c.idx];
+    if(!chosen)return;
     const toRemove=new Set(c.strokes||[]);
     strokes=strokes.filter(s=>!toRemove.has(s));
     // El tamaño del texto insertado debe coincidir con el tamaño de la letra
@@ -6861,11 +6955,24 @@ window.OcrEngine = (function(){
     // completamente distinto.
     const size=clamp(Math.round(c.medianH), TEXT_SIZE_MIN, TEXT_SIZE_MAX), y=c.y+size;
     growPageIfNeeded({x:c.x,y:y});
-    strokes.push({tool:'text',x:c.x,y:y,text:c.text,font:liveRecStyle,size:size,color:c.color||inkColor});
-    redoStack=[]; hideLiveRecognition(); redrawAll(); scheduleSave(); learnVocabularyFromText(c.text);
+    strokes.push({tool:'text',x:c.x,y:y,text:chosen,font:liveRecStyle,size:size,color:c.color||inkColor});
+    redoStack=[]; hideLiveRecognition(); redrawAll(); scheduleSave(); learnVocabularyFromText(chosen);
+    // Si terminó eligiendo algo distinto a lo primero que leyó Tesseract,
+    // lo recordamos para la próxima vez que aparezca esa misma lectura cruda.
+    window.OcrEngine.recordCorrection(c.rawGuess, chosen);
   }
   liveRecConvert.addEventListener('click',insertLiveRecognizedText);
-  liveRecDismiss.addEventListener('click',hideLiveRecognition);
+  liveRecDismiss.addEventListener('click',()=>{
+    const c=liveRecCandidate;
+    if(c && c.candidates && c.idx < c.candidates.length-1){
+      c.idx++;
+      liveRecWord.textContent=c.candidates[c.idx];
+      liveRecWord.className='liveRecWord f-'+liveRecStyle;
+      liveRecMeta.textContent = (c.idx < c.candidates.length-1) ? 'Convertir · × para otra opción' : 'Tocá Convertir';
+      return;
+    }
+    hideLiveRecognition();
+  });
   liveRecWord.addEventListener('click',()=>{
     const styles=['impMin','impMay','impLow','cursiva'];
     liveRecStyle=styles[(styles.indexOf(liveRecStyle)+1)%styles.length];
@@ -8036,19 +8143,22 @@ window.OcrEngine = (function(){
       let text=await window.OcrEngine.recognizeWord(pack.canvas, {fast:true});
       if(seq!==vbLiveSeq) return; // el usuario ya siguió escribiendo: descartamos esta respuesta vieja
       if(text){
-        // Corrige contra la lista de palabras comunes en español (la
-        // pizarra no tiene acceso al diccionario personal del cuaderno,
-        // que vive en otro almacenamiento, pero esto ya ayuda con los
-        // errores más típicos en palabras cortas y frecuentes).
-        text=window.OcrEngine.correctWord(text,null);
+        // Hasta 3 candidatas (aprendida > corregida por diccionario común >
+        // lectura cruda) para poder ofrecer la siguiente si al cerrar la
+        // primera no era la palabra correcta. La corrección por diccionario
+        // personal vive en el cuaderno (otro almacenamiento), pero la
+        // memoria de correcciones aprendidas es compartida entre las dos
+        // superficies de OCR de la app.
+        const candidates=window.OcrEngine.buildCandidates(text,null);
+        if(!candidates.length) return;
         // El texto transcripto respeta el color de la tinta manuscrita que
         // reemplaza, no el color activo en el selector de la pizarra.
         const colorCounts=new Map();
         paths.forEach(p=>{ const c=p.getAttribute('stroke'); if(c) colorCounts.set(c,(colorCounts.get(c)||0)+1); });
         let recColor=null, recColorCount=0;
         colorCounts.forEach((count,c)=>{ if(count>recColorCount){ recColorCount=count; recColor=c; } });
-        vbLiveCandidate={text,box:pack.box,rawH:pack.rawH,color:recColor};
-        vbLiveWord.textContent=text; vbLiveWord.className='f-impMin';
+        vbLiveCandidate={candidates,idx:0,rawGuess:text,box:pack.box,rawH:pack.rawH,color:recColor};
+        vbLiveWord.textContent=candidates[0]; vbLiveWord.className='f-impMin';
         vbPositionLiveRecognition(pack.box);
       }
     }catch(e){
@@ -8063,15 +8173,28 @@ window.OcrEngine = (function(){
     const seq=vbLiveSeq;
     vbLiveTimer=setTimeout(()=>vbRecognizeRecentWord(seq),520);
   }
-  vbLiveDismiss.addEventListener('click',vbHideLiveRecognition);
+  vbLiveDismiss.addEventListener('click',()=>{
+    const c=vbLiveCandidate;
+    if(c && c.candidates && c.idx < c.candidates.length-1){
+      c.idx++;
+      vbLiveWord.textContent=c.candidates[c.idx]; vbLiveWord.className='f-impMin';
+      return;
+    }
+    vbHideLiveRecognition();
+  });
   vbLiveConvert.addEventListener('click',()=>{
     if(!vbLiveCandidate) return;
-    const {text,box,rawH,color}=vbLiveCandidate;
+    const {candidates,idx,rawGuess,box,rawH,color}=vbLiveCandidate;
+    const text=candidates && candidates[idx];
+    if(!text) return;
     // El tamaño del texto insertado respeta el tamaño real de la letra
     // manuscrita (rawH) en vez de un valor fijo, con los mismos topes que
     // usa la herramienta de texto del resto de la app.
     const size=Math.max(16, Math.min(96, Math.round(rawH || 28)));
     const t=document.createElementNS(NS,'text'); t.setAttribute('x',box.x); t.setAttribute('y',box.b+Math.max(10,size*0.35)); t.setAttribute('font-size',String(size)); t.setAttribute('font-family','Patrick Hand, sans-serif'); t.setAttribute('fill',color||vbColor.value); t.dataset.obj='text'; t.textContent=text; vbObjects.appendChild(t); vbCommit(); vbHideLiveRecognition();
+    // Si terminó eligiendo algo distinto a lo primero que leyó Tesseract, lo
+    // recordamos para la próxima vez que aparezca esa misma lectura cruda.
+    window.OcrEngine.recordCorrection(rawGuess, text);
   });
 
   let vbRecognizer=null, vbRecognizing=false, vbDictationBase='';
@@ -9012,6 +9135,13 @@ window.OcrEngine = (function(){
       if(!vbOcrToggle.checked) vbHideLiveRecognition();
     });
     window.addEventListener('ocrEnabledChange', refreshVbOcrToggle);
+  }
+  const vbOcrForgetBtn = document.getElementById('vbOcrForgetBtn');
+  if(vbOcrForgetBtn){
+    vbOcrForgetBtn.addEventListener('click', ()=>{
+      if(!confirm('¿Olvidar las correcciones de letra que aprendió el OCR hasta ahora? El reconocimiento vuelve a empezar de cero.')) return;
+      window.OcrEngine.forgetCorrections();
+    });
   }
   function vbOpenSettings(){
     refreshVbOcrToggle();
