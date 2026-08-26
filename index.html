@@ -1110,9 +1110,17 @@ window.OcrEngine = (function(){
   #pdfInkCanvas{position:absolute;inset:0;pointer-events:none;touch-action:none;}
   #pdfInkCanvas.drawing{pointer-events:auto;cursor:crosshair;}
   #pdfDrawToolbar{
-    display:flex;align-items:center;gap:6px;padding:6px 10px;
+    display:none;align-items:center;gap:6px;padding:6px 10px;
     border-bottom:1px solid var(--panel-edge);flex-shrink:0;overflow-x:auto;
   }
+  /* ---------- Herramientas ocultas hasta doble-tap/doble-clic ---------- */
+  /* La idea es que el PDF se vea "solo" (sin lápiz/marcador/goma ni zoom
+     encima) hasta que el usuario toque dos veces la zona del PDF. Ese
+     doble-tap agrega la clase "showTools" a #pdfPanel, que es lo que
+     realmente destapa estas barras (el display:none de arriba es la base). */
+  #pdfPanel.showTools #pdfDrawToolbar{display:flex;}
+  #pdfPanelFooter .pdfZoomGroup{display:none;align-items:center;gap:8px;}
+  #pdfPanel.showTools #pdfPanelFooter .pdfZoomGroup{display:flex;}
   #pdfDrawToolbar .pdfSelDivider{width:1px;height:20px;background:var(--panel-edge);margin:0 1px;flex-shrink:0;}
   #pdfDrawDots{display:flex;align-items:center;gap:5px;flex-shrink:0;}
   #pdfDrawDots .pdfSelDot{width:16px;height:16px;}
@@ -1922,7 +1930,11 @@ window.OcrEngine = (function(){
   #vectorPanelView #vbPdfViewerPage{min-width:52px;text-align:center;color:var(--vb-muted);font-size:11px;}
 
   /* ---------- Dibujo/resaltado sobre el PDF de la biblioteca ---------- */
-  #vectorPanelView #vpDrawToolbar{display:flex;align-items:center;gap:6px;flex:0 0 auto;overflow-x:auto;-webkit-overflow-scrolling:touch;margin-bottom:7px;}
+  #vectorPanelView #vpDrawToolbar{display:none;align-items:center;gap:6px;flex:0 0 auto;overflow-x:auto;-webkit-overflow-scrolling:touch;margin-bottom:7px;}
+  /* Herramientas ocultas hasta doble-tap/doble-clic sobre el PDF (mismo criterio que #pdfPanel). */
+  #vectorPanelView #vbPdfViewer.showTools #vpDrawToolbar{display:flex;}
+  #vectorPanelView #vbPdfViewerZoom{display:none;}
+  #vectorPanelView #vbPdfViewer.showTools #vbPdfViewerZoom{display:flex;}
   #vectorPanelView #vpDrawToolbar::-webkit-scrollbar{height:0;}
   #vectorPanelView .vpTool{height:30px;min-width:30px;border:1px solid var(--vb-line);background:var(--vb-ui-2);color:var(--vb-ink);border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;padding:0;}
   #vectorPanelView .vpTool svg{width:15px;height:15px;flex-shrink:0;}
@@ -2385,10 +2397,12 @@ window.OcrEngine = (function(){
         <button class="icon" id="pdfNextBtn" title="Página siguiente">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
         </button>
-        <div class="divider"></div>
-        <button class="icon" id="pdfZoomOutBtn" title="Alejar">−</button>
-        <span id="pdfZoomLabel">100%</span>
-        <button class="icon" id="pdfZoomInBtn" title="Acercar">+</button>
+        <span class="pdfZoomGroup">
+          <div class="divider"></div>
+          <button class="icon" id="pdfZoomOutBtn" title="Alejar">−</button>
+          <span id="pdfZoomLabel">100%</span>
+          <button class="icon" id="pdfZoomInBtn" title="Acercar">+</button>
+        </span>
       </div>
       <input type="file" id="pdfFileInput" accept="application/pdf" style="display:none;">
     </div>
@@ -4307,12 +4321,26 @@ window.OcrEngine = (function(){
   (function setupPdfPinchZoom(){
     const pointers = new Map();
     let pinchInfo = null;
+    // ---------- Paneo con un dedo ----------
+    // Antes, con un solo dedo, no pasaba nada acá: se dependía del scroll
+    // táctil nativo del navegador sobre #pdfCanvasWrap, que en algunos
+    // dispositivos/casos (p. ej. dentro de la app instalada como PWA, o
+    // cuando el dedo arranca sobre la capa de texto seleccionable) no
+    // respondía bien y el usuario terminaba teniendo que arrastrar la barra
+    // de scroll a mano. Ahora un solo dedo arrastra directamente el
+    // contenido (como en un mapa), moviendo scrollLeft/scrollTop, y con dos
+    // dedos se sigue haciendo pinch-zoom como antes.
+    let panInfo = null;
     pdfCanvasWrapEl.addEventListener('pointerdown', (e)=>{
       if(e.pointerType !== 'touch' || pdfInkCanvasEl.classList.contains('drawing')) return;
       pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
       if(pointers.size === 2){
+        panInfo = null;
         const pts = [...pointers.values()];
         pinchInfo = { dist: Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y), zoom0: pdfZoom };
+      } else if(pointers.size === 1){
+        const p = pointers.values().next().value;
+        panInfo = { startX:p.x, startY:p.y, scrollLeft:pdfCanvasWrapEl.scrollLeft, scrollTop:pdfCanvasWrapEl.scrollTop, moved:false };
       }
     });
     pdfCanvasWrapEl.addEventListener('pointermove', (e)=>{
@@ -4323,12 +4351,33 @@ window.OcrEngine = (function(){
         const dist = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
         const newZoom = Math.max(0.4, Math.min(3, pinchInfo.zoom0 * (dist/pinchInfo.dist)));
         if(Math.abs(newZoom - pdfZoom) > 0.02){ pdfZoom = +newZoom.toFixed(3); renderCurrentPdfPage(); }
+      } else if(pointers.size === 1 && panInfo){
+        const p = pointers.values().next().value;
+        const dx = p.x - panInfo.startX, dy = p.y - panInfo.startY;
+        if(!panInfo.moved && Math.hypot(dx,dy) < 4) return; // umbral chico: no pisa un tap/click
+        panInfo.moved = true;
+        e.preventDefault();
+        pdfCanvasWrapEl.scrollLeft = panInfo.scrollLeft - dx;
+        pdfCanvasWrapEl.scrollTop = panInfo.scrollTop - dy;
       }
-    });
-    function endPointer(e){ pointers.delete(e.pointerId); if(pointers.size<2) pinchInfo=null; }
+    }, {passive:false});
+    function endPointer(e){ pointers.delete(e.pointerId); if(pointers.size<2) pinchInfo=null; if(pointers.size<1) panInfo=null; }
     pdfCanvasWrapEl.addEventListener('pointerup', endPointer);
     pdfCanvasWrapEl.addEventListener('pointercancel', endPointer);
   })();
+
+  // ---------- Mostrar/ocultar herramientas con doble-tap/doble-clic ----------
+  // Por defecto el PDF se ve "pelado" (sin lápiz/marcador/goma ni zoom
+  // encima). Tocar/cliquear dos veces la zona del PDF alterna la clase
+  // "showTools" en #pdfPanel, que es lo que la CSS usa para mostrar esas
+  // barras (ver reglas de #pdfDrawToolbar y .pdfZoomGroup). El evento
+  // "dblclick" ya sirve para esto sin agregar nada extra: el doble-tap-zoom
+  // nativo está bloqueado en toda la app (user-scalable=no + touch-action),
+  // así que el navegador entrega el doble toque como un "dblclick" normal.
+  pdfCanvasWrapEl.addEventListener('dblclick', (e)=>{
+    if(!currentPdfDoc) return;
+    pdfPanelEl.classList.toggle('showTools');
+  });
 
   function openPdfPanel(){
     pdfPanelEl.classList.add('open');
@@ -9186,6 +9235,49 @@ window.OcrEngine = (function(){
   document.getElementById('vbPdfViewerCanvasWrap').addEventListener('scroll', ()=>{
     if(vpSelToolbarEl.classList.contains('show')) positionVpSelToolbar();
   });
+  // ---------- Paneo con un dedo (visor de PDF de la biblioteca) ----------
+  // Mismo criterio que en el panel principal de PDF: con un solo dedo se
+  // arrastra el contenido moviendo scrollLeft/scrollTop en vez de depender
+  // solo de la barra de scroll nativa. Se desactiva mientras hay una
+  // herramienta de dibujo activa (pen/marker/eraser), para no pisar el trazo.
+  (function setupVbPdfViewerPan(){
+    const wrapEl = document.getElementById('vbPdfViewerCanvasWrap');
+    if(!wrapEl) return;
+    const pointers = new Map();
+    let panInfo = null;
+    wrapEl.addEventListener('pointerdown', (e)=>{
+      if(e.pointerType !== 'touch' || vpDrawTool !== 'select') return;
+      pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+      if(pointers.size === 1){
+        const p = pointers.values().next().value;
+        panInfo = { startX:p.x, startY:p.y, scrollLeft:wrapEl.scrollLeft, scrollTop:wrapEl.scrollTop, moved:false };
+      } else {
+        panInfo = null;
+      }
+    });
+    wrapEl.addEventListener('pointermove', (e)=>{
+      if(!pointers.has(e.pointerId)) return;
+      pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+      if(pointers.size === 1 && panInfo){
+        const p = pointers.values().next().value;
+        const dx = p.x - panInfo.startX, dy = p.y - panInfo.startY;
+        if(!panInfo.moved && Math.hypot(dx,dy) < 4) return; // umbral chico: no pisa un tap
+        panInfo.moved = true;
+        e.preventDefault();
+        wrapEl.scrollLeft = panInfo.scrollLeft - dx;
+        wrapEl.scrollTop = panInfo.scrollTop - dy;
+      }
+    }, {passive:false});
+    function endPointer(e){ pointers.delete(e.pointerId); if(pointers.size<1) panInfo=null; }
+    wrapEl.addEventListener('pointerup', endPointer);
+    wrapEl.addEventListener('pointercancel', endPointer);
+    // Mismo doble-tap/doble-clic para mostrar/ocultar herramientas, ahora
+    // sobre el visor de PDF de la biblioteca (ver #vbPdfViewer.showTools).
+    wrapEl.addEventListener('dblclick', ()=>{
+      if(!vbPdfViewerDoc) return;
+      document.getElementById('vbPdfViewer').classList.toggle('showTools');
+    });
+  })();
   document.addEventListener('pointerdown', (e)=>{
     if(vpSelToolbarEl.classList.contains('show') && !vpSelToolbarEl.contains(e.target) && !vpTextLayerEl.contains(e.target)){
       hideVpSelToolbar();
