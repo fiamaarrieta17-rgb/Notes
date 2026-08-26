@@ -967,7 +967,10 @@ window.OcrEngine = (function(){
   }
   .swatch-add svg{width:9px;height:9px;filter:drop-shadow(0 0 1px rgba(0,0,0,.8));}
 
-  input[type=range]{width:52px;accent-color:var(--pine);height:16px;flex-shrink:0;}
+  #widthControl{display:flex;align-items:center;gap:7px;flex-shrink:0;height:30px;padding:0 8px;border:1px solid var(--panel-edge);border-radius:7px;background:var(--panel-2);}
+  #widthControl label{display:flex;align-items:center;color:var(--cream-dim);font-size:10px;font-weight:600;white-space:nowrap;}
+  #widthRange{width:128px;accent-color:var(--pine);height:18px;flex-shrink:0;cursor:pointer;}
+  input[type=range]{accent-color:var(--pine);height:16px;flex-shrink:0;}
 
   #kebabWrap{position:relative;flex-shrink:0;margin-left:6px;padding-left:6px;border-left:1px solid var(--panel-edge);}
   #kebabBtn{
@@ -1455,6 +1458,11 @@ window.OcrEngine = (function(){
   .floatDrop.open{display:flex;}
   .floatDrop::-webkit-scrollbar{height:0;}
   #widthQuickBtn{width:30px;height:30px;border:1px solid var(--panel-edge);border-radius:7px;background:var(--panel-2);color:var(--cream-dim);cursor:pointer;font-size:11px;font-weight:700;flex-shrink:0;}
+  /* El tamaño de las herramientas ahora se elige solo con el deslizador
+     (#widthRange, ver setTool: paso 0.1 = prácticamente continuo/"infinito"),
+     así que este botón de tamaños fijos y su panel quedan ocultos. Se deja el
+     resto del código intacto (por si se quiere reactivar) en vez de borrarlo. */
+  #widthQuickBtn, #widthQuickPanel{display:none !important;}
   #widthQuickPanel{display:none;position:absolute;top:100%;left:8px;z-index:35;min-width:220px;padding:10px;background:var(--panel-2);border:1px solid var(--panel-edge);border-radius:10px;box-shadow:0 14px 34px rgba(0,0,0,.55);}
   #widthQuickPanel.open{display:block;}
   #widthQuickTitle{font-size:10px;color:var(--cream-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;}
@@ -1660,21 +1668,15 @@ window.OcrEngine = (function(){
   #vectorPanelView.vb-light #vbToolbar button.vb-tool-primary[data-tool-tone="marker"]{background:linear-gradient(145deg,#F5F0FA,#E9E1F3);}
   #vectorPanelView.vb-light #vbToolbar button.vb-tool-primary[data-tool-tone="eraser"]{background:linear-gradient(145deg,#F3F5F8,#E5E9F0);}
   #vectorPanelView.vb-light #vbToolbar button.vb-mode-btn.active{background:#E5EBFF;border-color:#AABCF5;}
-  #vectorPanelView.vb-light .vbChoiceOpt:hover,
-  #vectorPanelView.vb-light .vbChoiceThickOpt:hover,
-  #vectorPanelView.vb-light .vb-thick-opt:hover{background:#E8EDF7;border-color:#AABCF5;color:#20242D;}
-  #vectorPanelView.vb-light .vbChoiceOpt.active,
-  #vectorPanelView.vb-light .vbChoiceThickOpt.active,
-  #vectorPanelView.vb-light .vb-thick-opt.active{color:#fff;}
+  #vectorPanelView.vb-light .vbChoiceOpt:hover{background:#E8EDF7;border-color:#AABCF5;color:#20242D;}
+  #vectorPanelView.vb-light .vbChoiceOpt.active{color:#fff;}
   #vectorPanelView .vb-sep{width:1px;height:22px;background:var(--vb-line);margin:0 2px;flex:none;flex-shrink:0;}
   #vectorPanelView #vbSize{width:80px;accent-color:var(--vb-accent);flex-shrink:0;}
   #vectorPanelView #vbSizeQuickBtn,#vectorPanelView #vbSizeLabel,#vectorPanelView #vbSize{display:none !important;}
   #vectorPanelView #vbThicknessPanel{display:none;position:fixed;z-index:30;min-width:220px;padding:10px;background:rgba(27,29,36,.98);border:1px solid var(--vb-line);border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.5);}
   #vectorPanelView #vbThicknessPanel.open{display:block;}
   #vectorPanelView #vbThicknessTitle{font-size:11px;color:var(--vb-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;}
-  #vectorPanelView #vbThicknessPresets{display:flex;gap:6px;flex-wrap:wrap;}
-  #vectorPanelView .vb-thick-opt{border:1px solid var(--vb-line);background:var(--vb-ui-2);color:var(--vb-ink);border-radius:8px;min-width:32px;height:30px;cursor:pointer;font-weight:600;}
-  #vectorPanelView .vb-thick-opt.active{background:var(--vb-accent);border-color:var(--vb-accent);}
+  #vectorPanelView #vbThicknessPresets{display:none !important;}
   #vectorPanelView #vbSizeLabel{
     display:inline-flex;align-items:center;justify-content:center;width:22px;height:32px;
     color:var(--vb-muted);font-size:15px;flex:none;
@@ -1765,9 +1767,7 @@ window.OcrEngine = (function(){
   #vectorPanelView .vbChoiceThickness{margin-top:12px;padding-top:10px;border-top:1px solid var(--vb-line);}
   #vectorPanelView .vbChoiceThicknessTitle{font-size:11px;color:var(--vb-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px;}
   #vectorPanelView #vbToolThicknessRange{width:100%;accent-color:var(--vb-accent);}
-  #vectorPanelView #vbToolThicknessPresets{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;}
-  #vectorPanelView .vbChoiceThickOpt{border:1px solid var(--vb-line);background:var(--vb-ui-2);color:var(--vb-ink);border-radius:7px;min-width:30px;height:28px;cursor:pointer;font-size:11px;font-weight:600;}
-  #vectorPanelView .vbChoiceThickOpt.active{background:var(--vb-accent);border-color:var(--vb-accent);}
+  #vectorPanelView #vbToolThicknessPresets{display:none !important;}
   #vectorPanelView .vbChoiceOpt{border:1px solid var(--vb-line);background:var(--vb-ui-2);color:var(--vb-ink);border-radius:8px;padding:8px 10px;cursor:pointer;white-space:nowrap;font-weight:600;}
   #vectorPanelView .vbChoiceOpt.active{background:var(--vb-accent);border-color:var(--vb-accent);}
   #vectorPanelView #vbZoom{display:none !important;}
@@ -2158,7 +2158,10 @@ window.OcrEngine = (function(){
     <div class="grp" id="swatches"></div>
     <input type="color" id="colorPicker" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;">
     <div class="divider"></div>
-    <input type="range" id="widthRange" min="1" max="14" value="3" title="Grosor">
+    <div id="widthControl" title="Definí el tamaño de la herramienta con el deslizador">
+      <label for="widthRange">Tamaño</label>
+      <input type="range" id="widthRange" min="0.1" max="80" step="0.1" value="3" title="Tamaño de la herramienta" aria-label="Tamaño de la herramienta">
+    </div>
    </div>
 
     <div class="floatDrop" id="shapeTypeGrp">
@@ -2450,12 +2453,8 @@ window.OcrEngine = (function(){
       <textarea id="textInputArea" rows="3" placeholder="Escribí acá…"></textarea>
     </div>
     <div class="row">
-      <label class="field-label">Tamaño</label>
-      <div class="zoomrow">
-        <button class="zoombtn" id="textSizeDown">−</button>
-        <span id="textSizeLabel">34px</span>
-        <button class="zoombtn" id="textSizeUp">+</button>
-      </div>
+      <label class="field-label" for="textSizeRange">Tamaño</label>
+      <input id="textSizeRange" type="range" min="16" max="96" step="1" value="34" title="Definí el tamaño del texto con el deslizador" aria-label="Tamaño del texto">
     </div>
     <div class="exportFooter">
       <button class="action" id="textCancelBtn">Cancelar</button>
@@ -2893,7 +2892,7 @@ window.OcrEngine = (function(){
     }
     return 1;
   }
-  function widthForStroke(stroke, p, idx, taperOpts){
+  function widthForStroke(stroke, p, idx, taperOpts, speed){
     let w;
     if(stroke.tool==='highlighter' || stroke.tool==='underline'){
       w = stroke.width * (markStyleFor(stroke).widthMul || 1) * (0.4 + p);
@@ -2907,6 +2906,13 @@ window.OcrEngine = (function(){
         const j = 1 + (((Math.abs(Math.sin((idx+1)*78.233))%1) - 0.5) * 2) * ps.widthJitter;
         w *= Math.max(0.15, j);
       }
+      // Velocidad del gesto: además de la presión, una lapicera real se afina
+      // un poco cuando la mano se mueve rápido (menos tinta llega a tocar el
+      // papel) y engorda levemente cuando va lenta (la punta "pisa" más).
+      // Nebo combina presión+velocidad para el grosor; el efecto acá es
+      // sutil (máx. ~18%) para sumar esa "respiración" natural de tinta real
+      // sin deformar la forma de la letra (que la sigue marcando la presión).
+      if(speed!=null) w *= (1 - clamp(speed,0,1)*0.18);
     } else {
       w = stroke.width * (0.4 + p);
     }
@@ -3202,10 +3208,12 @@ window.OcrEngine = (function(){
   ];
   const FOLDER_ICONS = ['📓','📔','📕','📗','📘','📙','⭐','❤️','📌','🎯','📚','✏️','🎨','🔬','🎵','🌱','🧠','🧪','💡','🌙','🗂️','📝'];
   const TOOL_RANGE = {
-    pen:{min:1,max:14,def:3}, eraser:{min:6,max:50,def:18},
-    highlighter:{min:10,max:40,def:20}, underline:{min:2,max:12,def:5},
+    // Rangos amplios: no hay "tamaños" predefinidos, todo el control queda
+    // en el deslizador (min↔max), desde trazo muy fino hasta muy grueso.
+    pen:{min:0.5,max:30,def:3}, eraser:{min:4,max:80,def:18},
+    highlighter:{min:6,max:60,def:20}, underline:{min:1,max:20,def:5},
     text:{min:TEXT_SIZE_MIN,max:TEXT_SIZE_MAX,def:34},
-    shape:{min:1,max:14,def:3},
+    shape:{min:0.5,max:30,def:3},
   };
 
   let folders = [], currentFolderId = null;
@@ -3336,9 +3344,7 @@ window.OcrEngine = (function(){
   const textEditorPanel = document.getElementById('textEditorPanel');
   const textStyleBtns = [...document.querySelectorAll('.textStyleBtn')];
   const textInputArea = document.getElementById('textInputArea');
-  const textSizeDown = document.getElementById('textSizeDown');
-  const textSizeUp = document.getElementById('textSizeUp');
-  const textSizeLabel = document.getElementById('textSizeLabel');
+  const textSizeRange = document.getElementById('textSizeRange');
   const textCancelBtn = document.getElementById('textCancelBtn');
   const textInsertBtn = document.getElementById('textInsertBtn');
   const ocrTidyBtn = document.getElementById('ocrTidyBtn');
@@ -4583,8 +4589,17 @@ window.OcrEngine = (function(){
     ({pen:toolPenBtn, text:toolTextBtn, highlighter:toolHighlighterBtn, underline:toolUnderlineBtn, shape:toolShapeBtn, mic:toolMicBtn, eraser:toolEraserBtn, pan:toolPanBtn})[t].classList.add('active');
     viewport.style.cursor = t==='pan' ? 'grab' : 'crosshair';
     const r = TOOL_RANGE[t];
-    if(r){ widthRange.min=r.min; widthRange.max=r.max; widthRange.value=widths[t]; widthRange.style.visibility='visible'; widthQuickBtn.style.display='block'; }
-    else { widthRange.style.visibility='hidden'; widthQuickBtn.style.display='none'; widthQuickPanel.classList.remove('open'); }
+    if(r){
+      widthRange.min=r.min; widthRange.max=r.max; widthRange.value=widths[t]; widthRange.style.visibility='visible';
+      widthRange.setAttribute('aria-valuemin', r.min);
+      widthRange.setAttribute('aria-valuemax', r.max);
+      // Paso fino: el tamaño del texto queda en enteros (así combina bien con
+      // los botones +/- de la herramienta Texto, que suman de a TEXT_SIZE_STEP),
+      // pero el resto de las herramientas usa un paso mínimo (0.1) para que el
+      // deslizador se sienta continuo/"infinito" en vez de saltar de a un número.
+      widthRange.step = (t==='text') ? 1 : 0.1;
+    }
+    else { widthRange.style.visibility='hidden'; }
     renderSwatches();
   }
 
@@ -4699,14 +4714,20 @@ window.OcrEngine = (function(){
   function renderWidthQuickPanel(){
     const labels={pen:'Grosor de lápiz',highlighter:'Grosor de marcador',underline:'Grosor de subrayador',eraser:'Grosor de goma'};
     widthQuickTitle.textContent=labels[tool]||'Grosor';
-    const values=tool==='eraser'?[2,5,8,12,18,24]:tool==='highlighter'?[3,5,7,9,12,14]:tool==='underline'?[1,2,3,4,6,8]:[1,2,3,5,7,10];
+    // Más opciones de tamaño por herramienta (antes 6, ahora 8-9), siempre
+    // dentro del rango real del control deslizante de cada una (TOOL_RANGE)
+    // para que ningún preset quede fuera de lo que el slider permite.
+    const values=tool==='eraser'?[6,8,10,14,18,24,30,38,50]:tool==='highlighter'?[10,12,14,18,22,26,30,35,40]:tool==='underline'?[2,3,4,5,6,8,10,12]:[1,2,3,4,5,7,9,11,14];
     widthQuickPresets.innerHTML='';
     values.forEach(n=>{const b=document.createElement('button');b.type='button';b.className='widthQuickOpt'+(Number(widths[tool])===n?' active':'');b.textContent=n;b.addEventListener('click',()=>{widthRange.value=n;widthRange.dispatchEvent(new Event('input',{bubbles:true}));renderWidthQuickPanel();});widthQuickPresets.appendChild(b);});
   }
   widthRange.addEventListener('input', ()=>{
-    const v = parseInt(widthRange.value,10);
-    if(widths[tool] !== undefined) widths[tool] = v;
-    renderWidthQuickPanel();
+    // El tamaño se guarda con decimales: cada herramienta responde de forma
+    // continua al deslizador, sin saltar entre tamaños prefijados.
+    const v = tool==='text' ? Math.round(parseFloat(widthRange.value)) : parseFloat(widthRange.value);
+    if(widths[tool] !== undefined){
+      widths[tool] = v;
+    }
   });
   widthQuickBtn.addEventListener('click',(e)=>{e.stopPropagation();renderWidthQuickPanel();widthQuickPanel.classList.toggle('open');});
   document.addEventListener('pointerdown',(e)=>{if(!e.target.closest('#widthQuickPanel')&&!e.target.closest('#widthQuickBtn'))widthQuickPanel.classList.remove('open');});
@@ -5280,7 +5301,7 @@ window.OcrEngine = (function(){
     targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, 0); targetCtx.globalCompositeOperation = style.composite;
     targetCtx.fillStyle = colorForStroke(stroke);
     targetCtx.beginPath();
-    targetCtx.arc(p.x, p.y, widthForStroke(stroke, p.p, 0, taperOpts) / 2, 0, Math.PI*2);
+    targetCtx.arc(p.x, p.y, widthForStroke(stroke, p.p, 0, taperOpts, p.v||0) / 2, 0, Math.PI*2);
     targetCtx.fill();
     targetCtx.globalAlpha = 1; targetCtx.globalCompositeOperation = 'source-over';
   }
@@ -5289,7 +5310,7 @@ window.OcrEngine = (function(){
     const cap = capForStroke(stroke);
     targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, i1); targetCtx.globalCompositeOperation = style.composite;
     targetCtx.strokeStyle = colorForStroke(stroke);
-    targetCtx.lineWidth = widthForStroke(stroke, p1.p, i1, taperOpts);
+    targetCtx.lineWidth = widthForStroke(stroke, p1.p, i1, taperOpts, p1.v||0);
     targetCtx.lineJoin = cap==='square' ? 'miter' : 'round'; targetCtx.lineCap = cap;
     targetCtx.beginPath();
     targetCtx.moveTo(p0.x, p0.y);
@@ -5331,7 +5352,7 @@ window.OcrEngine = (function(){
     targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, i);
     targetCtx.globalCompositeOperation = style.composite;
     targetCtx.strokeStyle = colorForStroke(stroke);
-    targetCtx.lineWidth = widthForStroke(stroke, p1.p, i);
+    targetCtx.lineWidth = widthForStroke(stroke, p1.p, i, undefined, p1.v||0);
     targetCtx.lineJoin = cap0==='square' ? 'miter' : 'round'; targetCtx.lineCap = cap0;
     targetCtx.beginPath();
     targetCtx.moveTo(start.x, start.y);
@@ -5349,7 +5370,7 @@ window.OcrEngine = (function(){
     targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, n-1);
     targetCtx.globalCompositeOperation = style.composite;
     targetCtx.strokeStyle = colorForStroke(stroke);
-    targetCtx.lineWidth = widthForStroke(stroke, last.p, n-1, {end:true});
+    targetCtx.lineWidth = widthForStroke(stroke, last.p, n-1, {end:true}, last.v||0);
     targetCtx.lineJoin = cap1==='square' ? 'miter' : 'round'; targetCtx.lineCap = cap1;
     targetCtx.beginPath();
     targetCtx.moveTo(start.x, start.y);
@@ -5374,7 +5395,7 @@ window.OcrEngine = (function(){
       // Acá sí se conoce el trazo COMPLETO y cerrado (redibujo final o de
       // exportación), así que el afinado de ambas puntas (opts.end) es
       // seguro: no hay riesgo de "cortar" un trazo que en realidad sigue.
-      targetCtx.lineWidth = widthForStroke(stroke, p1.p, i, {end:true});
+      targetCtx.lineWidth = widthForStroke(stroke, p1.p, i, {end:true}, p1.v||0);
       targetCtx.lineJoin = capS==='square' ? 'miter' : 'round'; targetCtx.lineCap = capS;
       targetCtx.beginPath();
       targetCtx.moveTo(start.x, start.y);
@@ -5383,6 +5404,55 @@ window.OcrEngine = (function(){
     }
     drawFreehandTail(targetCtx, stroke, style);
     targetCtx.globalAlpha = 1; targetCtx.globalCompositeOperation = 'source-over';
+  }
+  // ---------- Predicción de punto (reduce el retraso visual) ----------
+  // Entre la muestra real del lápiz y el frame en que se pinta en pantalla
+  // siempre hay algo de latencia. Nebo y apps similares "adelantan" un poco
+  // la tinta visible extrapolando la velocidad reciente del gesto, y corrigen
+  // esa puntita especulativa apenas llega la muestra real siguiente. Clave:
+  // el punto predicho NUNCA se agrega a stroke.points, solo se pinta — así
+  // el trazo guardado, el reconocimiento de escritura y la goma siguen
+  // viendo exactamente los puntos reales que reportó el hardware.
+  const PREDICT_FACTOR = 0.55; // fracción del último desplazamiento que se adelanta
+  let predictedPatch = null;   // píxeles guardados debajo de la punta especulativa, para poder "deshacerla"
+  function clearPredictedTip(){
+    if(!predictedPatch) return;
+    predictedPatch.ctx.putImageData(predictedPatch.data, predictedPatch.px, predictedPatch.py);
+    predictedPatch = null;
+  }
+  function drawPredictedTip(targetCtx, stroke, style){
+    const pts = stroke.points;
+    const n = pts.length;
+    if(n < 2) return;
+    const prev = pts[n-2], last = pts[n-1];
+    const dx = last.x - prev.x, dy = last.y - prev.y;
+    if(Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) return; // mano quieta: nada que adelantar
+    const predicted = { x:last.x + dx*PREDICT_FACTOR, y:last.y + dy*PREDICT_FACTOR };
+    const scale = currentCanvasScale();
+    const w = widthForStroke(stroke, last.p, n-1, undefined, last.v||0);
+    const pad = Math.max(6, w) + 4;
+    const minX = Math.min(last.x, predicted.x) - pad, maxX = Math.max(last.x, predicted.x) + pad;
+    const minY = Math.min(last.y, predicted.y) - pad, maxY = Math.max(last.y, predicted.y) + pad;
+    const px = Math.max(0, Math.floor(minX*scale));
+    const py = Math.max(0, Math.floor(minY*scale));
+    const pw = Math.min(targetCtx.canvas.width, Math.ceil(maxX*scale)) - px;
+    const ph = Math.min(targetCtx.canvas.height, Math.ceil(maxY*scale)) - py;
+    if(pw <= 0 || ph <= 0) return;
+    let data;
+    try{ data = targetCtx.getImageData(px, py, pw, ph); } catch(err){ return; } // lienzo "tainted" u otro error: sin predicción, sin romper el trazo real
+    const cap = capForStroke(stroke);
+    targetCtx.save();
+    targetCtx.globalAlpha = alphaForStroke(stroke, style.alpha, n-1);
+    targetCtx.globalCompositeOperation = style.composite;
+    targetCtx.strokeStyle = colorForStroke(stroke);
+    targetCtx.lineWidth = w;
+    targetCtx.lineJoin = cap==='square' ? 'miter' : 'round'; targetCtx.lineCap = cap;
+    targetCtx.beginPath();
+    targetCtx.moveTo(last.x, last.y);
+    targetCtx.lineTo(predicted.x, predicted.y);
+    targetCtx.stroke();
+    targetCtx.restore();
+    predictedPatch = { ctx: targetCtx, data, px, py };
   }
   function lineSegmentTo(targetCtx, stroke, style){
     targetCtx.globalAlpha = style.alpha; targetCtx.globalCompositeOperation = style.composite;
@@ -5449,6 +5519,7 @@ window.OcrEngine = (function(){
     }
 
     drawing = true; redoStack = [];
+    predictedPatch = null; // ninguna punta especulativa pendiente de un trazo anterior
     activeDrawPointerId = e.pointerId;
     hideLiveRecognition();
     hideTidyUndoToast();
@@ -5552,6 +5623,13 @@ window.OcrEngine = (function(){
     // mano con toda la fidelidad con la que el hardware la reportó, sin
     // trabajo de más: son las mismas muestras que el dispositivo ya generó,
     // antes se descartaban.
+    //
+    // Antes de sumar las muestras reales de este evento, deshacemos la punta
+    // especulativa que se haya pintado en el evento anterior (drawPredictedTip
+    // más abajo): esas muestras reales son siempre más precisas que lo que se
+    // había adelantado.
+    clearPredictedTip();
+
     let rawEvents = (typeof e.getCoalescedEvents === 'function') ? e.getCoalescedEvents() : null;
     if(!rawEvents || !rawEvents.length) rawEvents = [e];
 
@@ -5612,6 +5690,11 @@ window.OcrEngine = (function(){
         const oldWeight = 1 - newWeight - midWeight;
         pt.x = last.x*oldWeight + prev.x*midWeight + pt.x*newWeight;
         pt.y = last.y*oldWeight + prev.y*midWeight + pt.y*newWeight;
+        // Guardamos la velocidad normalizada del gesto en el propio punto:
+        // widthForStroke la usa para el grosor (presión + velocidad) y
+        // drawPredictedTip la reutiliza para extrapolar la punta especulativa,
+        // sin tener que recalcularla ni duplicar esta lógica en otro lado.
+        pt.v = speedT;
         if(tidyMode){
           const page = pages.find(p=>p.id===currentPageId);
           if(page && page.paperType === 'rayado'){
@@ -5647,10 +5730,21 @@ window.OcrEngine = (function(){
     if(currentStroke.tool === 'highlighter'){
       restoreFromBase();
       overlayBuffer('highlighter');
+    } else if(currentStroke.tool === 'pen'){
+      // Adelanta una puntita especulativa hasta donde el gesto probablemente
+      // ya esté para cuando este frame se pinte (ver drawPredictedTip). Se
+      // corrige/rehace en el próximo pointermove (clearPredictedTip) y jamás
+      // se guarda en stroke.points, así que el trazo real sigue siendo el
+      // dato editable y compatible con la goma de siempre.
+      drawPredictedTip(ctx, currentStroke, styleFor(currentStroke.tool));
     }
   });
 
   function finishStroke(){
+    // La punta especulativa (si había una) queda pisada por el redibujado
+    // final de abajo (restoreFromBase / rawCopy); solo hace falta soltar la
+    // referencia para no intentar "deshacerla" sobre el trazo siguiente.
+    predictedPatch = null;
     const t = currentStroke && currentStroke.tool;
     if(t === 'shape'){
       // Un toque sin arrastre no cuenta como forma: la descartamos para no
@@ -6428,9 +6522,10 @@ window.OcrEngine = (function(){
   textStyleBtns.forEach(b=>{
     b.addEventListener('click', ()=>{ textStyle = b.dataset.style; updateTextStyleUI(); });
   });
-  function updateTextSizeUI(){ textSizeLabel.textContent = widths.text + 'px'; }
-  textSizeDown.addEventListener('click', ()=>{ widths.text = Math.max(TEXT_SIZE_MIN, widths.text - TEXT_SIZE_STEP); updateTextSizeUI(); if(widthRange.min==TEXT_SIZE_MIN) widthRange.value = widths.text; });
-  textSizeUp.addEventListener('click', ()=>{ widths.text = Math.min(TEXT_SIZE_MAX, widths.text + TEXT_SIZE_STEP); updateTextSizeUI(); if(widthRange.min==TEXT_SIZE_MIN) widthRange.value = widths.text; });
+  textSizeRange.addEventListener('input', ()=>{
+    widths.text = Math.round(parseFloat(textSizeRange.value));
+    if(tool==='text') widthRange.value = widths.text;
+  });
 
   // Color más frecuente entre un grupo de trazos (por si hay letra escrita
   // con más de un color en la misma selección): así la transcripción respeta
@@ -6447,6 +6542,7 @@ window.OcrEngine = (function(){
     return best;
   }
   function openTextEditor(){
+    textSizeRange.value = widths.text;
     closePopover();
     textInputArea.value = '';
     ocrHintRow.style.display = 'none';
@@ -7089,7 +7185,11 @@ window.OcrEngine = (function(){
       // (textStyle = 'impMin' más abajo), ajustamos el tamaño global antes de
       // abrir el editor, así el usuario ve y puede confirmar/editar ese tamaño.
       widths.text = clamp(Math.round(medianH), TEXT_SIZE_MIN, TEXT_SIZE_MAX);
-      if(widthRange.min==TEXT_SIZE_MIN) widthRange.value = widths.text;
+             if(widthRange.min==TEXT_SIZE_MIN){
+         widthRange.value = widths.text;
+         textSizeRange.value = widths.text;
+       }
+
       textInsertPt = { x: insertMinX, y: insertMinY + widths.text };
       openTextEditor();
       textInputArea.value = recognized;
@@ -7525,17 +7625,12 @@ window.OcrEngine = (function(){
       vbSizeLabel.textContent='●'; vbSizeLabel.title='Grosor del trazo';
     }
   }
-  const vbThicknessPresetsFor=t=>t==='eraser' ? [6,10,14,20,30,45] : [1,2,3,5,8,12,18];
   function vbRenderThicknessPanel(){
     const er=vTool==='eraser';
-    vbThicknessTitle.textContent=er?'Grosor de goma':(vTool==='highlighter'?'Grosor de marcador':'Grosor de lápiz');
-    const value=er?vEraserSize:vPenSize;
+    vbThicknessTitle.textContent=er?'Tamaño de goma':(vTool==='highlighter'?'Tamaño de marcador':'Tamaño de lápiz');
+    // El tamaño se define exclusivamente con el deslizador; no se muestran
+    // botones con valores fijos.
     vbThicknessPresets.innerHTML='';
-    vbThicknessPresetsFor(vTool).forEach(n=>{
-      const b=document.createElement('button'); b.type='button'; b.className='vb-thick-opt'+(Math.abs(n-value)<.01?' active':''); b.textContent=n;
-      b.addEventListener('click',()=>{ vbSize.value=n; vbSize.dispatchEvent(new Event('input',{bubbles:true})); vbRenderThicknessPanel(); });
-      vbThicknessPresets.appendChild(b);
-    });
   }
   function vbOpenThicknessPanel(){
     vbRenderThicknessPanel();
@@ -7565,11 +7660,9 @@ window.OcrEngine = (function(){
   function vbRenderToolThickness(kind){
     const er=kind==='eraser';
     const value=er?vEraserSize:vPenSize;
-    const values=er?[6,10,14,20,30,45]:kind==='mark'?[1,2,3,5,8,12,18]:[1,2,3,5,8,12,18];
-    vbToolThicknessTitle.textContent=er?'Grosor de goma':kind==='mark'?'Grosor de marcador':'Grosor de lápiz';
-    vbToolThicknessRange.min=er?'4':'.5'; vbToolThicknessRange.max=er?'80':'30'; vbToolThicknessRange.step=er?'1':'.5'; vbToolThicknessRange.value=value;
+    vbToolThicknessTitle.textContent=er?'Tamaño de goma':kind==='mark'?'Tamaño de marcador':'Tamaño de lápiz';
+    vbToolThicknessRange.min=er?'4':'.5'; vbToolThicknessRange.max=er?'80':'30'; vbToolThicknessRange.step=er?'0.1':'0.1'; vbToolThicknessRange.value=value;
     vbToolThicknessPresets.innerHTML='';
-    values.forEach(n=>{const b=document.createElement('button');b.type='button';b.className='vbChoiceThickOpt'+(Math.abs(n-value)<.01?' active':'');b.textContent=n;b.addEventListener('click',()=>{vbToolThicknessRange.value=n;vbToolThicknessRange.dispatchEvent(new Event('input',{bubbles:true}));vbRenderToolThickness(kind);});vbToolThicknessPresets.appendChild(b);});
   }
   vbToolThicknessRange.addEventListener('input',()=>{if(vTool==='eraser'){vEraserSize=+vbToolThicknessRange.value;vbSize.value=vEraserSize;vbUpdateEraserCursorSize();}else{vPenSize=+vbToolThicknessRange.value;vbSize.value=vPenSize;}vbRenderToolThickness(vTool==='highlighter'?'mark':vTool);});
   function vbOpenToolStylePanel(kind,btn){
