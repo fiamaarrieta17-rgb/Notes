@@ -1883,6 +1883,21 @@ window.OcrEngine = (function(){
   #vectorPanelView #vbPdfPanelClose svg{width:16px;height:16px;}
   #vectorPanelView #vbPdfPanelBody{flex:1;min-height:0;min-width:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px;box-sizing:border-box;display:flex;flex-direction:column;}
   #vectorPanelView #vbPdfAddBtn{margin-bottom:10px;}
+  /* Cuando hay una vista previa de PDF abierta, el botón de agregar y los
+     selectores de carpeta se ocultan: en pantallas chicas competían por
+     espacio con la vista previa (que es lo que el usuario está mirando en
+     ese momento) y obligaban a hacer scroll de más para llegar a la lista.
+     Se recuperan apenas se cierra la vista previa (ver vbPdfShowPreview /
+     el botón de cerrar de #vbPdfViewer). */
+  #vectorPanelView #vbPdfPanelBody.previewOpen #vbPdfAddBtn,
+  #vectorPanelView #vbPdfPanelBody.previewOpen #vbPdfFolderBar{display:none;}
+  /* En modo "solo PDF" también se ocultan la lista y el mensaje de carpeta
+     vacía: lo único visible es el visor, que además pasa a ocupar todo el
+     espacio disponible (antes quedaba como una caja chica de altura fija). */
+  #vectorPanelView #vbPdfPanelBody.previewOpen #vbPdfList,
+  #vectorPanelView #vbPdfPanelBody.previewOpen #vbPdfEmpty{display:none;}
+  #vectorPanelView #vbPdfPanelBody.previewOpen #vbPdfViewer{flex:1;min-height:0;margin:0;}
+  #vectorPanelView #vbPdfPanelBody.previewOpen #vbPdfViewerCanvasWrap{flex:1;min-height:0;max-height:none;}
   #vectorPanelView #vbPdfEmpty{display:none;margin:18px 4px;font-size:12.5px;line-height:1.5;color:var(--vb-muted);}
   #vectorPanelView #vbPdfEmpty.show{display:block;}
   #vectorPanelView .vbPdfItem{
@@ -1911,14 +1926,90 @@ window.OcrEngine = (function(){
   #vectorPanelView .vbPdfDelBtn:hover{background:#B23A48;border-color:#B23A48;color:#fff;}
   #vectorPanelView .vbPdfInsertBtn svg,#vectorPanelView .vbPdfDelBtn svg{width:14px;height:14px;}
   #vectorPanelView .vbPdfItem[data-busy="1"]{opacity:.55;pointer-events:none;}
-  #vectorPanelView #vbPdfFolderBar{display:flex;gap:6px;align-items:center;margin-bottom:10px;flex-wrap:wrap;}
-  #vectorPanelView #vbPdfNoteFolderSelect{flex:1 1 100%;min-width:0;height:36px;}
-  #vectorPanelView #vbPdfFolderBar #vbPdfFolderSelect{flex:1;min-width:0;}
-  #vectorPanelView #vbPdfFolderBar #vbPdfNewFolder{flex:0 0 36px;}
+  #vectorPanelView #vbPdfFolderBar{display:flex;flex-direction:column;gap:8px;margin-bottom:10px;}
+  #vectorPanelView #vbPdfFolderBarTop{display:flex;align-items:center;gap:8px;}
+  #vectorPanelView #vbPdfCrumbs{flex:1;min-width:0;display:flex;align-items:center;flex-wrap:wrap;gap:4px;font-size:11.5px;color:var(--vb-muted);}
+  #vectorPanelView .vbPdfCrumb{background:none;border:none;padding:2px 1px;color:var(--vb-muted);font:inherit;font-size:11.5px;cursor:pointer;white-space:nowrap;max-width:140px;overflow:hidden;text-overflow:ellipsis;}
+  #vectorPanelView .vbPdfCrumb:hover{color:var(--vb-accent);text-decoration:underline;}
+  #vectorPanelView .vbPdfCrumb.current{color:var(--vb-ink);font-weight:700;cursor:default;}
+  #vectorPanelView .vbPdfCrumb.current:hover{text-decoration:none;}
+  #vectorPanelView .vbPdfCrumbSep{color:var(--vb-line);font-size:11px;}
+  #vectorPanelView #vbPdfFolderBarBtns{display:flex;gap:6px;flex-shrink:0;}
+  #vectorPanelView #vbPdfFoldersMenuBtn,#vectorPanelView #vbPdfNewFolder{
+    width:32px;height:32px;flex:0 0 32px;border:1px solid var(--vb-line);border-radius:8px;
+    background:var(--vb-ui-2);color:var(--vb-ink);display:flex;align-items:center;justify-content:center;cursor:pointer;
+  }
+  #vectorPanelView #vbPdfFoldersMenuBtn svg,#vectorPanelView #vbPdfNewFolder svg{width:16px;height:16px;}
+  #vectorPanelView #vbPdfFoldersMenuBtn:hover,#vectorPanelView #vbPdfNewFolder:hover{background:var(--vb-accent);border-color:var(--vb-accent);color:#fff;}
+  #vectorPanelView .vbPdfChipsRow{display:none;gap:7px;flex-wrap:wrap;align-items:center;}
+  #vectorPanelView .vbPdfChip{
+    display:inline-flex;align-items:center;gap:6px;border:1px solid var(--vb-line);border-radius:20px;
+    background:var(--vb-ui-2);color:var(--vb-ink);padding:6px 11px 6px 8px;font:600 12px 'Inter',sans-serif;cursor:pointer;
+  }
+  #vectorPanelView .vbPdfChip:hover{border-color:var(--vb-accent);}
+  #vectorPanelView .vbPdfChip.active{background:var(--vb-accent);border-color:var(--vb-accent);color:#fff;}
+  #vectorPanelView .vbPdfChipIcon{width:15px;height:15px;flex:0 0 15px;display:flex;opacity:.85;}
+  #vectorPanelView .vbPdfChipIcon svg{width:100%;height:100%;}
+  #vectorPanelView .vbPdfChip.active .vbPdfChipIcon{opacity:1;}
+  #vectorPanelView .vbPdfChipLabel{max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  #vectorPanelView .vbPdfChipCount{
+    background:rgba(127,127,127,.25);border-radius:10px;padding:1px 6px;font-size:10.5px;font-weight:700;
+  }
+  #vectorPanelView .vbPdfChip.active .vbPdfChipCount{background:rgba(255,255,255,.28);}
+  /* Cajón lateral con el árbol completo de carpetas/subcarpetas y sus PDFs */
+  #vectorPanelView #vbPdfFoldersDrawerBackdrop{
+    position:fixed;inset:0;z-index:29;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;
+    transition:opacity .2s ease;backdrop-filter:blur(1px);
+  }
+  #vectorPanelView #vbPdfFoldersDrawerBackdrop.open{opacity:1;pointer-events:auto;}
+  #vectorPanelView #vbPdfFoldersDrawer{
+    position:fixed;z-index:30;top:0;right:0;bottom:0;width:min(340px,90vw);
+    padding:calc(14px + env(safe-area-inset-top)) 14px calc(14px + env(safe-area-inset-bottom));
+    background:linear-gradient(180deg,var(--vb-ui-2),var(--vb-ui));border-left:1px solid var(--vb-line);
+    box-shadow:-18px 0 42px rgba(0,0,0,.38);display:flex;flex-direction:column;gap:10px;
+    transform:translateX(100%);visibility:hidden;pointer-events:none;
+    transition:transform .22s cubic-bezier(.2,.8,.2,1),visibility .22s;
+  }
+  #vectorPanelView #vbPdfFoldersDrawer.open{transform:translateX(0);visibility:visible;pointer-events:auto;}
+  #vectorPanelView #vbPdfFoldersDrawerHeader{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:2px 2px 10px;border-bottom:1px solid var(--vb-line);}
+  #vectorPanelView #vbPdfFoldersDrawerTitle{display:flex;align-items:center;gap:9px;color:var(--vb-ink);font:600 14px 'Inter',sans-serif;}
+  #vectorPanelView #vbPdfFoldersDrawerTitle svg{width:17px;height:17px;color:var(--vb-accent);}
+  #vectorPanelView #vbPdfFoldersDrawerClose{width:30px;height:30px;border:1px solid var(--vb-line);border-radius:8px;background:transparent;color:var(--vb-muted);display:flex;align-items:center;justify-content:center;cursor:pointer;}
+  #vectorPanelView #vbPdfFoldersDrawerClose:hover{background:var(--vb-line);color:var(--vb-ink);}
+  #vectorPanelView #vbPdfFoldersDrawerClose svg{width:15px;height:15px;}
+  #vectorPanelView #vbPdfFoldersDrawerList{display:flex;flex-direction:column;gap:4px;overflow-y:auto;min-height:0;padding:2px;}
+  #vectorPanelView #vbPdfFoldersDrawerList::-webkit-scrollbar{width:4px;}
+  #vectorPanelView #vbPdfFoldersDrawerList::-webkit-scrollbar-thumb{background:var(--vb-line);border-radius:6px;}
+  #vectorPanelView .vbPdfDrawerGroup{border-bottom:1px solid var(--vb-line);padding-bottom:6px;margin-bottom:2px;}
+  #vectorPanelView .vbPdfDrawerNoteHead,#vectorPanelView .vbPdfDrawerSubRow{
+    width:100%;border:1px solid transparent;border-radius:9px;background:rgba(127,127,127,.08);color:var(--vb-ink);
+    display:flex;align-items:center;gap:8px;padding:8px 9px;text-align:left;cursor:pointer;font:600 12.5px 'Inter',sans-serif;margin:3px 0;
+  }
+  #vectorPanelView .vbPdfDrawerNoteHead svg,#vectorPanelView .vbPdfDrawerSubRow svg{width:15px;height:15px;flex:0 0 15px;color:var(--vb-accent);}
+  #vectorPanelView .vbPdfDrawerSubRow{margin-left:14px;width:calc(100% - 14px);background:rgba(127,127,127,.04);font-weight:500;font-size:12px;}
+  #vectorPanelView .vbPdfDrawerNoteHead:hover,#vectorPanelView .vbPdfDrawerSubRow:hover{background:rgba(127,127,127,.16);border-color:var(--vb-line);}
+  #vectorPanelView .vbPdfDrawerCount{margin-left:auto;background:rgba(127,127,127,.25);border-radius:10px;padding:1px 7px;font-size:10.5px;font-weight:700;flex-shrink:0;}
+  #vectorPanelView .vbPdfDrawerFiles{margin:0 0 4px 34px;display:flex;flex-direction:column;gap:2px;}
+  #vectorPanelView .vbPdfDrawerFile{font-size:11px;color:var(--vb-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  #vectorPanelView #vbPdfFoldersDrawerEmpty{display:none;margin:24px 6px;text-align:center;color:var(--vb-muted);font-size:12px;line-height:1.5;}
+  #vectorPanelView #vbPdfFoldersDrawerEmpty.show{display:block;}
   #vectorPanelView #vbPdfViewer{display:none;flex:0 0 auto;width:100%;max-width:100%;min-width:0;box-sizing:border-box;flex-direction:column;gap:7px;margin:0 0 10px;padding:8px;background:#15161B;border:1px solid var(--vb-line);border-radius:10px;overflow:hidden;}
   #vectorPanelView #vbPdfViewer.show{display:flex;}
-  #vectorPanelView #vbPdfViewerHead{display:flex;align-items:center;justify-content:space-between;gap:6px;color:var(--vb-muted);font-size:11px;}
-  #vectorPanelView #vbPdfViewerTitle{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  /* #vbPdfViewer siempre tiene fondo oscuro fijo (#15161B), sin importar el
+     tema claro/oscuro del resto del panel. Por eso este encabezado usa
+     colores explícitos en vez de var(--vb-ink)/var(--vb-muted): en tema
+     claro esas variables son casi negras, lo que dejaba el botón "Atrás"
+     invisible sobre el fondo oscuro del visor. */
+  #vectorPanelView #vbPdfViewerHead{display:flex;align-items:center;justify-content:space-between;gap:6px;color:#B6B9C4;font-size:11px;}
+  #vectorPanelView #vbPdfViewerClose{
+    display:flex;align-items:center;gap:5px;flex-shrink:0;
+    background:#262832;border:1px solid #3B3F4C;border-radius:8px;
+    color:#F5F6FA;font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer;
+    padding:6px 11px 6px 8px;margin:0;
+  }
+  #vectorPanelView #vbPdfViewerClose svg{width:16px;height:16px;flex-shrink:0;}
+  #vectorPanelView #vbPdfViewerClose:hover{background:var(--vb-accent);border-color:var(--vb-accent);color:#fff;}
+  #vectorPanelView #vbPdfViewerTitle{flex:1;min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#B6B9C4;}
   #vectorPanelView #vbPdfViewerCanvasWrap{width:100%;min-width:0;min-height:120px;max-height:42vh;box-sizing:border-box;overflow:auto;background:#30323A;border-radius:7px;text-align:center;padding:6px;display:flex;justify-content:center;align-items:flex-start;}
   #vectorPanelView #vbPdfViewerCanvas{display:block;position:static!important;inset:auto!important;transform:none!important;float:none!important;flex:0 0 auto;max-width:100%;width:auto;height:auto;background:#fff;box-shadow:0 3px 10px rgba(0,0,0,.35);}
   #vectorPanelView #vbPdfViewerControls{width:100%;box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:6px;flex:0 0 auto;}
@@ -1966,9 +2057,6 @@ window.OcrEngine = (function(){
   #vectorPanelView #vpSelToolbar button:hover{border-color:var(--vb-accent);}
   #vectorPanelView #vpSelToolbar .vpDivider{width:1px;align-self:stretch;background:var(--vb-line);margin:0 1px;}
   #vectorPanelView #vpSelToolbar .vpDot{width:14px;height:14px;}
-  #vectorPanelView #vbPdfFolderSelect{flex:1;min-width:0;max-width:none;height:34px;}
-  #vectorPanelView #vbPdfNewFolder{width:34px;height:34px;border:1px solid var(--vb-line);border-radius:9px;background:var(--vb-ui-2);color:var(--vb-ink);font-size:18px;cursor:pointer;}
-  #vectorPanelView #vbPdfNewFolder:hover{background:var(--vb-accent);border-color:var(--vb-accent);}
   #vectorPanelView #vbPdfList{width:100%;min-width:0;box-sizing:border-box;}
   @media (max-width:760px){
     /* En mobile el panel se acopla arriba, en vez de tapar toda la pantalla:
@@ -2696,12 +2784,28 @@ window.OcrEngine = (function(){
       </button>
       <input type="file" id="vbPdfMultiInput" accept="application/pdf,.pdf" multiple style="display:none;">
        <div id="vbPdfFolderBar">
-         <select id="vbPdfNoteFolderSelect" title="Carpeta de notas"><option value="all">Todas las carpetas</option></select>
-         <select id="vbPdfFolderSelect" title="Subcarpeta de PDFs"></select>
-         <button type="button" id="vbPdfNewFolder" title="Nueva carpeta o subcarpeta">+</button>
+         <div id="vbPdfFolderBarTop">
+           <div id="vbPdfCrumbs"></div>
+           <div id="vbPdfFolderBarBtns">
+             <button type="button" id="vbPdfFoldersMenuBtn" title="Ver todas las carpetas y subcarpetas">
+               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+             </button>
+             <button type="button" id="vbPdfNewFolder" title="Nueva carpeta o subcarpeta">
+               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+             </button>
+           </div>
+         </div>
+         <div id="vbPdfChipsFolders" class="vbPdfChipsRow"></div>
+         <div id="vbPdfChipsSub" class="vbPdfChipsRow"></div>
        </div>
        <div id="vbPdfViewer" aria-label="Visor PDF paralelo">
-         <div id="vbPdfViewerHead"><span id="vbPdfViewerTitle">Vista previa</span><button type="button" id="vbPdfViewerClose" title="Cerrar vista previa">×</button></div>
+         <div id="vbPdfViewerHead">
+           <button type="button" id="vbPdfViewerClose" title="Volver a la biblioteca">
+             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+             Atrás
+           </button>
+           <span id="vbPdfViewerTitle">Vista previa</span>
+         </div>
          <div id="vpDrawToolbar">
            <button type="button" class="vpTool active" id="vpToolSelect" title="Seleccionar texto / mover">
              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l7.5 17 2.5-7.5L21.5 11z"/><path d="M14 14l6 6"/></svg>
@@ -2738,6 +2842,21 @@ window.OcrEngine = (function(){
       <p id="vbPdfEmpty">Todavía no subiste ningún PDF a esta carpeta. Tocá "Agregar PDF(s)" para subir uno o varios; quedan guardados acá aunque cierres la app.</p>
     </div>
   </div>
+
+  <div id="vbPdfFoldersDrawerBackdrop"></div>
+  <aside id="vbPdfFoldersDrawer" aria-label="Carpetas y subcarpetas de PDFs" aria-hidden="true">
+    <div id="vbPdfFoldersDrawerHeader">
+      <div id="vbPdfFoldersDrawerTitle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/><path d="M3 9h18"/></svg>
+        <span>Carpetas y subcarpetas</span>
+      </div>
+      <button id="vbPdfFoldersDrawerClose" type="button" title="Cerrar" aria-label="Cerrar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div id="vbPdfFoldersDrawerList"></div>
+    <p id="vbPdfFoldersDrawerEmpty">Todavía no hay PDFs guardados para mostrar acá.</p>
+  </aside>
 
   <div id="vbZoom">
     <button id="vbMinus">−</button><span id="vbZoomPct">100%</span><button id="vbPlus">+</button><button id="vbReset">1:1</button>
@@ -8626,6 +8745,7 @@ window.OcrEngine = (function(){
   const vbUploadPdfBtn = document.getElementById('vbUploadPdfBtn');
   const vbPdfPanel = document.getElementById('vbPdfPanel');
   const vbPdfPanelClose = document.getElementById('vbPdfPanelClose');
+  const vbPdfPanelBody = document.getElementById('vbPdfPanelBody');
   const vbPdfAddBtn = document.getElementById('vbPdfAddBtn');
   const vbPdfMultiInput = document.getElementById('vbPdfMultiInput');
   const vbPdfList = document.getElementById('vbPdfList');
@@ -8640,13 +8760,22 @@ window.OcrEngine = (function(){
   const vbPdfViewerZoomIn = document.getElementById('vbPdfViewerZoomIn');
   const vbPdfViewerZoomValue = document.getElementById('vbPdfViewerZoomValue');
   const vbPdfEmpty = document.getElementById('vbPdfEmpty');
-  const vbPdfNoteFolderSelect = document.getElementById('vbPdfNoteFolderSelect');
-  const vbPdfFolderSelect = document.getElementById('vbPdfFolderSelect');
+  const vbPdfCrumbs = document.getElementById('vbPdfCrumbs');
+  const vbPdfChipsFolders = document.getElementById('vbPdfChipsFolders');
+  const vbPdfChipsSub = document.getElementById('vbPdfChipsSub');
+  const vbPdfFoldersMenuBtn = document.getElementById('vbPdfFoldersMenuBtn');
   const vbPdfNewFolder = document.getElementById('vbPdfNewFolder');
+  const vbPdfFoldersDrawer = document.getElementById('vbPdfFoldersDrawer');
+  const vbPdfFoldersDrawerBackdrop = document.getElementById('vbPdfFoldersDrawerBackdrop');
+  const vbPdfFoldersDrawerClose = document.getElementById('vbPdfFoldersDrawerClose');
+  const vbPdfFoldersDrawerList = document.getElementById('vbPdfFoldersDrawerList');
+  const vbPdfFoldersDrawerEmpty = document.getElementById('vbPdfFoldersDrawerEmpty');
   let vbPdfSelectedFolder = 'all';
   let vbPdfSelectedNoteFolder = 'all';
   let vbPdfViewerDoc = null, vbPdfViewerPageNum = 1;
   let vbPdfViewerScale = 1;
+  const VB_PDF_ICON_FOLDER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg>';
+  const VB_PDF_ICON_FOLDER_ALL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="7" rx="1.4"/><rect x="14" y="4" width="7" height="7" rx="1.4"/><rect x="3" y="14" width="7" height="7" rx="1.4"/><rect x="14" y="14" width="7" height="7" rx="1.4"/></svg>';
   function vbPdfFoldersKey(){ return 'cuaderno:vectorPdfFolders:' + vbPdfFolderId(); }
   function vbPdfGetFolders(){
     try{ const raw=localStorage.getItem(vbPdfFoldersKey()); const list=raw?JSON.parse(raw):[]; return Array.isArray(list)?list:[]; }catch(e){ return []; }
@@ -8660,42 +8789,154 @@ window.OcrEngine = (function(){
       return Array.isArray(list) ? list : [];
     }catch(e){ return []; }
   }
-  function vbPdfRefreshNoteFolderSelect(){
-    if(!vbPdfNoteFolderSelect) return;
-    const options=['<option value="all">Todas las carpetas</option>'];
-    vbPdfGetNoteFolders().slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'es')).forEach(f=>{
-      options.push('<option value="'+vbEsc(f.id)+'">'+vbEsc(f.name)+'</option>');
-    });
-    vbPdfNoteFolderSelect.innerHTML=options.join('');
-    if(![...vbPdfNoteFolderSelect.options].some(o=>o.value===vbPdfSelectedNoteFolder)) vbPdfSelectedNoteFolder='all';
-    vbPdfNoteFolderSelect.value=vbPdfSelectedNoteFolder;
+  // Arma una "pastilla" con icono de carpeta (reemplaza a los <select> de
+  // antes: se ve de un vistazo qué carpetas hay y cuántos PDFs tiene cada
+  // una, en vez de tener que abrir un desplegable).
+  function vbPdfMakeChip(label, icon, active, count, onClick){
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'vbPdfChip' + (active ? ' active' : '');
+    b.innerHTML = '<span class="vbPdfChipIcon">'+icon+'</span><span class="vbPdfChipLabel">'+vbEsc(label)+'</span>' + (count ? ('<span class="vbPdfChipCount">'+count+'</span>') : '');
+    b.addEventListener('click', onClick);
+    return b;
   }
-  function vbPdfRefreshFolderSelect(){
-    if(!vbPdfFolderSelect) return;
-    const list=vbPdfGetFolders();
-    const options=['<option value="all">Todas las subcarpetas</option>'];
-    if(vbPdfSelectedNoteFolder !== 'all'){
-      options.push('<option value="root">Sin carpeta</option>');
-      function add(parent, depth){ list.filter(f=>(f.parentId||'root')===parent).forEach(f=>{ options.push('<option value="'+vbEsc(f.id)+'">'+('— '.repeat(depth))+vbEsc(f.name)+'</option>'); add(f.id,depth+1); }); }
-      add('root',0);
+  // Redibuja las migas de pan + las pastillas de carpetas/subcarpetas según
+  // el nivel en el que esté parado el usuario. `itemsAll` es la lista
+  // completa de PDFs guardados (de todas las carpetas de notas), para poder
+  // mostrar cuántos hay en cada una sin volver a consultar la base.
+  function vbPdfRenderFolderBar(itemsAll){
+    const noteFolders = vbPdfGetNoteFolders().slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'es'));
+    if(vbPdfSelectedNoteFolder!=='all' && !noteFolders.some(f=>String(f.id)===String(vbPdfSelectedNoteFolder))) vbPdfSelectedNoteFolder='all';
+    const subFolders = vbPdfGetFolders();
+    if(vbPdfSelectedFolder!=='all' && vbPdfSelectedFolder!=='root' && !subFolders.some(f=>f.id===vbPdfSelectedFolder)) vbPdfSelectedFolder='all';
+
+    vbPdfCrumbs.innerHTML = '';
+    const crumbHome = document.createElement('button');
+    crumbHome.type='button';
+    crumbHome.className='vbPdfCrumb'+(vbPdfSelectedNoteFolder==='all'?' current':'');
+    crumbHome.textContent='Todas las carpetas';
+    if(vbPdfSelectedNoteFolder!=='all') crumbHome.addEventListener('click', ()=>{ vbPdfSelectedNoteFolder='all'; vbPdfSelectedFolder='all'; vbPdfRenderList(); });
+    vbPdfCrumbs.appendChild(crumbHome);
+    if(vbPdfSelectedNoteFolder!=='all'){
+      const noteFolder = noteFolders.find(f=>String(f.id)===String(vbPdfSelectedNoteFolder));
+      const sep=document.createElement('span'); sep.className='vbPdfCrumbSep'; sep.textContent='›'; vbPdfCrumbs.appendChild(sep);
+      const crumbNote=document.createElement('button'); crumbNote.type='button';
+      crumbNote.className='vbPdfCrumb'+(vbPdfSelectedFolder==='all'?' current':'');
+      crumbNote.textContent = noteFolder ? noteFolder.name : 'Carpeta actual';
+      if(vbPdfSelectedFolder!=='all') crumbNote.addEventListener('click', ()=>{ vbPdfSelectedFolder='all'; vbPdfRenderList(); });
+      vbPdfCrumbs.appendChild(crumbNote);
+      if(vbPdfSelectedFolder!=='all'){
+        const sep2=document.createElement('span'); sep2.className='vbPdfCrumbSep'; sep2.textContent='›'; vbPdfCrumbs.appendChild(sep2);
+        const crumbSub=document.createElement('span'); crumbSub.className='vbPdfCrumb current';
+        crumbSub.textContent = vbPdfSelectedFolder==='root' ? 'Sin carpeta' : vbPdfFolderLabel(vbPdfSelectedFolder, subFolders);
+        vbPdfCrumbs.appendChild(crumbSub);
+      }
     }
-    vbPdfFolderSelect.innerHTML=options.join('');
-    if(![...vbPdfFolderSelect.options].some(o=>o.value===vbPdfSelectedFolder)) vbPdfSelectedFolder='all';
-    vbPdfFolderSelect.value=vbPdfSelectedFolder;
+
+    vbPdfChipsFolders.innerHTML = '';
+    vbPdfChipsSub.innerHTML = '';
+    if(vbPdfSelectedNoteFolder==='all'){
+      vbPdfChipsSub.style.display='none';
+      vbPdfChipsFolders.style.display = noteFolders.length ? 'flex' : 'none';
+      noteFolders.forEach(f=>{
+        const count = itemsAll.filter(r=>String(r.folderId||'scratch')===String(f.id)).length;
+        vbPdfChipsFolders.appendChild(vbPdfMakeChip(f.name, VB_PDF_ICON_FOLDER, false, count, ()=>{
+          vbPdfSelectedNoteFolder=String(f.id); vbPdfSelectedFolder='all'; vbPdfRenderList();
+        }));
+      });
+    } else {
+      vbPdfChipsFolders.style.display='none';
+      vbPdfChipsSub.style.display='flex';
+      const scoped = itemsAll.filter(r=>String(r.folderId||'scratch')===String(vbPdfSelectedNoteFolder));
+      vbPdfChipsSub.appendChild(vbPdfMakeChip('Todas', VB_PDF_ICON_FOLDER_ALL, vbPdfSelectedFolder==='all', scoped.length, ()=>{ vbPdfSelectedFolder='all'; vbPdfRenderList(); }));
+      vbPdfChipsSub.appendChild(vbPdfMakeChip('Sin carpeta', VB_PDF_ICON_FOLDER, vbPdfSelectedFolder==='root', scoped.filter(r=>!r.pdfFolderId||r.pdfFolderId==='root').length, ()=>{ vbPdfSelectedFolder='root'; vbPdfRenderList(); }));
+      (function addSub(parent, depth){
+        subFolders.filter(f=>(f.parentId||'root')===parent).forEach(f=>{
+          const count = scoped.filter(r=>String(r.pdfFolderId||'root')===String(f.id)).length;
+          vbPdfChipsSub.appendChild(vbPdfMakeChip((depth>0?'— '.repeat(depth):'')+f.name, VB_PDF_ICON_FOLDER, vbPdfSelectedFolder===f.id, count, ()=>{ vbPdfSelectedFolder=f.id; vbPdfRenderList(); }));
+          addSub(f.id, depth+1);
+        });
+      })('root',0);
+    }
   }
-  if(vbPdfNoteFolderSelect) vbPdfNoteFolderSelect.addEventListener('change', ()=>{ vbPdfSelectedNoteFolder=vbPdfNoteFolderSelect.value; vbPdfSelectedFolder='all'; vbPdfRefreshFolderSelect(); vbPdfRenderList(); });
-  if(vbPdfFolderSelect) vbPdfFolderSelect.addEventListener('change', ()=>{ vbPdfSelectedFolder=vbPdfFolderSelect.value; vbPdfRenderList(); });
   if(vbPdfNewFolder) vbPdfNewFolder.addEventListener('click', ()=>{
     if(vbPdfSelectedNoteFolder==='all'){
       vbPdfSelectedNoteFolder = vCurrentFolder ? String(vCurrentFolder.id) : 'all';
-      vbPdfRefreshNoteFolderSelect();
-      vbPdfRefreshFolderSelect();
     }
     const name=prompt('Nombre de la nueva carpeta'); if(!name || !name.trim()) return;
     const list=vbPdfGetFolders(); const id='pdfFolder_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
     list.push({id,name:name.trim(),parentId:(vbPdfSelectedFolder==='root'||vbPdfSelectedFolder==='all')?'root':vbPdfSelectedFolder,createdAt:Date.now()}); vbPdfSaveFolders(list);
-    vbPdfSelectedFolder=id; vbPdfRefreshFolderSelect(); vbPdfRenderList();
+    vbPdfSelectedFolder=id; vbPdfRenderList();
   });
+  // Cajón (ícono hamburguesa) con el árbol completo de carpetas y
+  // subcarpetas, cada una con sus PDFs bien separados, para saltar
+  // directamente a cualquiera sin tener que ir nivel por nivel.
+  function vbPdfCloseFoldersDrawer(){
+    if(!vbPdfFoldersDrawer) return;
+    vbPdfFoldersDrawer.classList.remove('open');
+    vbPdfFoldersDrawerBackdrop.classList.remove('open');
+    vbPdfFoldersDrawer.setAttribute('aria-hidden','true');
+  }
+  async function vbPdfOpenFoldersDrawer(){
+    if(!vbPdfFoldersDrawer) return;
+    const all = await vbPdfDbListAll();
+    const noteFolders = vbPdfGetNoteFolders();
+    const subFolders = vbPdfGetFolders();
+    const byNote = new Map();
+    all.forEach(rec=>{
+      const key = rec.folderId || 'scratch';
+      if(!byNote.has(key)) byNote.set(key, []);
+      byNote.get(key).push(rec);
+    });
+    const noteName = key => key==='scratch' ? 'Sin carpeta de notas' : ((noteFolders.find(f=>String(f.id)===String(key))||{}).name || 'Carpeta');
+    const keys = [...byNote.keys()].sort((a,b)=> noteName(a).localeCompare(noteName(b),'es'));
+    vbPdfFoldersDrawerList.innerHTML = '';
+    keys.forEach(key=>{
+      const recs = byNote.get(key);
+      const group = document.createElement('div'); group.className='vbPdfDrawerGroup';
+      const head = document.createElement('button'); head.type='button'; head.className='vbPdfDrawerNoteHead';
+      head.innerHTML = VB_PDF_ICON_FOLDER_ALL + '<span>'+vbEsc(noteName(key))+'</span><span class="vbPdfDrawerCount">'+recs.length+'</span>';
+      head.addEventListener('click', ()=>{
+        vbPdfSelectedNoteFolder = key==='scratch' ? 'all' : String(key);
+        vbPdfSelectedFolder='all';
+        vbPdfCloseFoldersDrawer();
+        vbPdfRenderList();
+      });
+      group.appendChild(head);
+      const bySub = new Map();
+      recs.forEach(r=>{
+        const sk = r.pdfFolderId || 'root';
+        if(!bySub.has(sk)) bySub.set(sk, []);
+        bySub.get(sk).push(r);
+      });
+      [...bySub.keys()].sort((a,b)=> vbPdfFolderLabel(a,subFolders).localeCompare(vbPdfFolderLabel(b,subFolders),'es')).forEach(sk=>{
+        const subRecs = bySub.get(sk);
+        const subRow = document.createElement('button'); subRow.type='button'; subRow.className='vbPdfDrawerSubRow';
+        subRow.innerHTML = VB_PDF_ICON_FOLDER + '<span>'+vbEsc(vbPdfFolderLabel(sk,subFolders))+'</span><span class="vbPdfDrawerCount">'+subRecs.length+'</span>';
+        subRow.addEventListener('click', ()=>{
+          vbPdfSelectedNoteFolder = key==='scratch' ? 'all' : String(key);
+          vbPdfSelectedFolder = sk;
+          vbPdfCloseFoldersDrawer();
+          vbPdfRenderList();
+        });
+        group.appendChild(subRow);
+        const filesEl = document.createElement('div'); filesEl.className='vbPdfDrawerFiles';
+        subRecs.forEach(r=>{
+          const fEl = document.createElement('span'); fEl.className='vbPdfDrawerFile'; fEl.textContent = r.name;
+          filesEl.appendChild(fEl);
+        });
+        group.appendChild(filesEl);
+      });
+      vbPdfFoldersDrawerList.appendChild(group);
+    });
+    vbPdfFoldersDrawerEmpty.classList.toggle('show', keys.length===0);
+    vbPdfFoldersDrawer.classList.add('open');
+    vbPdfFoldersDrawerBackdrop.classList.add('open');
+    vbPdfFoldersDrawer.setAttribute('aria-hidden','false');
+  }
+  if(vbPdfFoldersMenuBtn) vbPdfFoldersMenuBtn.addEventListener('click', ()=>{ vbPdfOpenFoldersDrawer().catch(err=>console.error('No se pudo abrir el listado de carpetas:',err)); });
+  if(vbPdfFoldersDrawerClose) vbPdfFoldersDrawerClose.addEventListener('click', vbPdfCloseFoldersDrawer);
+  if(vbPdfFoldersDrawerBackdrop) vbPdfFoldersDrawerBackdrop.addEventListener('click', vbPdfCloseFoldersDrawer);
 
   // Inserta las páginas de un PDF (Blob/File) como imágenes en el lienzo actual
   async function vbInsertPdfFromBlob(blob){
@@ -8844,9 +9085,9 @@ window.OcrEngine = (function(){
   const VB_PDF_ICON_DEL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>';
 
   async function vbPdfRenderList(){
-    vbPdfRefreshNoteFolderSelect();
-    vbPdfRefreshFolderSelect();
-    const items = vbPdfSelectedNoteFolder === 'all' ? await vbPdfDbListAll() : await vbPdfDbListForFolder(vbPdfSelectedNoteFolder);
+    const itemsAll = await vbPdfDbListAll();
+    vbPdfRenderFolderBar(itemsAll);
+    const items = vbPdfSelectedNoteFolder === 'all' ? itemsAll : itemsAll.filter(r=>String(r.folderId||'scratch')===String(vbPdfSelectedNoteFolder));
     const visible = items.filter(rec=>vbPdfSelectedFolder === 'all' || (rec.pdfFolderId||'root')===vbPdfSelectedFolder);
     vbPdfList.innerHTML = '';
     vbPdfEmpty.classList.toggle('show', visible.length === 0);
@@ -8884,6 +9125,7 @@ window.OcrEngine = (function(){
       vbPdfViewerScale = 1;
       vbPdfViewerTitle.textContent = rec.name || 'PDF';
       vbPdfViewer.classList.add('show');
+      if(vbPdfPanelBody) vbPdfPanelBody.classList.add('previewOpen');
       currentVpPdfUid = rec.uid;
       currentVpMarks = await vpMarksGetByPdf(rec.uid).catch(()=>[]);
       await vbPdfRenderPreviewPage();
@@ -8939,6 +9181,7 @@ window.OcrEngine = (function(){
   }
   vbPdfViewerClose.addEventListener('click', ()=>{
     vbPdfViewer.classList.remove('show');
+    if(vbPdfPanelBody) vbPdfPanelBody.classList.remove('previewOpen');
     vbPdfViewerDoc = null;
     currentVpPdfUid = null; currentVpMarks = [];
     if(vpTextLayerEl) vpTextLayerEl.innerHTML = '';
@@ -9379,8 +9622,6 @@ window.OcrEngine = (function(){
   async function vbOpenPdfPanel(){
     vbCloseSettings();
     vbPdfPanel.classList.add('open');
-    vbPdfRefreshNoteFolderSelect();
-    vbPdfRefreshFolderSelect();
     await vbPdfRenderList();
     // Recuperación adicional: si el PDF acaba de guardarse pero la lista aún
     // no se repintó, mostrar igualmente el último registro persistido.
