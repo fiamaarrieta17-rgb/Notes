@@ -6561,25 +6561,39 @@ window.OcrEngine = (function(){
   }
 
   // ---------- Dictado por voz: convierte lo que decís al micrófono en texto ----------
+  // Nota sobre confiabilidad (cortes y reinicios): los navegadores —sobre
+  // todo Chrome— cortan el reconocimiento solo tras unos segundos de
+  // silencio o tras ~60s seguidos, aunque "continuous" esté en true. Para
+  // que el dictado se sienta continuo en vez de cortarse:
+  //   - en cada reinicio se crea un objeto SpeechRecognition NUEVO en vez de
+  //     reusar el anterior (reusarlo es lo que en Chrome/Android suele tirar
+  //     "already started" o dejar de emitir resultados sin avisar);
+  //   - el reinicio se hace con un pequeño delay: arrancar de nuevo en el
+  //     mismo instante en que terminó el anterior es lo que más dispara ese
+  //     error;
+  //   - si el reinicio falla varias veces SEGUIDAS (por ejemplo, se perdió
+  //     el permiso de micrófono a mitad de dictado), se deja de reintentar y
+  //     se avisa, en vez de quedar reintentando en silencio para siempre. El
+  //     contador se resetea apenas llega un resultado, para no penalizar
+  //     reinicios normales espaciados en el tiempo por pausas al hablar.
   const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
   let recognizer = null;
   let recognizing = false;
   let dictationBaseText = '';
+  let dictationRestartFails = 0;
+  const DICTATION_RESTART_DELAY_MS = 200;
+  const DICTATION_MAX_RESTART_FAILS = 4;
   if(!SpeechRecognitionCtor){
     micToggleBtn.disabled = true;
     micStatus.textContent = 'Tu navegador no soporta dictado por voz (probá con Chrome)';
   }
-  function startDictation(){
-    if(!SpeechRecognitionCtor || recognizing) return;
-    recognizer = new SpeechRecognitionCtor();
-    recognizer.lang = (navigator.language && navigator.language.startsWith('es')) ? navigator.language : 'es-AR';
-    recognizer.continuous = true;
-    recognizer.interimResults = true;
-    // Guardamos lo que ya había en el cuadro de texto para no pisarlo: lo
-    // dictado se agrega a continuación, no lo reemplaza.
-    dictationBaseText = textInputArea.value ? textInputArea.value.replace(/\s+$/,'') + ' ' : '';
+  function buildDictationRecognizer(){
+    const r = new SpeechRecognitionCtor();
+    r.lang = (navigator.language && navigator.language.startsWith('es')) ? navigator.language : 'es-AR';
+    r.continuous = true;
+    r.interimResults = true;
     let finalTranscript = '';
-    recognizer.onresult = (e)=>{
+    r.onresult = (e)=>{
       let interim = '';
       for(let i = e.resultIndex; i < e.results.length; i++){
         const transcript = e.results[i][0].transcript;
@@ -6587,25 +6601,47 @@ window.OcrEngine = (function(){
         else interim += transcript;
       }
       textInputArea.value = dictationBaseText + finalTranscript + interim;
+      dictationRestartFails = 0; // llegó un resultado: la sesión anda bien
     };
-    recognizer.onerror = (e)=>{
+    r.onerror = (e)=>{
+      // "no-speech" y "aborted" son cortes normales (pausas al hablar, o
+      // nuestro propio reinicio): no cortan el dictado, dejamos que "onend"
+      // se encargue de reanudar.
       if(e.error === 'no-speech' || e.error === 'aborted') return;
       micStatus.textContent = micErrorMessage(e.error);
       stopDictation();
     };
-    recognizer.onend = ()=>{
+    r.onend = ()=>{
       // El navegador puede cortar el reconocimiento solo (por silencio largo,
       // por ejemplo); si todavía queríamos estar escuchando, lo reiniciamos.
-      if(recognizing){
-        dictationBaseText = textInputArea.value ? textInputArea.value.replace(/\s+$/,'') + ' ' : '';
-        finalTranscript = '';
-        try{ recognizer.start(); }catch(err){
+      if(!recognizing) return;
+      dictationBaseText = textInputArea.value ? textInputArea.value.replace(/\s+$/,'') + ' ' : '';
+      dictationRestartFails++;
+      if(dictationRestartFails > DICTATION_MAX_RESTART_FAILS){
+        recognizing = false;
+        micToggleBtn.classList.remove('listening');
+        micStatus.textContent = 'El dictado se cortó varias veces seguidas. Tocá el micrófono para reintentar.';
+        return;
+      }
+      setTimeout(()=>{
+        if(!recognizing) return;
+        try{ recognizer = buildDictationRecognizer(); recognizer.start(); }
+        catch(err){
           recognizing = false;
           micToggleBtn.classList.remove('listening');
           micStatus.textContent = micErrorMessage();
         }
-      }
+      }, DICTATION_RESTART_DELAY_MS);
     };
+    return r;
+  }
+  function startDictation(){
+    if(!SpeechRecognitionCtor || recognizing) return;
+    // Guardamos lo que ya había en el cuadro de texto para no pisarlo: lo
+    // dictado se agrega a continuación, no lo reemplaza.
+    dictationBaseText = textInputArea.value ? textInputArea.value.replace(/\s+$/,'') + ' ' : '';
+    dictationRestartFails = 0;
+    recognizer = buildDictationRecognizer();
     try{
       recognizer.start();
       recognizing = true;
@@ -6635,6 +6671,7 @@ window.OcrEngine = (function(){
   }
   function stopDictation(){
     recognizing = false;
+    dictationRestartFails = 0;
     if(recognizer){ try{ recognizer.stop(); }catch(err){} }
     updateMicUI();
   }
@@ -7950,7 +7987,7 @@ window.OcrEngine = (function(){
     }
     if(vTool==='eraser'){ vEraseDirty=false; vbEraseCircleAt(e.clientX, e.clientY); vGesture={pointerId:e.pointerId,erase:true}; return; }
     if(vTool==='text'){
-      vbTextBox.value=''; vbTextBox.dataset.x=p.x; vbTextBox.dataset.y=p.y;
+      vbTextBox.value=''; vbTextBox.style.height=''; vbTextBox.dataset.x=p.x; vbTextBox.dataset.y=p.y;
       vbTextBox.style.left=e.clientX+'px'; vbTextBox.style.top=e.clientY+'px'; vbTextBox.style.display='block'; vbTextBox.focus(); return;
     }
     if(vTool==='pen' || vTool==='highlighter'){ vPoints=[p]; vbNewStroke(); vGesture={pointerId:e.pointerId,draw:true}; }
@@ -8290,10 +8327,23 @@ window.OcrEngine = (function(){
     window.OcrEngine.recordCorrection(rawGuess, text);
   });
 
-  let vbRecognizer=null, vbRecognizing=false, vbDictationBase='';
+  // Nota sobre confiabilidad (cortes y reinicios): mismo criterio que el
+  // dictado del cuaderno (ver comentario arriba, en la sección equivalente
+  // del editor de texto). Acá había además dos bugs puntuales:
+  //   1) "onerror" cortaba el dictado ante CUALQUIER error, incluyendo
+  //      "no-speech" y "aborted" — que son pausas normales al hablar o
+  //      nuestro propio reinicio, no fallas reales. Eso hacía que el
+  //      dictado se sintiera cortado todo el tiempo, mucho más seguido que
+  //      en el cuaderno (que sí distinguía esos casos).
+  //   2) El botón de micrófono, al tocarlo para DETENER un dictado ya en
+  //      curso, vaciaba la caja de texto antes de frenar — perdiendo todo lo
+  //      dictado hasta ese momento.
+  let vbRecognizer=null, vbRecognizing=false, vbDictationBase='', vbDictationRestartFails=0;
   const VBSpeech = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const VB_DICTATION_RESTART_DELAY_MS = 200;
+  const VB_DICTATION_MAX_RESTART_FAILS = 4;
   function vbSetVoiceStatus(text, show=true){ vbVoiceStatus.textContent=text; vbVoiceStatus.classList.toggle('show',show); }
-  function vbStopDictation(){ vbRecognizing=false; if(vbRecognizer){ try{vbRecognizer.stop();}catch(e){} } if(vbMic) vbMic.classList.remove('active'); if(vbVoiceStatus.textContent.startsWith('Escuchando')) vbSetVoiceStatus('',false); }
+  function vbStopDictation(){ vbRecognizing=false; vbDictationRestartFails=0; if(vbRecognizer){ try{vbRecognizer.stop();}catch(e){} } if(vbMic) vbMic.classList.remove('active'); if(vbVoiceStatus.textContent.startsWith('Escuchando')) vbSetVoiceStatus('',false); }
   async function vbPrepareMicrophone(){
     if(!window.isSecureContext || location.protocol==='content:'){
       vbSetVoiceStatus('El micrófono requiere HTTPS o una app instalada. En Brave: permisos del sitio → Micrófono → Permitir.',true); return false;
@@ -8307,22 +8357,72 @@ window.OcrEngine = (function(){
     }
     return true;
   }
+  function vbBuildRecognizer(){
+    const r = new VBSpeech();
+    r.lang = (navigator.language&&navigator.language.startsWith('es'))?navigator.language:'es-AR';
+    r.continuous = true; r.interimResults = true;
+    let finalText='';
+    r.onresult = e=>{
+      let interim='';
+      for(let i=e.resultIndex;i<e.results.length;i++){ const tx=e.results[i][0].transcript; if(e.results[i].isFinal) finalText+=tx+' '; else interim+=tx; }
+      vbTextBox.value = vbDictationBase+finalText+interim;
+      vbDictationRestartFails = 0; // llegó un resultado: la sesión anda bien
+    };
+    r.onerror = e=>{
+      // "no-speech" y "aborted" son cortes normales: no cortan el dictado,
+      // dejamos que "onend" reanude solo.
+      if(e.error==='no-speech' || e.error==='aborted') return;
+      vbSetVoiceStatus('No se pudo usar el micrófono: '+e.error,true);
+      vbStopDictation();
+    };
+    r.onend = ()=>{
+      if(!vbRecognizing) return;
+      vbDictationBase = vbTextBox.value.replace(/\s+$/,''); if(vbDictationBase) vbDictationBase+=' ';
+      vbDictationRestartFails++;
+      if(vbDictationRestartFails > VB_DICTATION_MAX_RESTART_FAILS){
+        vbRecognizing=false; if(vbMic) vbMic.classList.remove('active');
+        vbSetVoiceStatus('El dictado se cortó varias veces seguidas. Tocá el micrófono para reintentar.',true);
+        return;
+      }
+      setTimeout(()=>{
+        if(!vbRecognizing) return;
+        try{ vbRecognizer = vbBuildRecognizer(); vbRecognizer.start(); }
+        catch(e){
+          vbRecognizing=false; if(vbMic) vbMic.classList.remove('active');
+          vbSetVoiceStatus('El dictado necesita permiso de micrófono y una página segura (https).',true);
+        }
+      }, VB_DICTATION_RESTART_DELAY_MS);
+    };
+    return r;
+  }
   async function vbStartDictation(){
     if(!VBSpeech){ vbSetVoiceStatus('Este navegador no admite dictado por voz. Probá con Chrome en HTTPS.',true); return; }
     if(vbRecognizing){ vbStopDictation(); return; }
     if(!(await vbPrepareMicrophone())) return;
-    vbRecognizer=new VBSpeech(); vbRecognizer.lang=(navigator.language&&navigator.language.startsWith('es'))?navigator.language:'es-AR'; vbRecognizer.continuous=true; vbRecognizer.interimResults=true;
     vbDictationBase=vbTextBox.value.replace(/\s+$/,''); if(vbDictationBase) vbDictationBase+=' ';
-    let finalText='';
-    vbRecognizer.onresult=e=>{ let interim=''; for(let i=e.resultIndex;i<e.results.length;i++){ const tx=e.results[i][0].transcript; if(e.results[i].isFinal) finalText+=tx+' '; else interim+=tx; } vbTextBox.value=vbDictationBase+finalText+interim; };
-    vbRecognizer.onerror=e=>{ if(e.error!=='no-speech'&&e.error!=='aborted') vbSetVoiceStatus('No se pudo usar el micrófono: '+e.error,true); vbStopDictation(); };
-    vbRecognizer.onend=()=>{ if(vbRecognizing){ try{vbRecognizer.start();}catch(e){vbStopDictation();} } };
+    vbDictationRestartFails=0;
+    vbRecognizer = vbBuildRecognizer();
     try{ vbRecognizer.start(); vbRecognizing=true; vbMic.classList.add('active'); vbSetVoiceStatus('Escuchando… hablá ahora',true); }catch(e){ vbSetVoiceStatus('El dictado necesita permiso de micrófono y una página segura (https).',true); }
   }
   vbMic.addEventListener('click',()=>{
-    vbTextBox.value=''; vbTextBox.dataset.x=String((innerWidth/2-vTx)/vScale); vbTextBox.dataset.y=String((110-vTy)/vScale);
+    // Si ya se está dictando, el botón funciona como "detener": antes se
+    // vaciaba y reposicionaba la caja de texto SIEMPRE, incluso al frenar un
+    // dictado en curso — eso borraba todo lo dictado hasta ese momento. Si
+    // ya hay una sesión activa, ahora solo se detiene, sin tocar el texto.
+    if(vbRecognizing){ vbStopDictation(); return; }
+    vbTextBox.value=''; vbTextBox.style.height=''; vbTextBox.dataset.x=String((innerWidth/2-vTx)/vScale); vbTextBox.dataset.y=String((110-vTy)/vScale);
     vbTextBox.style.left='50%'; vbTextBox.style.top='112px'; vbTextBox.style.transform='translateX(-50%)'; vbTextBox.style.display='block'; vbTextBox.focus(); vbStartDictation();
   });
+  // Antes el cuadro de texto quedaba siempre con la altura de un renglón
+  // (rows="1", resize:none): al escribir dos o más líneas —a mano o
+  // dictando— el texto seguía entrando, pero solo se veía a través de un
+  // scroll interno diminuto. Ahora crece con el contenido, como el cuadro
+  // de texto del cuaderno.
+  function vbAutoGrowTextBox(){
+    vbTextBox.style.height = 'auto';
+    vbTextBox.style.height = vbTextBox.scrollHeight + 'px';
+  }
+  vbTextBox.addEventListener('input', vbAutoGrowTextBox);
   vbTextBox.addEventListener('blur', ()=>{
     vbStopDictation(); vbTextBox.style.transform='';
     const s=vbTextBox.value.trim(); if(!s){ vbTextBox.style.display='none'; return; }
