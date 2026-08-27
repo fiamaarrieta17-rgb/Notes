@@ -1928,6 +1928,13 @@ window.OcrEngine = (function(){
   #vectorPanelView .vbPdfItem[data-busy="1"]{opacity:.55;pointer-events:none;}
   #vectorPanelView #vbPdfFolderBar{display:flex;flex-direction:column;gap:8px;margin-bottom:10px;}
   #vectorPanelView #vbPdfFolderBarTop{display:flex;align-items:center;gap:8px;}
+  #vectorPanelView #vbPdfBackBtn{
+    display:none;flex:0 0 30px;width:30px;height:30px;border:1px solid var(--vb-line);border-radius:8px;
+    background:var(--vb-ui-2);color:var(--vb-ink);align-items:center;justify-content:center;cursor:pointer;
+  }
+  #vectorPanelView #vbPdfBackBtn.show{display:flex;}
+  #vectorPanelView #vbPdfBackBtn svg{width:16px;height:16px;}
+  #vectorPanelView #vbPdfBackBtn:hover{background:var(--vb-accent);border-color:var(--vb-accent);color:#fff;}
   #vectorPanelView #vbPdfCrumbs{flex:1;min-width:0;display:flex;align-items:center;flex-wrap:wrap;gap:4px;font-size:11.5px;color:var(--vb-muted);}
   #vectorPanelView .vbPdfCrumb{background:none;border:none;padding:2px 1px;color:var(--vb-muted);font:inherit;font-size:11.5px;cursor:pointer;white-space:nowrap;max-width:140px;overflow:hidden;text-overflow:ellipsis;}
   #vectorPanelView .vbPdfCrumb:hover{color:var(--vb-accent);text-decoration:underline;}
@@ -2827,6 +2834,9 @@ window.OcrEngine = (function(){
       <input type="file" id="vbPdfMultiInput" accept="application/pdf,.pdf" multiple style="display:none;">
        <div id="vbPdfFolderBar">
          <div id="vbPdfFolderBarTop">
+           <button type="button" id="vbPdfBackBtn" title="Volver atrás">
+             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+           </button>
            <div id="vbPdfCrumbs"></div>
            <div id="vbPdfFolderBarBtns">
              <button type="button" id="vbPdfFoldersMenuBtn" title="Ver todas las carpetas y subcarpetas">
@@ -8815,6 +8825,7 @@ window.OcrEngine = (function(){
   const vbPdfViewerZoomValue = document.getElementById('vbPdfViewerZoomValue');
   const vbPdfEmpty = document.getElementById('vbPdfEmpty');
   const vbPdfCrumbs = document.getElementById('vbPdfCrumbs');
+  const vbPdfBackBtn = document.getElementById('vbPdfBackBtn');
   const vbPdfChipsFolders = document.getElementById('vbPdfChipsFolders');
   const vbPdfChipsSub = document.getElementById('vbPdfChipsSub');
   const vbPdfFoldersMenuBtn = document.getElementById('vbPdfFoldersMenuBtn');
@@ -8880,6 +8891,7 @@ window.OcrEngine = (function(){
     if(vbPdfSelectedFolder!=='all' && vbPdfSelectedFolder!=='root' && !subFolders.some(f=>f.id===vbPdfSelectedFolder)) vbPdfSelectedFolder='all';
 
     vbPdfCrumbs.innerHTML = '';
+    if(vbPdfBackBtn) vbPdfBackBtn.classList.toggle('show', !(vbPdfSelectedNoteFolder==='all' && vbPdfSelectedFolder==='all'));
     const crumbHome = document.createElement('button');
     crumbHome.type='button';
     crumbHome.className='vbPdfCrumb'+(vbPdfSelectedNoteFolder==='all'?' current':'');
@@ -8934,6 +8946,23 @@ window.OcrEngine = (function(){
       })('root',0);
     }
   }
+  // Botón "<" explícito para subir un nivel, además de las migas de pan:
+  // sube de subcarpeta a su carpeta contenedora, de ahí a la vista de esa
+  // carpeta de notas, y de ahí a "Todas las carpetas".
+  function vbPdfGoBack(){
+    if(vbPdfSelectedFolder !== 'all'){
+      if(vbPdfSelectedFolder === 'root'){ vbPdfSelectedFolder = 'all'; }
+      else {
+        const f = vbPdfGetFolders().find(x=>x.id===vbPdfSelectedFolder);
+        vbPdfSelectedFolder = f ? (f.parentId || 'root') : 'all';
+      }
+    } else if(vbPdfSelectedNoteFolder !== 'all'){
+      vbPdfSelectedNoteFolder = 'all';
+      vbPdfSelectedFolder = 'all';
+    }
+    vbPdfRenderList();
+  }
+  if(vbPdfBackBtn) vbPdfBackBtn.addEventListener('click', vbPdfGoBack);
   if(vbPdfNewFolder) vbPdfNewFolder.addEventListener('click', ()=>{
     if(vbPdfSelectedNoteFolder==='all'){
       vbPdfSelectedNoteFolder = vCurrentFolder ? String(vCurrentFolder.id) : 'all';
