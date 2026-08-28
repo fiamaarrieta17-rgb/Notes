@@ -4649,13 +4649,56 @@ window.OcrEngine = (function(){
     }
   });
 
+  // ---------- Zoom fluido: previsualización con CSS, re-render solo al
+  // asentarse ----------
+  // Antes, la rueda con Ctrl y los botones +/- llamaban a pdfZoomToPoint
+  // directo: cada paso de zoom disparaba un render completo de pdf.js (canvas
+  // + capa de texto + marcas), que es caro. Con la rueda esto se dispara
+  // muchas veces por segundo y con los botones basta con tocarlos rápido un
+  // par de veces seguidas: el resultado se sentía a los saltos. Ahora, igual
+  // que ya hacía el pellizco táctil, el paso se previsualiza al instante con
+  // "transform: scale" sobre el contenedor de la página (lo dibuja la GPU,
+  // sin tocar pdf.js) y recién se pide el render nítido cuando el usuario
+  // deja de tocar rueda/botón durante un momento. Si el render real todavía
+  // está en curso cuando toca reasentar, se reintenta un poco más tarde en
+  // vez de perder el pedido de zoom.
+  let pdfPendingZoom = null;
+  let pdfZoomAnchorPt = null;
+  let pdfZoomCommitTimer = null;
+  function pdfQuickZoomPreview(targetZoom, clientX, clientY){
+    if(!currentPdfDoc) return;
+    targetZoom = +Math.max(0.4, Math.min(3, targetZoom)).toFixed(3);
+    const baseZoom = pdfZoom || 1;
+    const liveScale = targetZoom / baseZoom;
+    const stackRect = pdfPageStackEl.getBoundingClientRect();
+    pdfPageStackEl.style.willChange = 'transform';
+    pdfPageStackEl.style.transformOrigin = (clientX - stackRect.left) + 'px ' + (clientY - stackRect.top) + 'px';
+    pdfPageStackEl.style.transform = 'scale(' + liveScale + ')';
+    pdfPendingZoom = targetZoom;
+    pdfZoomAnchorPt = {x:clientX, y:clientY};
+    pdfZoomLabelEl.textContent = Math.round(targetZoom*100) + '%';
+    clearTimeout(pdfZoomCommitTimer);
+    pdfZoomCommitTimer = setTimeout(pdfCommitQuickZoom, 150);
+  }
+  async function pdfCommitQuickZoom(){
+    clearTimeout(pdfZoomCommitTimer); pdfZoomCommitTimer = null;
+    if(pdfPendingZoom == null) return;
+    if(pdfZoomingNow){ pdfZoomCommitTimer = setTimeout(pdfCommitQuickZoom, 80); return; }
+    const zoomToApply = pdfPendingZoom, anchor = pdfZoomAnchorPt;
+    pdfPendingZoom = null; pdfZoomAnchorPt = null;
+    pdfPageStackEl.style.transform = '';
+    pdfPageStackEl.style.transformOrigin = '';
+    pdfPageStackEl.style.willChange = '';
+    await pdfZoomToPoint(zoomToApply, anchor.x, anchor.y);
+  }
   // ---------- Zoom con Ctrl+rueda (o pellizco de trackpad) y pellizco táctil ----------
   pdfCanvasWrapEl.addEventListener('wheel', (e)=>{
     if(!currentPdfDoc || !e.ctrlKey) return;
     e.preventDefault();
     const factor = e.deltaY < 0 ? 1.08 : 1/1.08;
-    const newZoom = Math.max(0.4, Math.min(3, +(pdfZoom*factor).toFixed(3)));
-    pdfZoomToPoint(newZoom, e.clientX, e.clientY);
+    const base = pdfPendingZoom != null ? pdfPendingZoom : pdfZoom;
+    const newZoom = Math.max(0.4, Math.min(3, +(base*factor).toFixed(3)));
+    pdfQuickZoomPreview(newZoom, e.clientX, e.clientY);
   }, {passive:false});
   // ---------- Zoom anclado al punto del pellizco/cursor ----------
   // Antes, tanto el pellizco táctil como Ctrl+rueda cambiaban "pdfZoom" y
@@ -4924,15 +4967,17 @@ window.OcrEngine = (function(){
   });
   pdfZoomOutBtn.addEventListener('click', ()=>{
     if(!currentPdfDoc) return;
-    const newZoom = Math.max(0.4, +(pdfZoom - 0.15).toFixed(2));
+    const base = pdfPendingZoom != null ? pdfPendingZoom : pdfZoom;
+    const newZoom = Math.max(0.4, +(base - 0.15).toFixed(2));
     const rect = pdfCanvasWrapEl.getBoundingClientRect();
-    pdfZoomToPoint(newZoom, rect.left + rect.width/2, rect.top + rect.height/2);
+    pdfQuickZoomPreview(newZoom, rect.left + rect.width/2, rect.top + rect.height/2);
   });
   pdfZoomInBtn.addEventListener('click', ()=>{
     if(!currentPdfDoc) return;
-    const newZoom = Math.min(3, +(pdfZoom + 0.15).toFixed(2));
+    const base = pdfPendingZoom != null ? pdfPendingZoom : pdfZoom;
+    const newZoom = Math.min(3, +(base + 0.15).toFixed(2));
     const rect = pdfCanvasWrapEl.getBoundingClientRect();
-    pdfZoomToPoint(newZoom, rect.left + rect.width/2, rect.top + rect.height/2);
+    pdfQuickZoomPreview(newZoom, rect.left + rect.width/2, rect.top + rect.height/2);
   });
 
   // Arrastre del divisor para cambiar el ancho del panel de PDF.
@@ -9779,14 +9824,17 @@ window.OcrEngine = (function(){
         '</div>';
       vbPdfList.appendChild(el);
     });
-    // Si hay documentos y todavía no se mostró ninguno, abrir el primero
-    // automáticamente para que agregar/recuperar un PDF siempre produzca una
-    // vista visible dentro de la ventana emergente.
-    if(visible.length && !vbPdfViewer.classList.contains('show')){
-      const first = await vbPdfDbGet(visible[0].uid);
-      if(first) await vbPdfShowPreview(first, 1);
-    }
+    // Antes acá se auto-abría el primer PDF visible cada vez que el visor
+    // estaba cerrado. Eso rompía la navegación por carpetas: cada click en
+    // una carpeta o en "atrás" volvía a llamar a esta función, y como el
+    // visor estaba cerrado (el usuario lo acababa de cerrar para volver a
+    // elegir), se reabría solo el primer PDF de la carpeta en vez de dejar
+    // ver la lista — quedaba "tildado" yendo y viniendo entre la lista y un
+    // PDF que el usuario no pidió. Ahora esta función solo dibuja la lista;
+    // el PDF se abre nada más cuando el usuario lo toca (ver vbPdfList click
+    // más abajo) o al subir uno nuevo (ver vbPdfHandleFiles).
   }
+
 
   async function vbPdfShowPreview(rec, pageNum){
     if(!rec || !rec.blob || !window.pdfjsLib) return;
@@ -9804,7 +9852,9 @@ window.OcrEngine = (function(){
       await vbPdfRenderPreviewPage();
     }catch(err){ console.error(err); alert('No se pudo mostrar la vista previa del PDF.'); }
   }
-  async function vbPdfRenderPreviewPage(){
+  let vbPdfRenderTask = null;
+  async function vbPdfRenderPreviewPage(opts){
+    opts = opts || {};
     if(!vbPdfViewerDoc) return;
     const page = await vbPdfViewerDoc.getPage(vbPdfViewerPageNum);
     const wrap = document.getElementById('vbPdfViewerCanvasWrap');
@@ -9812,7 +9862,15 @@ window.OcrEngine = (function(){
     const base = page.getViewport({scale:1});
     const width = fitWidth * vbPdfViewerScale;
     const viewport = page.getViewport({scale:width/base.width});
-    const ratio = window.devicePixelRatio || 1;
+    // El ancho de render crece con fitWidth*escala*densidad de píxeles: a
+    // zoom alto en un teléfono con dpr 3, esto podía pedir un canvas de
+    // varios miles de píxeles de ancho, y ese render por sí solo ya tardaba
+    // lo suficiente como para sentirse "trabado" al asentar el zoom. Se topa
+    // la densidad efectiva para que el canvas no crezca sin límite; sigue
+    // siendo nítido de sobra en una pantalla de celular/tablet.
+    const rawRatio = window.devicePixelRatio || 1;
+    const MAX_CANVAS_WIDTH = 2200;
+    const ratio = Math.min(rawRatio, Math.max(1, MAX_CANVAS_WIDTH / viewport.width));
     vbPdfViewerCanvas.width = Math.ceil(viewport.width * ratio);
     vbPdfViewerCanvas.height = Math.ceil(viewport.height * ratio);
     vbPdfViewerCanvas.style.width = Math.ceil(viewport.width) + 'px';
@@ -9821,36 +9879,57 @@ window.OcrEngine = (function(){
     vbPdfViewerZoomValue.textContent = Math.round(vbPdfViewerScale * 100) + '%';
     const ctx = vbPdfViewerCanvas.getContext('2d');
     ctx.setTransform(ratio,0,0,ratio,0,0);
-    await page.render({canvasContext:ctx, viewport}).promise;
+    // Cancelamos cualquier render de canvas anterior que haya quedado a
+    // mitad de camino: si el zoom se asienta de nuevo antes de que termine
+    // el render previo, no queremos dos renders dibujando encima uno del
+    // otro (eso también generaba tirones).
+    if(vbPdfRenderTask){ try{ vbPdfRenderTask.cancel(); }catch(e){} }
+    const task = page.render({canvasContext:ctx, viewport});
+    vbPdfRenderTask = task;
+    try{
+      await task.promise;
+    }catch(e){
+      if(e && e.name === 'RenderingCancelledException') return;
+      console.error(e);
+    }
+    if(vbPdfRenderTask === task) vbPdfRenderTask = null;
     vbPdfViewerPage.textContent = vbPdfViewerPageNum + ' / ' + vbPdfViewerDoc.numPages;
     vbPdfViewerPrev.disabled = vbPdfViewerPageNum <= 1;
     vbPdfViewerNext.disabled = vbPdfViewerPageNum >= vbPdfViewerDoc.numPages;
-    // Capa de texto (para poder seleccionar y resaltar/subrayar en PDFs con
-    // texto real), y encima las marcas guardadas + los trazos a mano libre
-    // (estos últimos sirven también sobre PDFs escaneados/de solo imagen).
-    hideVpSelToolbar();
-    if(vpTextLayerTask){ try{ vpTextLayerTask.cancel(); }catch(e){} }
-    vpTextLayerEl.innerHTML = '';
-    vpTextLayerEl.style.setProperty('--scale-factor', viewport.scale);
-    let pageHasText = true;
-    try{
-      const textContent = await page.getTextContent();
-      pageHasText = !!(textContent.items && textContent.items.length);
-      const tlTask = pdfjsLib.renderTextLayer({ textContentSource: textContent, container: vpTextLayerEl, viewport });
-      vpTextLayerTask = tlTask;
-      await tlTask.promise;
-    }catch(e){ if(!(e && e.name === 'RenderingCancelledException')) console.error(e); }
-    if(vpTextLayerTask) vpTextLayerTask = null;
-    // Sin texto real (escaneo/foto) no hay nada que seleccionar, así que el
-    // modo "Seleccionar" (el que arranca activo por defecto) no responde a
-    // ningún toque: por eso "no dejaba remarcar" en PDFs subidos como
-    // imagen. Se pasa a lápiz automáticamente para que trazar funcione ya
-    // mismo, sin que el usuario tenga que descubrir el botón de herramienta.
-    if(!pageHasText && vpDrawTool === 'select'){
-      setVpTool('pen');
+    // ---------- Capa de texto + marcas + tinta ----------
+    // Construir la capa de texto (pdfjsLib.renderTextLayer) es lo más caro
+    // de todo esto en páginas con mucho texto, y hasta ahora se hacía antes
+    // de que el navegador llegara a pintar el canvas ya nítido: el usuario
+    // veía el "tirón" justo al soltar el pellizco o el botón, aunque la
+    // imagen ya estuviera lista. Cuando `deferExtras` viene en true (lo pide
+    // el asentado del zoom), el canvas se pinta primero y esto se corre a un
+    // frame aparte, para que el navegador pueda mostrar la imagen nítida de
+    // inmediato y recién después gastar tiempo en la capa de texto.
+    const runExtras = async ()=>{
+      hideVpSelToolbar();
+      if(vpTextLayerTask){ try{ vpTextLayerTask.cancel(); }catch(e){} }
+      vpTextLayerEl.innerHTML = '';
+      vpTextLayerEl.style.setProperty('--scale-factor', viewport.scale);
+      let pageHasText = true;
+      try{
+        const textContent = await page.getTextContent();
+        pageHasText = !!(textContent.items && textContent.items.length);
+        const tlTask = pdfjsLib.renderTextLayer({ textContentSource: textContent, container: vpTextLayerEl, viewport });
+        vpTextLayerTask = tlTask;
+        await tlTask.promise;
+      }catch(e){ if(!(e && e.name === 'RenderingCancelledException')) console.error(e); }
+      if(vpTextLayerTask) vpTextLayerTask = null;
+      if(!pageHasText && vpDrawTool === 'select'){
+        setVpTool('pen');
+      }
+      renderVpMarksLayer();
+      renderVpInkLayer();
+    };
+    if(opts.deferExtras){
+      requestAnimationFrame(()=>{ runExtras(); });
+    } else {
+      await runExtras();
     }
-    renderVpMarksLayer();
-    renderVpInkLayer();
   }
   vbPdfViewerClose.addEventListener('click', ()=>{
     vbPdfViewer.classList.remove('show');
@@ -10274,7 +10353,7 @@ window.OcrEngine = (function(){
       const contentX = wrapEl.scrollLeft + localX;
       const contentY = wrapEl.scrollTop + localY;
       vbPdfViewerScale = Math.round(newScale*100)/100;
-      await vbPdfRenderPreviewPage();
+      await vbPdfRenderPreviewPage({deferExtras:true});
       const ratio = vbPdfViewerScale / oldScale;
       wrapEl.scrollLeft = contentX*ratio - localX;
       wrapEl.scrollTop = contentY*ratio - localY;
@@ -10395,15 +10474,59 @@ window.OcrEngine = (function(){
   });
   vbPdfViewerPrev.addEventListener('click', async ()=>{ if(vbPdfViewerDoc && vbPdfViewerPageNum>1){ vbPdfViewerPageNum--; await vbPdfRenderPreviewPage(); } });
   vbPdfViewerNext.addEventListener('click', async ()=>{ if(vbPdfViewerDoc && vbPdfViewerPageNum<vbPdfViewerDoc.numPages){ vbPdfViewerPageNum++; await vbPdfRenderPreviewPage(); } });
-  vbPdfViewerZoomOut.addEventListener('click', async ()=>{
+  // ---------- Zoom fluido con los botones +/- (visor de PDF de la
+  // biblioteca) ----------
+  // Antes cada click en +/- llamaba directo a vbPdfRenderPreviewPage: un
+  // render completo de pdf.js (canvas + capa de texto). Tocando varias veces
+  // seguidas eso se sentía a los saltos, igual que le pasaba al pellizco
+  // antes de tener su previsualización con CSS. Ahora los botones usan la
+  // misma idea: el paso se previsualiza al instante con "transform: scale"
+  // sobre vpPageStack (lo dibuja la GPU) y el render nítido se pide recién
+  // cuando el usuario deja de tocar el botón un momento.
+  let vbPdfPendingScale = null;
+  let vbPdfZoomAnchorPt = null;
+  let vbPdfZoomCommitTimer = null;
+  function vbPdfQuickZoomPreview(targetScale, clientX, clientY, wrapEl){
     if(!vbPdfViewerDoc) return;
-    vbPdfViewerScale = Math.max(.5, Math.round((vbPdfViewerScale-.25)*100)/100);
-    await vbPdfRenderPreviewPage();
+    targetScale = Math.max(.5, Math.min(3, Math.round(targetScale*100)/100));
+    const baseScale = vbPdfViewerScale || 1;
+    const liveScale = targetScale / baseScale;
+    const stackRect = vpPageStackEl.getBoundingClientRect();
+    vpPageStackEl.style.willChange = 'transform';
+    vpPageStackEl.style.transformOrigin = (clientX - stackRect.left) + 'px ' + (clientY - stackRect.top) + 'px';
+    vpPageStackEl.style.transform = 'scale(' + liveScale + ')';
+    vbPdfPendingScale = targetScale;
+    vbPdfZoomAnchorPt = {x:clientX, y:clientY, wrapEl};
+    vbPdfViewerZoomValue.textContent = Math.round(targetScale*100) + '%';
+    clearTimeout(vbPdfZoomCommitTimer);
+    vbPdfZoomCommitTimer = setTimeout(vbPdfCommitQuickZoom, 150);
+  }
+  async function vbPdfCommitQuickZoom(){
+    clearTimeout(vbPdfZoomCommitTimer); vbPdfZoomCommitTimer = null;
+    if(vbPdfPendingScale == null) return;
+    if(vbPdfZoomingNow){ vbPdfZoomCommitTimer = setTimeout(vbPdfCommitQuickZoom, 80); return; }
+    const scaleToApply = vbPdfPendingScale, anchor = vbPdfZoomAnchorPt;
+    vbPdfPendingScale = null; vbPdfZoomAnchorPt = null;
+    vpPageStackEl.style.transform = '';
+    vpPageStackEl.style.transformOrigin = '';
+    vpPageStackEl.style.willChange = '';
+    await vbPdfZoomToPoint(scaleToApply, anchor.x, anchor.y, anchor.wrapEl);
+  }
+  vbPdfViewerZoomOut.addEventListener('click', ()=>{
+    if(!vbPdfViewerDoc) return;
+    const wrapEl = document.getElementById('vbPdfViewerCanvasWrap');
+    const rect = wrapEl.getBoundingClientRect();
+    const base = vbPdfPendingScale != null ? vbPdfPendingScale : vbPdfViewerScale;
+    const newScale = Math.max(.5, Math.round((base-.25)*100)/100);
+    vbPdfQuickZoomPreview(newScale, rect.left + rect.width/2, rect.top + rect.height/2, wrapEl);
   });
-  vbPdfViewerZoomIn.addEventListener('click', async ()=>{
+  vbPdfViewerZoomIn.addEventListener('click', ()=>{
     if(!vbPdfViewerDoc) return;
-    vbPdfViewerScale = Math.min(3, Math.round((vbPdfViewerScale+.25)*100)/100);
-    await vbPdfRenderPreviewPage();
+    const wrapEl = document.getElementById('vbPdfViewerCanvasWrap');
+    const rect = wrapEl.getBoundingClientRect();
+    const base = vbPdfPendingScale != null ? vbPdfPendingScale : vbPdfViewerScale;
+    const newScale = Math.min(3, Math.round((base+.25)*100)/100);
+    vbPdfQuickZoomPreview(newScale, rect.left + rect.width/2, rect.top + rect.height/2, wrapEl);
   });
   vbPdfList.addEventListener('click', async (e)=>{
     const item = e.target.closest('.vbPdfItem');
@@ -10494,14 +10617,14 @@ window.OcrEngine = (function(){
   async function vbOpenPdfPanel(){
     vbCloseSettings();
     vbPdfPanel.classList.add('open');
+    // Al abrir, arrancamos mostrando directamente las carpetas de ESTE
+    // cuaderno (no la lista global de "todas las carpetas" de todos los
+    // cuadernos): es lo que se espera ver al tocar el ícono de PDFs estando
+    // adentro de una carpeta de notas. Se puede subir a "Todas las carpetas"
+    // con las migas de pan si hace falta cruzar entre cuadernos.
+    vbPdfSelectedNoteFolder = vCurrentFolder ? String(vCurrentFolder.id) : 'all';
+    vbPdfSelectedFolder = 'all';
     await vbPdfRenderList();
-    // Recuperación adicional: si el PDF acaba de guardarse pero la lista aún
-    // no se repintó, mostrar igualmente el último registro persistido.
-    if(!vbPdfViewer.classList.contains('show')){
-      const all = await vbPdfDbListAll();
-      const latest = all[all.length-1];
-      if(latest) await vbPdfShowPreview(latest, 1);
-    }
     vbUpdatePdfSplitLayout();
   }
   function vbClosePdfPanel(){
