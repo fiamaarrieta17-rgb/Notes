@@ -3127,7 +3127,7 @@ window.OcrEngine = (function(){
     estilografica: { name:'Estilográfica',         widthFn:(w,p)=> w*(0.35+p*1.9),   alpha:.94, cap:'round'  },
     caligrafico:   { name:'Caligráfico',           widthFn:(w,p)=> w*(1.0+p*2.6),    alpha:.97, cap:'square' },
     marcador:      { name:'Marcador seco',         widthFn:(w,p)=> w*(2.0+p*2.4),    alpha:.55, cap:'square', grain:true },
-    grafito:       { name:'Lápiz grafito',         widthFn:(w,p)=> w*(0.65+p*0.8),   alpha:.55, cap:'round',  grain:true, tint:.7,  widthJitter:.4 },
+    grafito:       { name:'Lápiz grafito',         widthFn:(w,p)=> w*(0.7+p*0.85),   alpha:.72, cap:'round',  grain:true, grainAmount:.4, tint:.65, widthJitter:.16, steady:.12 },
     carbon:        { name:'Carboncillo',           widthFn:(w,p)=> w*(1.1+p*1.4),    alpha:.32, cap:'round',  grain:true, tint:.9,  widthJitter:.5 },
     pincel:        { name:'Pincel',                widthFn:(w,p)=> w*(0.6+p*2.0),    alpha:.96, cap:'round'  },
     pincelSeco:    { name:'Pincel seco',           widthFn:(w,p)=> w*(0.7+p*1.2),    alpha:.48, cap:'round',  grain:true, tint:.15, widthJitter:.45 },
@@ -3189,7 +3189,15 @@ window.OcrEngine = (function(){
     if(stroke.tool==='pen'){
       const ps = PEN_STYLES[stroke.penStyle] || PEN_STYLES.estandar;
       let a = baseAlpha * (ps.alpha!=null ? ps.alpha : 1);
-      if(ps.grain && idx!=null){ const g = 0.35 + (Math.abs(Math.sin((idx+1)*12.9898))%1)*0.65; a *= g; }
+      if(ps.grain && idx!=null){
+        // grainAmount acota cuánto oscila la opacidad del grano (0-1, default 1
+        // = comportamiento histórico ±0.65). Estilos con pulso firme (grafito)
+        // usan un rango más angosto: se sigue viendo textura, pero no "parpadea"
+        // tanto punto a punto, que es lo que se lee como mano insegura.
+        const amt = ps.grainAmount!=null ? ps.grainAmount : 1;
+        const g = (1 - amt*0.65) + (Math.abs(Math.sin((idx+1)*12.9898))%1)*(amt*0.65);
+        a *= g;
+      }
       return a;
     }
     return baseAlpha;
@@ -6297,8 +6305,14 @@ window.OcrEngine = (function(){
         // Piso general un poco más bajo que antes (más firmeza de base en todos
         // los estilos), sin tocar el techo: los trazos rápidos siguen sintiéndose
         // igual de sueltos, solo se afirma el micro-temblor de la mano quieta.
-        const slowWeight = tidyMode ? 0.20 : 0.28;
-        const fastWeight = tidyMode ? 0.60 : 0.72;
+        // steady (opcional, por estilo): firmeza extra fija, pensada para
+        // estilos donde un pulso muy sólido importa más que la fidelidad al
+        // gesto crudo (grafito). Se resta directo del peso del punto nuevo,
+        // por eso su rango es chico (0-0.5): valores altos se sentirían
+        // "pegajosos" y redondearían de más las puntas de la letra.
+        const steady = ps.steady || 0;
+        const slowWeight = clamp((tidyMode ? 0.20 : 0.28) - steady, 0.10, 1);
+        const fastWeight = clamp((tidyMode ? 0.60 : 0.72) - steady*0.5, 0.20, 1);
         const floor = clamp(slowWeight - (1 - t) * 0.10, 0.11, slowWeight);
         const ceil = clamp(fastWeight - (1 - t) * 0.08, floor + 0.1, fastWeight);
         const newWeight = floor + (ceil - floor) * speedT;
