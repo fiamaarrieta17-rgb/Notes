@@ -2080,7 +2080,7 @@ window.OcrEngine = (function(){
   }
   #vectorPanelView #vbPdfViewerFullscreenBtn svg{width:15px;height:15px;flex-shrink:0;}
   #vectorPanelView #vbPdfViewerFullscreenBtn:hover{background:var(--vb-accent);border-color:var(--vb-accent);color:#fff;}
-  #vectorPanelView #vbPdfViewer.vbFsMode #vbPdfViewerFullscreenBtn{background:var(--vb-accent);border-color:var(--vb-accent);color:#fff;}
+  #vectorPanelView #vbPdfPanel.vbFsMode #vbPdfViewerFullscreenBtn{background:var(--vb-accent);border-color:var(--vb-accent);color:#fff;}
   #vectorPanelView #vbPdfViewerTitle{flex:1;min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#B6B9C4;}
   #vectorPanelView #vbPdfViewerCanvasWrap{width:100%;min-width:0;min-height:120px;max-height:42vh;box-sizing:border-box;overflow:auto;background:#30323A;border-radius:7px;text-align:center;padding:6px;display:flex;justify-content:center;align-items:flex-start;}
   #vectorPanelView #vbPdfViewerCanvas{display:block;position:static!important;inset:auto!important;transform:none!important;float:none!important;flex:0 0 auto;max-width:100%;width:auto;height:auto;background:#fff;box-shadow:0 3px 10px rgba(0,0,0,.35);}
@@ -2161,6 +2161,28 @@ window.OcrEngine = (function(){
   #vectorPanelView #vbPdfPanel.vbFsMode{
     top:0;left:0;right:0;bottom:0;width:100vw;max-width:100vw;height:100vh;
     max-height:100vh;min-height:0;border-radius:0;z-index:60;
+    box-sizing:border-box;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    background:#15161B;
+  }
+  /* La cabecera "Biblioteca de PDFs" (con su propia X) queda redundante acá:
+     el visor ya trae su propia franja con "Atrás" y el botón de pantalla
+     completa, y en fullscreen conviene devolverle ese espacio a la lectura
+     en vez de mostrar dos barras superpuestas. */
+  #vectorPanelView #vbPdfPanel.vbFsMode #vbPdfPanelHeader{
+    display:none;
+  }
+  #vectorPanelView #vbPdfPanel.vbFsMode #vbPdfPanelBody{
+    padding:8px;
+  }
+  #vectorPanelView #vbPdfPanel.vbFsMode #vbPdfViewerCanvasWrap{
+    border-radius:0;background:#0E0F13;
+  }
+  /* La cabecera del visor ("Atrás" / título / pantalla completa) se resalta
+     un poco más en fullscreen, ya que ahora es la única barra de navegación
+     visible y hay que poder encontrarla de un vistazo. */
+  #vectorPanelView #vbPdfPanel.vbFsMode #vbPdfViewerHead{
+    flex-shrink:0;padding:4px 2px 8px;font-size:12px;
   }
 </style>
 </head>
@@ -3701,6 +3723,43 @@ window.OcrEngine = (function(){
   const pdfSelDotsEl = document.getElementById('pdfSelDots');
   const pdfSelCopiedHintEl = document.getElementById('pdfSelCopiedHint');
   const pdfInkCanvasEl = document.getElementById('pdfInkCanvas');
+  // Canvas auxiliares (fuera del DOM) para que el marcador sobre el PDF se
+  // comporte igual que en la hoja: una pasada continua se pinta primero
+  // como silueta OPACA en un buffer aparte y recién se mezcla (con la
+  // opacidad/multiply reales) UNA sola vez sobre la capa visible. Antes
+  // cada segmentito del trazo se mezclaba por separado directo sobre el
+  // canvas visible, así que los solapamientos internos de una misma
+  // pasada (curvas, tramos lentos) se veían mucho más oscuros/opacos de
+  // lo esperado, aunque solo se hubiera pasado una vez por ese lugar.
+  const pdfInkBufferCanvasEl = document.createElement('canvas');
+  const pdfInkBaseCanvasEl = document.createElement('canvas');
+  function preparePdfMarkBuffer(){
+    const iw = pdfInkCanvasEl.width, ih = pdfInkCanvasEl.height;
+    pdfInkBufferCanvasEl.width = iw; pdfInkBufferCanvasEl.height = ih;
+    pdfInkBaseCanvasEl.width = iw; pdfInkBaseCanvasEl.height = ih;
+    const outputScale = window.devicePixelRatio || 1;
+    const bctx = pdfInkBufferCanvasEl.getContext('2d');
+    bctx.setTransform(outputScale,0,0,outputScale,0,0);
+    // Instantánea de lo ya confirmado en el canvas visible, para poder
+    // "restaurarlo" antes de cada mezcla del trazo en vivo.
+    const baseCtx = pdfInkBaseCanvasEl.getContext('2d');
+    baseCtx.setTransform(1,0,0,1,0,0);
+    baseCtx.drawImage(pdfInkCanvasEl, 0, 0);
+  }
+  function overlayPdfMarkBuffer(){
+    const ictx = pdfInkCanvasEl.getContext('2d');
+    const iw = pdfInkCanvasEl.width, ih = pdfInkCanvasEl.height;
+    const outputScale = window.devicePixelRatio || 1;
+    const st = pdfMarkStyle(pdfCurrentStroke.tool, pdfCurrentStroke);
+    ictx.setTransform(1,0,0,1,0,0);
+    ictx.clearRect(0,0,iw,ih);
+    ictx.drawImage(pdfInkBaseCanvasEl, 0, 0);
+    ictx.globalAlpha = st.alpha;
+    ictx.globalCompositeOperation = st.composite;
+    ictx.drawImage(pdfInkBufferCanvasEl, 0, 0);
+    ictx.globalAlpha = 1; ictx.globalCompositeOperation = 'source-over';
+    ictx.setTransform(outputScale,0,0,outputScale,0,0);
+  }
   const pdfToolSelectBtn = document.getElementById('pdfToolSelect');
   const pdfToolPenBtn = document.getElementById('pdfToolPen');
   const pdfToolMarkerBtn = document.getElementById('pdfToolMarker');
@@ -4051,7 +4110,7 @@ window.OcrEngine = (function(){
             div.style.width = (r.wFrac*w) + 'px';
             div.style.height = (r.hFrac*h) + 'px';
             div.style.background = m.color;
-            div.style.opacity = '0.42';
+            div.style.opacity = '0.24';
           } else {
             const lineH = Math.max(1.5, r.hFrac*h*0.08);
             div.style.left = (r.xFrac*w) + 'px';
@@ -4105,9 +4164,32 @@ window.OcrEngine = (function(){
     const strokesForPage = currentPdfMarks
       .filter(m=> m.page===currentPdfPageNum && m.type==='ink' && m.points && m.points.length)
       .sort((a,b)=> a.createdAt - b.createdAt);
+    if(!strokesForPage.length) return;
+    // El marcador (y el subrayado a mano) se pintan primero como silueta
+    // opaca en un buffer aparte y se mezclan UNA sola vez sobre la capa
+    // visible (misma técnica que en la hoja de papel): así una pasada
+    // continua ya confirmada se ve pareja y solo se oscurece más al
+    // superponerse con OTRO trazo, no consigo misma.
+    pdfInkBufferCanvasEl.width = pdfInkCanvasEl.width;
+    pdfInkBufferCanvasEl.height = pdfInkCanvasEl.height;
+    const bctx = pdfInkBufferCanvasEl.getContext('2d');
     for(const m of strokesForPage){
       const stroke = pdfInkStrokeFromMark(m, w, h);
-      drawFreehandSmooth(ictx, stroke, styleFor(stroke.tool, stroke));
+      if(BUFFERED_TOOLS.has(stroke.tool)){
+        bctx.setTransform(1,0,0,1,0,0);
+        bctx.clearRect(0,0,pdfInkBufferCanvasEl.width,pdfInkBufferCanvasEl.height);
+        bctx.setTransform(outputScale,0,0,outputScale,0,0);
+        drawFreehandSmooth(bctx, stroke, SILHOUETTE_STYLE);
+        const st = pdfMarkStyle(stroke.tool, stroke);
+        ictx.setTransform(1,0,0,1,0,0);
+        ictx.globalAlpha = st.alpha;
+        ictx.globalCompositeOperation = st.composite;
+        ictx.drawImage(pdfInkBufferCanvasEl, 0, 0);
+        ictx.globalAlpha = 1; ictx.globalCompositeOperation = 'source-over';
+        ictx.setTransform(outputScale,0,0,outputScale,0,0);
+      } else {
+        drawFreehandSmooth(ictx, stroke, pdfMarkStyle(stroke.tool, stroke));
+      }
     }
   }
 
@@ -4190,7 +4272,13 @@ window.OcrEngine = (function(){
       penStyle: toolName === 'pen' ? 'estandar' : undefined,
       points: [pt],
     };
-    dotTo(pdfInkCanvasEl.getContext('2d'), pdfCurrentStroke, styleFor(toolName, pdfCurrentStroke));
+    if(toolName === 'highlighter'){
+      preparePdfMarkBuffer();
+      dotTo(pdfInkBufferCanvasEl.getContext('2d'), pdfCurrentStroke, SILHOUETTE_STYLE);
+      overlayPdfMarkBuffer();
+    } else {
+      dotTo(pdfInkCanvasEl.getContext('2d'), pdfCurrentStroke, pdfMarkStyle(toolName, pdfCurrentStroke));
+    }
   });
   pdfInkCanvasEl.addEventListener('pointermove', (e)=>{
     if(!pdfDrawing || e.pointerId !== pdfDrawPointerId) return;
@@ -4202,7 +4290,12 @@ window.OcrEngine = (function(){
     const last = pts[pts.length-1];
     if(Math.hypot(pt.x-last.x, pt.y-last.y) < 0.8) return;
     pts.push(pt);
-    drawFreehandIncrement(pdfInkCanvasEl.getContext('2d'), pdfCurrentStroke, styleFor(pdfCurrentStroke.tool, pdfCurrentStroke));
+    if(pdfCurrentStroke.tool === 'highlighter'){
+      drawFreehandIncrement(pdfInkBufferCanvasEl.getContext('2d'), pdfCurrentStroke, SILHOUETTE_STYLE);
+      overlayPdfMarkBuffer();
+    } else {
+      drawFreehandIncrement(pdfInkCanvasEl.getContext('2d'), pdfCurrentStroke, pdfMarkStyle(pdfCurrentStroke.tool, pdfCurrentStroke));
+    }
   });
   function endPdfDraw(e){
     if(!pdfDrawing || (e && e.pointerId !== pdfDrawPointerId)) return;
@@ -4212,7 +4305,9 @@ window.OcrEngine = (function(){
     const stroke = pdfCurrentStroke;
     pdfCurrentStroke = null;
     if(!stroke || !stroke.points.length) return;
-    if(stroke.points.length > 1) drawFreehandTail(pdfInkCanvasEl.getContext('2d'), stroke, styleFor(stroke.tool, stroke));
+    if(stroke.tool !== 'highlighter' && stroke.points.length > 1){
+      drawFreehandTail(pdfInkCanvasEl.getContext('2d'), stroke, pdfMarkStyle(stroke.tool, stroke));
+    }
     const w = pdfCanvasEl.clientWidth, h = pdfCanvasEl.clientHeight;
     if(!w || !h || !currentPdfMeta) return;
     const mark = {
@@ -4229,6 +4324,12 @@ window.OcrEngine = (function(){
       createdAt: Date.now(),
     };
     currentPdfMarks.push(mark);
+    if(stroke.tool === 'highlighter'){
+      // Redibuja toda la capa desde los datos guardados: así el trazo
+      // recién terminado queda pintado con la técnica de buffer por trazo
+      // (ver renderPdfInkLayer), no con el estado intermedio en vivo.
+      renderPdfInkLayer();
+    }
     pdfMarkPut(mark).catch(()=>{ alert('No se pudo guardar el trazo.'); });
   }
   pdfInkCanvasEl.addEventListener('pointerup', endPdfDraw);
@@ -4590,6 +4691,47 @@ window.OcrEngine = (function(){
   (function setupPdfPinchZoom(){
     const pointers = new Map();
     let pinchInfo = null;
+    // ---------- Pellizco fluido: previsualización con CSS, re-render solo
+    // al final ----------
+    // Antes cada micro-cambio de distancia entre dedos disparaba un
+    // pdfZoomToPoint completo (page.render de pdf.js + capa de texto +
+    // marcas), que es caro: en un pellizco real eso se dispara decenas de
+    // veces por segundo y el resultado se sentía a los saltos, no fluido.
+    // Ahora, mientras los dos dedos se mueven, se escala con CSS
+    // (transform: scale) el contenedor que agrupa canvas+texto+tinta —eso
+    // lo hace la GPU a 60fps sin tocar pdf.js—, y recién cuando el gesto se
+    // detiene (pausa) o termina (se levantan los dedos) se pide el
+    // re-render nítido a la resolución final. El punto de anclaje del
+    // pellizco se fija UNA vez al arrancar el gesto (como en una foto real:
+    // ese punto queda fijo bajo los dedos durante toda la previsualización).
+    let pinchBaseZoom = 1;
+    let pinchLiveScale = 1;
+    let pinchCommitTimer = null;
+    function clearPinchTransform(){
+      pdfPageStackEl.style.transform = '';
+      pdfPageStackEl.style.transformOrigin = '';
+      pdfPageStackEl.style.willChange = '';
+    }
+    async function commitPinchZoom(){
+      clearTimeout(pinchCommitTimer); pinchCommitTimer = null;
+      if(!pinchInfo) return;
+      const finalZoom = +Math.max(0.4, Math.min(3, pinchBaseZoom * pinchLiveScale)).toFixed(3);
+      const anchor = pinchInfo.lastMid;
+      clearPinchTransform();
+      await pdfZoomToPoint(finalZoom, anchor.x, anchor.y);
+      pinchBaseZoom = pdfZoom; pinchLiveScale = 1;
+      // Si el gesto sigue (los dedos no se levantaron), la próxima fase de
+      // previsualización tiene que medir desde ACÁ: tanto la distancia de
+      // referencia como el punto de anclaje, para no arrastrar el cálculo
+      // desde el inicio del pellizco (eso duplicaría el escalado ya
+      // aplicado) ni pivotear desde un punto viejo de los dedos.
+      if(pointers.size === 2){
+        const pts = [...pointers.values()];
+        pinchInfo.startDist = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
+        const stackRect = pdfPageStackEl.getBoundingClientRect();
+        pdfPageStackEl.style.transformOrigin = (anchor.x-stackRect.left) + 'px ' + (anchor.y-stackRect.top) + 'px';
+      }
+    }
     // ---------- Paneo con un dedo ----------
     // Antes, con un solo dedo, no pasaba nada acá: se dependía del scroll
     // táctil nativo del navegador sobre #pdfCanvasWrap, que en algunos
@@ -4605,8 +4747,14 @@ window.OcrEngine = (function(){
       pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
       if(pointers.size === 2){
         panInfo = null;
+        clearTimeout(pinchCommitTimer); pinchCommitTimer = null;
         const pts = [...pointers.values()];
-        pinchInfo = { lastDist: Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y), lastMid: midpoint(pts[0],pts[1]) };
+        const mid = midpoint(pts[0], pts[1]);
+        pinchInfo = { startDist: Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y), lastMid: mid };
+        pinchBaseZoom = pdfZoom; pinchLiveScale = 1;
+        const stackRect = pdfPageStackEl.getBoundingClientRect();
+        pdfPageStackEl.style.transformOrigin = (mid.x-stackRect.left) + 'px ' + (mid.y-stackRect.top) + 'px';
+        pdfPageStackEl.style.willChange = 'transform';
       } else if(pointers.size === 1){
         const p = pointers.values().next().value;
         panInfo = { startX:p.x, startY:p.y, scrollLeft:pdfCanvasWrapEl.scrollLeft, scrollTop:pdfCanvasWrapEl.scrollTop, moved:false };
@@ -4618,15 +4766,16 @@ window.OcrEngine = (function(){
       if(pointers.size === 2 && pinchInfo && currentPdfDoc){
         const pts = [...pointers.values()];
         const dist = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
-        const mid = midpoint(pts[0], pts[1]);
-        const newZoom = Math.max(0.4, Math.min(3, pdfZoom * (dist/pinchInfo.lastDist)));
-        // El punto de referencia (dedos) se va actualizando en cada evento
-        // (lastDist/lastMid), igual que el pellizco de la hoja principal:
-        // así el zoom queda anclado a dónde están los dedos EN CADA
-        // INSTANTE, no solo a dónde arrancó el gesto.
-        pinchInfo.lastDist = dist;
-        pinchInfo.lastMid = mid;
-        if(Math.abs(newZoom - pdfZoom) > 0.015) pdfZoomToPoint(+newZoom.toFixed(3), mid.x, mid.y);
+        pinchInfo.lastMid = midpoint(pts[0], pts[1]);
+        const targetZoom = Math.max(0.4, Math.min(3, pinchBaseZoom * (dist/pinchInfo.startDist)));
+        pinchLiveScale = targetZoom / pinchBaseZoom;
+        pdfPageStackEl.style.transform = 'scale(' + pinchLiveScale + ')';
+        // Si el gesto se sostiene sin soltar (una pausa de ~140ms), se
+        // aprovecha para "asentar" un re-render nítido: si no, un pellizco
+        // largo se queda escalado con CSS todo el tiempo y el texto se ve
+        // borroso hasta soltar los dedos.
+        clearTimeout(pinchCommitTimer);
+        pinchCommitTimer = setTimeout(commitPinchZoom, 140);
       } else if(pointers.size === 1 && panInfo){
         const p = pointers.values().next().value;
         const dx = p.x - panInfo.startX, dy = p.y - panInfo.startY;
@@ -4637,10 +4786,17 @@ window.OcrEngine = (function(){
         pdfCanvasWrapEl.scrollTop = panInfo.scrollTop - dy;
       }
     }, {passive:false});
-    function endPointer(e){ pointers.delete(e.pointerId); if(pointers.size<2) pinchInfo=null; if(pointers.size<1) panInfo=null; }
+    function endPointer(e){
+      pointers.delete(e.pointerId);
+      if(pointers.size<2 && pinchInfo){
+        commitPinchZoom().catch(()=>{ clearPinchTransform(); }).finally(()=>{ pinchInfo=null; });
+      }
+      if(pointers.size<1) panInfo=null;
+    }
     pdfCanvasWrapEl.addEventListener('pointerup', endPointer);
     pdfCanvasWrapEl.addEventListener('pointercancel', endPointer);
   })();
+
 
   // ---------- Mostrar/ocultar herramientas con doble-tap/doble-clic ----------
   // Por defecto el PDF se ve "pelado" (sin lápiz/marcador/goma ni zoom
@@ -5650,6 +5806,16 @@ window.OcrEngine = (function(){
   };
   function markStyleFor(stroke){ return MARK_STYLES[(stroke && stroke.markStyle) || currentMarkStyle] || MARK_STYLES.translucido; }
   renderMarkStyleDrop();
+  // El marcador SOBRE UN PDF usa menos opacidad que el mismo marcador sobre
+  // la hoja de papel: un PDF suele tener texto denso y líneas finas, y la
+  // misma opacidad que en la hoja (pensada para tapar poco sobre trazos a
+  // mano) igual se siente "pesada" encima de letra de imprenta chica. Se
+  // deja aparte de styleFor() para no tocar el resaltado de la hoja normal.
+  const PDF_MARKER_ALPHA_SCALE = 0.55;
+  function pdfMarkStyle(t, stroke){
+    const s = styleFor(t, stroke);
+    return t === 'highlighter' ? {alpha: s.alpha * PDF_MARKER_ALPHA_SCALE, composite: s.composite} : s;
+  }
   function styleFor(t, stroke){
     switch(t){
       case 'eraser': return {alpha:1, composite:'destination-out'};
@@ -7979,9 +8145,12 @@ window.OcrEngine = (function(){
   window.uid = uid;
   window.dotTo = dotTo;
   window.styleFor = styleFor;
+  window.pdfMarkStyle = pdfMarkStyle;
   window.drawFreehandIncrement = drawFreehandIncrement;
   window.drawFreehandSmooth = drawFreehandSmooth;
   window.drawFreehandTail = drawFreehandTail;
+  window.BUFFERED_TOOLS = BUFFERED_TOOLS;
+  window.SILHOUETTE_STYLE = SILHOUETTE_STYLE;
   // Anchos usados por el lápiz/marcador/goma del visor de PDF de la
   // biblioteca (ver más abajo, otro <script>): antes esas constantes solo
   // existían acá adentro, así que tocar/dibujar tiraba un ReferenceError
@@ -9693,22 +9862,38 @@ window.OcrEngine = (function(){
     if(vpMarksLayerEl) vpMarksLayerEl.innerHTML = '';
     if(vpInkCanvasEl){ const ic=vpInkCanvasEl.getContext('2d'); ic.setTransform(1,0,0,1,0,0); ic.clearRect(0,0,vpInkCanvasEl.width,vpInkCanvasEl.height); }
     hideVpSelToolbar();
-    vbPdfPanel.classList.remove('vbFsMode'); // al volver a la biblioteca, se sale de pantalla completa
+    vbPdfSetFullscreen(false); // al volver a la biblioteca, se sale de pantalla completa
   });
 
   // ---------- Pantalla completa del visor de PDF (biblioteca) ----------
   const vbPdfViewerFullscreenBtn = document.getElementById('vbPdfViewerFullscreenBtn');
+  const VB_PDF_ICON_EXPAND = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>';
+  const VB_PDF_ICON_COLLAPSE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></svg>';
+  // Centralizado en una función (en vez de solo togglear la clase en el
+  // click) para poder llamarla también desde "Atrás" y desde la tecla Escape,
+  // y que el ícono/título del botón queden siempre sincronizados con el
+  // estado real, sin depender de cuál de los tres caminos lo disparó.
+  function vbPdfSetFullscreen(on){
+    vbPdfPanel.classList.toggle('vbFsMode', on);
+    if(vbPdfViewerFullscreenBtn){
+      vbPdfViewerFullscreenBtn.title = on ? 'Salir de pantalla completa' : 'Ver en pantalla completa';
+      vbPdfViewerFullscreenBtn.innerHTML = on ? VB_PDF_ICON_COLLAPSE : VB_PDF_ICON_EXPAND;
+    }
+    // El canvas del PDF se re-renderiza a un tamaño de contenedor distinto,
+    // así que hay que recalcular página e ink en cuanto cambia el layout.
+    requestAnimationFrame(()=>{ vbPdfRenderPreviewPage(); renderVpInkLayer(); });
+  }
   if(vbPdfViewerFullscreenBtn){
     vbPdfViewerFullscreenBtn.addEventListener('click', (e)=>{
       e.stopPropagation();
-      vbPdfPanel.classList.toggle('vbFsMode');
-      vbPdfViewerFullscreenBtn.title = vbPdfPanel.classList.contains('vbFsMode')
-        ? 'Salir de pantalla completa' : 'Ver en pantalla completa';
-      // El canvas del PDF se re-renderiza a un tamaño de contenedor distinto,
-      // así que hay que recalcular página e ink en cuanto cambia el layout.
-      requestAnimationFrame(()=>{ vbPdfRenderPreviewPage(); renderVpInkLayer(); });
+      vbPdfSetFullscreen(!vbPdfPanel.classList.contains('vbFsMode'));
     });
   }
+  // Escape para salir de pantalla completa desde teclado (iPad con teclado,
+  // escritorio). No hace nada si no hay nada abierto en fullscreen.
+  document.addEventListener('keydown', (e)=>{
+    if(e.key === 'Escape' && vbPdfPanel.classList.contains('vbFsMode')) vbPdfSetFullscreen(false);
+  });
 
   // ---------- Dibujo (lápiz/marcador/borrador) y resaltado/subrayado sobre
   // el PDF de la biblioteca. Los trazos a mano libre se guardan igual que el
@@ -9719,6 +9904,38 @@ window.OcrEngine = (function(){
   const vpTextLayerEl = document.getElementById('vpTextLayer');
   const vpMarksLayerEl = document.getElementById('vpMarksLayer');
   const vpInkCanvasEl = document.getElementById('vpInkCanvas');
+  // Mismo buffer de silueta que en el visor de PDF principal (ver el otro
+  // <script>): el marcador se pinta primero opaco en un canvas aparte y
+  // recién se mezcla (con la opacidad/multiply reales) UNA vez sobre la
+  // capa visible, para que una pasada continua no se oscurezca sola por
+  // superponer sus propios segmentos internos.
+  const vpInkBufferCanvasEl = document.createElement('canvas');
+  const vpInkBaseCanvasEl = document.createElement('canvas');
+  function prepareVpMarkBuffer(){
+    const iw = vpInkCanvasEl.width, ih = vpInkCanvasEl.height;
+    vpInkBufferCanvasEl.width = iw; vpInkBufferCanvasEl.height = ih;
+    vpInkBaseCanvasEl.width = iw; vpInkBaseCanvasEl.height = ih;
+    const outputScale = window.devicePixelRatio || 1;
+    const bctx = vpInkBufferCanvasEl.getContext('2d');
+    bctx.setTransform(outputScale,0,0,outputScale,0,0);
+    const baseCtx = vpInkBaseCanvasEl.getContext('2d');
+    baseCtx.setTransform(1,0,0,1,0,0);
+    baseCtx.drawImage(vpInkCanvasEl, 0, 0);
+  }
+  function overlayVpMarkBuffer(){
+    const ictx = vpInkCanvasEl.getContext('2d');
+    const iw = vpInkCanvasEl.width, ih = vpInkCanvasEl.height;
+    const outputScale = window.devicePixelRatio || 1;
+    const st = window.pdfMarkStyle(vpCurrentStroke.tool, vpCurrentStroke);
+    ictx.setTransform(1,0,0,1,0,0);
+    ictx.clearRect(0,0,iw,ih);
+    ictx.drawImage(vpInkBaseCanvasEl, 0, 0);
+    ictx.globalAlpha = st.alpha;
+    ictx.globalCompositeOperation = st.composite;
+    ictx.drawImage(vpInkBufferCanvasEl, 0, 0);
+    ictx.globalAlpha = 1; ictx.globalCompositeOperation = 'source-over';
+    ictx.setTransform(outputScale,0,0,outputScale,0,0);
+  }
   const vpDrawDotsEl = document.getElementById('vpDrawDots');
   const vpToolSelectBtn = document.getElementById('vpToolSelect');
   const vpToolPenBtn = document.getElementById('vpToolPen');
@@ -9810,9 +10027,27 @@ window.OcrEngine = (function(){
     const strokesForPage = currentVpMarks
       .filter(m=> m.page===vbPdfViewerPageNum && m.type==='ink' && m.points && m.points.length)
       .sort((a,b)=> a.createdAt - b.createdAt);
+    if(!strokesForPage.length) return;
+    vpInkBufferCanvasEl.width = vpInkCanvasEl.width;
+    vpInkBufferCanvasEl.height = vpInkCanvasEl.height;
+    const bctx = vpInkBufferCanvasEl.getContext('2d');
     for(const m of strokesForPage){
       const stroke = vpInkStrokeFromMark(m, w, h);
-      drawFreehandSmooth(ictx, stroke, styleFor(stroke.tool, stroke));
+      if(window.BUFFERED_TOOLS.has(stroke.tool)){
+        bctx.setTransform(1,0,0,1,0,0);
+        bctx.clearRect(0,0,vpInkBufferCanvasEl.width,vpInkBufferCanvasEl.height);
+        bctx.setTransform(outputScale,0,0,outputScale,0,0);
+        drawFreehandSmooth(bctx, stroke, window.SILHOUETTE_STYLE);
+        const st = window.pdfMarkStyle(stroke.tool, stroke);
+        ictx.setTransform(1,0,0,1,0,0);
+        ictx.globalAlpha = st.alpha;
+        ictx.globalCompositeOperation = st.composite;
+        ictx.drawImage(vpInkBufferCanvasEl, 0, 0);
+        ictx.globalAlpha = 1; ictx.globalCompositeOperation = 'source-over';
+        ictx.setTransform(outputScale,0,0,outputScale,0,0);
+      } else {
+        drawFreehandSmooth(ictx, stroke, window.pdfMarkStyle(stroke.tool, stroke));
+      }
     }
   }
   function renderVpMarksLayer(){
@@ -9830,7 +10065,7 @@ window.OcrEngine = (function(){
           if(m.type === 'highlight'){
             div.style.left = (r.xFrac*w) + 'px'; div.style.top = (r.yFrac*h) + 'px';
             div.style.width = (r.wFrac*w) + 'px'; div.style.height = (r.hFrac*h) + 'px';
-            div.style.background = m.color; div.style.opacity = '0.42';
+            div.style.background = m.color; div.style.opacity = '0.24';
           } else {
             const lineH = Math.max(1.5, r.hFrac*h*0.08);
             div.style.left = (r.xFrac*w) + 'px'; div.style.top = (r.yFrac*h + r.hFrac*h - lineH) + 'px';
@@ -9895,7 +10130,13 @@ window.OcrEngine = (function(){
       penStyle: toolName === 'pen' ? vPenStyle : undefined,
       points: [pt],
     };
-    dotTo(vpInkCanvasEl.getContext('2d'), vpCurrentStroke, styleFor(toolName, vpCurrentStroke));
+    if(toolName === 'highlighter'){
+      prepareVpMarkBuffer();
+      dotTo(vpInkBufferCanvasEl.getContext('2d'), vpCurrentStroke, window.SILHOUETTE_STYLE);
+      overlayVpMarkBuffer();
+    } else {
+      dotTo(vpInkCanvasEl.getContext('2d'), vpCurrentStroke, window.pdfMarkStyle(toolName, vpCurrentStroke));
+    }
   });
   vpInkCanvasEl.addEventListener('pointermove', (e)=>{
     if(!vpDrawing || e.pointerId !== vpDrawPointerId) return;
@@ -9904,6 +10145,7 @@ window.OcrEngine = (function(){
     if(!vpCurrentStroke) return;
     let rawEvents = (typeof e.getCoalescedEvents === 'function') ? e.getCoalescedEvents() : null;
     if(!rawEvents || !rawEvents.length) rawEvents = [e];
+    let moved = false;
     for(let k=0;k<rawEvents.length;k++){
       const ev=rawEvents[k];
       const pt = { x:ev.clientX-rect.left, y:ev.clientY-rect.top, p: ev.pressure && ev.pressure>0 ? ev.pressure : 0.5 };
@@ -9911,8 +10153,14 @@ window.OcrEngine = (function(){
       const last = pts[pts.length-1];
       if(Math.hypot(pt.x-last.x, pt.y-last.y) < 0.5) continue;
       pts.push(pt);
-      drawFreehandIncrement(vpInkCanvasEl.getContext('2d'), vpCurrentStroke, styleFor(vpCurrentStroke.tool, vpCurrentStroke));
+      moved = true;
+      if(vpCurrentStroke.tool === 'highlighter'){
+        drawFreehandIncrement(vpInkBufferCanvasEl.getContext('2d'), vpCurrentStroke, window.SILHOUETTE_STYLE);
+      } else {
+        drawFreehandIncrement(vpInkCanvasEl.getContext('2d'), vpCurrentStroke, window.pdfMarkStyle(vpCurrentStroke.tool, vpCurrentStroke));
+      }
     }
+    if(moved && vpCurrentStroke.tool === 'highlighter') overlayVpMarkBuffer();
   });
   function endVpDraw(e){
     if(!vpDrawing || (e && e.pointerId !== vpDrawPointerId)) return;
@@ -9922,7 +10170,9 @@ window.OcrEngine = (function(){
     const stroke = vpCurrentStroke;
     vpCurrentStroke = null;
     if(!stroke || !stroke.points.length) return;
-    if(stroke.points.length > 1) drawFreehandTail(vpInkCanvasEl.getContext('2d'), stroke, styleFor(stroke.tool, stroke));
+    if(stroke.tool !== 'highlighter' && stroke.points.length > 1){
+      drawFreehandTail(vpInkCanvasEl.getContext('2d'), stroke, window.pdfMarkStyle(stroke.tool, stroke));
+    }
     const w = vbPdfViewerCanvas.clientWidth, h = vbPdfViewerCanvas.clientHeight;
     if(!w || !h || !currentVpPdfUid) return;
     const mark = {
@@ -9935,6 +10185,11 @@ window.OcrEngine = (function(){
       createdAt: Date.now(),
     };
     currentVpMarks.push(mark);
+    if(stroke.tool === 'highlighter'){
+      // Redibuja toda la capa desde los datos guardados con la técnica de
+      // buffer por trazo (ver renderVpInkLayer), no con el estado en vivo.
+      renderVpInkLayer();
+    }
     vpMarkPut(mark).catch(()=>{ alert('No se pudo guardar el trazo.'); });
   }
   vpInkCanvasEl.addEventListener('pointerup', endVpDraw);
@@ -10041,16 +10296,52 @@ window.OcrEngine = (function(){
     const pointers = new Map();
     let panInfo = null;
     let pinchInfo = null;
+    // ---------- Pellizco fluido: previsualización con CSS, re-render solo
+    // al final ----------
+    // Mismo motivo que en el panel principal: re-renderizar el PDF (pdf.js)
+    // en cada micro-movimiento de los dedos se siente a los saltos. Acá se
+    // escala con CSS el "vpPageStack" (canvas+texto+tinta juntos, así se
+    // mueven pegados) mientras los dedos se mueven, y se pide el re-render
+    // nítido recién cuando el gesto hace una pausa o termina.
+    let pinchBaseScale = 1;
+    let pinchLiveScale = 1;
+    let pinchCommitTimer = null;
+    function clearPinchTransform(){
+      vpPageStackEl.style.transform = '';
+      vpPageStackEl.style.transformOrigin = '';
+      vpPageStackEl.style.willChange = '';
+    }
+    async function commitPinchZoom(){
+      clearTimeout(pinchCommitTimer); pinchCommitTimer = null;
+      if(!pinchInfo) return;
+      const finalScale = Math.max(.5, Math.min(3, pinchBaseScale * pinchLiveScale));
+      const anchor = pinchInfo.lastMid;
+      clearPinchTransform();
+      await vbPdfZoomToPoint(finalScale, anchor.x, anchor.y, wrapEl);
+      pinchBaseScale = vbPdfViewerScale; pinchLiveScale = 1;
+      // Re-basar distancia y anclaje si el gesto sigue, por la misma razón
+      // que en el panel principal: si no, el siguiente tramo duplicaría el
+      // escalado ya aplicado o pivotearía desde un punto viejo.
+      if(pointers.size === 2){
+        const pts = [...pointers.values()];
+        pinchInfo.startDist = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
+        const stackRect = vpPageStackEl.getBoundingClientRect();
+        vpPageStackEl.style.transformOrigin = (anchor.x-stackRect.left) + 'px ' + (anchor.y-stackRect.top) + 'px';
+      }
+    }
     wrapEl.addEventListener('pointerdown', (e)=>{
       if(e.pointerType !== 'touch' || vpDrawTool !== 'select') return;
       pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
       if(pointers.size === 2){
         panInfo = null;
+        clearTimeout(pinchCommitTimer); pinchCommitTimer = null;
         const pts = [...pointers.values()];
-        pinchInfo = {
-          lastDist: Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y),
-          lastMid: {x:(pts[0].x+pts[1].x)/2, y:(pts[0].y+pts[1].y)/2}
-        };
+        const mid = {x:(pts[0].x+pts[1].x)/2, y:(pts[0].y+pts[1].y)/2};
+        pinchInfo = { startDist: Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y), lastMid: mid };
+        pinchBaseScale = vbPdfViewerScale; pinchLiveScale = 1;
+        const stackRect = vpPageStackEl.getBoundingClientRect();
+        vpPageStackEl.style.transformOrigin = (mid.x-stackRect.left) + 'px ' + (mid.y-stackRect.top) + 'px';
+        vpPageStackEl.style.willChange = 'transform';
       } else if(pointers.size === 1){
         pinchInfo = null;
         const p = pointers.values().next().value;
@@ -10065,14 +10356,12 @@ window.OcrEngine = (function(){
       if(pointers.size === 2 && pinchInfo && vbPdfViewerDoc){
         const pts = [...pointers.values()];
         const dist = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
-        const mid = {x:(pts[0].x+pts[1].x)/2, y:(pts[0].y+pts[1].y)/2};
-        const newScale = Math.max(.5, Math.min(3, vbPdfViewerScale * (dist/pinchInfo.lastDist)));
-        // El punto de referencia se actualiza en cada evento, igual que en
-        // el panel principal: el zoom queda anclado a dónde están los dedos
-        // en cada instante, no solo a dónde arrancó el gesto.
-        pinchInfo.lastDist = dist;
-        pinchInfo.lastMid = mid;
-        if(Math.abs(newScale - vbPdfViewerScale) > 0.015) vbPdfZoomToPoint(newScale, mid.x, mid.y, wrapEl);
+        pinchInfo.lastMid = {x:(pts[0].x+pts[1].x)/2, y:(pts[0].y+pts[1].y)/2};
+        const targetScale = Math.max(.5, Math.min(3, pinchBaseScale * (dist/pinchInfo.startDist)));
+        pinchLiveScale = targetScale / pinchBaseScale;
+        vpPageStackEl.style.transform = 'scale(' + pinchLiveScale + ')';
+        clearTimeout(pinchCommitTimer);
+        pinchCommitTimer = setTimeout(commitPinchZoom, 140);
       } else if(pointers.size === 1 && panInfo){
         const p = pointers.values().next().value;
         const dx = p.x - panInfo.startX, dy = p.y - panInfo.startY;
@@ -10083,7 +10372,13 @@ window.OcrEngine = (function(){
         wrapEl.scrollTop = panInfo.scrollTop - dy;
       }
     }, {passive:false});
-    function endPointer(e){ pointers.delete(e.pointerId); if(pointers.size<2) pinchInfo=null; if(pointers.size<1) panInfo=null; }
+    function endPointer(e){
+      pointers.delete(e.pointerId);
+      if(pointers.size<2 && pinchInfo){
+        commitPinchZoom().catch(()=>{ clearPinchTransform(); }).finally(()=>{ pinchInfo=null; });
+      }
+      if(pointers.size<1) panInfo=null;
+    }
     wrapEl.addEventListener('pointerup', endPointer);
     wrapEl.addEventListener('pointercancel', endPointer);
     // Mismo doble-tap/doble-clic para mostrar/ocultar herramientas, ahora
@@ -10209,7 +10504,12 @@ window.OcrEngine = (function(){
     }
     vbUpdatePdfSplitLayout();
   }
-  function vbClosePdfPanel(){ vbPdfPanel.classList.remove('open','vbFsMode','previewOpen'); vbUpdatePdfSplitLayout(); }
+  function vbClosePdfPanel(){
+    vbPdfPanel.classList.remove('open','vbFsMode','previewOpen');
+    const fsBtn = document.getElementById('vbPdfViewerFullscreenBtn');
+    if(fsBtn){ fsBtn.title = 'Ver en pantalla completa'; fsBtn.innerHTML = VB_PDF_ICON_EXPAND; }
+    vbUpdatePdfSplitLayout();
+  }
 
   if(vbUploadPdfBtn) vbUploadPdfBtn.onclick = ()=>{ vbOpenPdfPanel().catch(err=>console.error('No se pudo abrir la biblioteca PDF:',err)); };
   if(vbPdfPanelClose) vbPdfPanelClose.onclick = vbClosePdfPanel;
