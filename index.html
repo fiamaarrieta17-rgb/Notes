@@ -1124,6 +1124,16 @@ window.OcrEngine = (function(){
   #pdfDrawToolbar .pdfSelDivider{width:1px;height:20px;background:var(--panel-edge);margin:0 1px;flex-shrink:0;}
   #pdfDrawDots{display:flex;align-items:center;gap:5px;flex-shrink:0;}
   #pdfDrawDots .pdfSelDot{width:16px;height:16px;}
+  /* ---------- Selector de grosor para lápiz/marcador/goma del PDF ---------- */
+  .pdfSizeDot{display:block;width:14px;height:14px;border-radius:50%;background:currentColor;margin:auto;}
+  #pdfSizePanel{
+    display:none;position:fixed;z-index:520;min-width:200px;padding:10px 12px;
+    background:var(--panel);border:1px solid var(--panel-edge);border-radius:10px;
+    box-shadow:0 14px 34px rgba(0,0,0,.55);
+  }
+  #pdfSizePanel.open{display:block;}
+  #pdfSizePanel .pdfSizeRow{display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--cream-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;}
+  #pdfSizeRange{width:100%;}
 
   /* ---------- Barra flotante al seleccionar texto del PDF ---------- */
   #pdfSelToolbar{
@@ -2106,6 +2116,16 @@ window.OcrEngine = (function(){
   #vectorPanelView .vpDivider{width:1px;height:20px;background:var(--vb-line);margin:0 2px;flex-shrink:0;}
   #vectorPanelView #vpDrawDots{display:flex;align-items:center;gap:5px;flex-shrink:0;}
   #vectorPanelView .vpDot{width:16px;height:16px;border-radius:50%;border:1px solid rgba(255,255,255,.35);cursor:pointer;flex-shrink:0;}
+  /* ---------- Selector de grosor para lápiz/marcador/goma del visor de biblioteca ---------- */
+  #vectorPanelView .vpSizeDot{display:block;width:14px;height:14px;border-radius:50%;background:currentColor;margin:auto;}
+  #vectorPanelView #vpSizePanel{
+    display:none;position:fixed;z-index:520;min-width:200px;padding:10px 12px;
+    background:var(--vb-ui-2);border:1px solid var(--vb-line);border-radius:10px;
+    box-shadow:0 14px 34px rgba(0,0,0,.55);
+  }
+  #vectorPanelView #vpSizePanel.open{display:block;}
+  #vectorPanelView #vpSizePanel .vpSizeRow{display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--vb-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;}
+  #vectorPanelView #vpSizeRange{width:100%;accent-color:var(--vb-accent);}
   #vectorPanelView .vpDot.active{outline:2px solid var(--vb-ink);outline-offset:1px;}
 
   #vectorPanelView #vpPageStack{position:relative;display:inline-block;flex:0 0 auto;}
@@ -2577,7 +2597,15 @@ window.OcrEngine = (function(){
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20H9l-6.5-6.5a2 2 0 010-2.83l8-8a2 2 0 012.83 0l6.5 6.5a2 2 0 010 2.83L13 20"/><path d="M6 15l6 6"/></svg>
         </button>
         <div class="pdfSelDivider"></div>
+        <button type="button" class="tool" id="pdfSizeBtn" title="Elegir grosor">
+          <span id="pdfSizeDot" class="pdfSizeDot"></span>
+        </button>
+        <div class="pdfSelDivider"></div>
         <div id="pdfDrawDots"></div>
+      </div>
+      <div id="pdfSizePanel">
+        <div class="pdfSizeRow"><span id="pdfSizeTitle">Grosor</span><span id="pdfSizeValue"></span></div>
+        <input id="pdfSizeRange" type="range" min=".5" max="20" step=".5" value="3">
       </div>
       <div id="pdfCanvasWrap">
         <div id="pdfPageStack">
@@ -2942,7 +2970,15 @@ window.OcrEngine = (function(){
              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13l-6.5 6.5a2 2 0 0 1-2.83 0l-4.17-4.17a2 2 0 0 1 0-2.83L11 6l7 7z"/><path d="M8 21h11"/></svg>
            </button>
            <div class="vpDivider"></div>
+           <button type="button" class="vpTool" id="vpSizeBtn" title="Elegir grosor">
+             <span id="vpSizeDot" class="vpSizeDot"></span>
+           </button>
+           <div class="vpDivider"></div>
            <div id="vpDrawDots"></div>
+         </div>
+         <div id="vpSizePanel">
+           <div class="vpSizeRow"><span id="vpSizeTitle">Grosor</span><span id="vpSizeValue"></span></div>
+           <input id="vpSizeRange" type="range" min=".5" max="20" step=".5" value="3">
          </div>
          <div id="vbPdfViewerCanvasWrap">
            <div id="vpPageStack">
@@ -3773,6 +3809,11 @@ window.OcrEngine = (function(){
   const pdfToolMarkerBtn = document.getElementById('pdfToolMarker');
   const pdfToolEraserBtn = document.getElementById('pdfToolEraser');
   const pdfDrawDotsEl = document.getElementById('pdfDrawDots');
+  const pdfSizeBtn = document.getElementById('pdfSizeBtn');
+  const pdfSizePanel = document.getElementById('pdfSizePanel');
+  const pdfSizeTitleEl = document.getElementById('pdfSizeTitle');
+  const pdfSizeValueEl = document.getElementById('pdfSizeValue');
+  const pdfSizeRangeEl = document.getElementById('pdfSizeRange');
 
   let currentPdfDoc = null, currentPdfMeta = null, currentPdfPageNum = 1, pdfZoom = 1, pdfRenderTask = null;
   let pdfTextLayerTask = null, currentPdfMarks = [], pdfMarkColor = MARK_COLORS[0].hex;
@@ -3783,7 +3824,24 @@ window.OcrEngine = (function(){
   let pdfDrawTool = 'select'; // 'select' | 'pen' | 'marker' | 'eraser'
   let pdfDrawColor = MARK_COLORS[8].hex; // rojo por defecto para el lápiz
   let pdfDrawing = false, pdfCurrentStroke = null, pdfDrawPointerId = null;
-  const PDF_PEN_WIDTH = 3, PDF_MARKER_WIDTH = 16, PDF_ERASER_WIDTH = 18;
+  // ---- Grosor ajustable de lápiz/marcador/goma sobre PDFs ----
+  // Un solo estado compartido (por nombre de herramienta) entre este panel
+  // de PDF junto a la hoja y el visor de biblioteca (vpTool*, otro <script>
+  // más abajo), persistido para recordar la preferencia entre sesiones.
+  const PDF_INK_SIZE_RANGE = { pen:{min:.5,max:20,step:.5,def:3}, marker:{min:4,max:40,step:1,def:16}, eraser:{min:6,max:60,step:1,def:18} };
+  const PDF_INK_SIZE_LABELS = { pen:'Grosor de lápiz', marker:'Grosor de marcador', eraser:'Grosor de goma' };
+  function loadPdfInkSizes(){
+    let saved = {};
+    try{ saved = JSON.parse(localStorage.getItem('pdfInkSizes')||'{}') || {}; }catch(err){}
+    const out = {};
+    for(const k in PDF_INK_SIZE_RANGE) out[k] = (typeof saved[k]==='number' && isFinite(saved[k])) ? saved[k] : PDF_INK_SIZE_RANGE[k].def;
+    return out;
+  }
+  const pdfInkSizes = loadPdfInkSizes();
+  function savePdfInkSize(tool, val){
+    pdfInkSizes[tool] = val;
+    try{ localStorage.setItem('pdfInkSizes', JSON.stringify(pdfInkSizes)); }catch(err){}
+  }
 
   pageEl.style.width = BASE_W + 'px';
   pageEl.style.height = BASE_H + 'px';
@@ -4211,11 +4269,41 @@ window.OcrEngine = (function(){
     // no tapar la selección de texto ni el scroll/pellizco del panel.
     pdfInkCanvasEl.classList.toggle('drawing', tool !== 'select');
     if(tool !== 'select') hidePdfSelToolbar();
+    syncPdfSizeUI();
   }
   pdfToolSelectBtn.addEventListener('click', ()=> setPdfDrawTool('select'));
   pdfToolPenBtn.addEventListener('click', ()=> setPdfDrawTool('pen'));
   pdfToolMarkerBtn.addEventListener('click', ()=> setPdfDrawTool('marker'));
   pdfToolEraserBtn.addEventListener('click', ()=> setPdfDrawTool('eraser'));
+
+  // ---------- Panel de grosor del lápiz/marcador/goma sobre el PDF ----------
+  function pdfSizeToolKey(){ return pdfDrawTool==='marker' ? 'marker' : (pdfDrawTool==='eraser' ? 'eraser' : 'pen'); }
+  function syncPdfSizeUI(){
+    const key = pdfSizeToolKey();
+    const range = PDF_INK_SIZE_RANGE[key];
+    pdfSizeRangeEl.min = range.min; pdfSizeRangeEl.max = range.max; pdfSizeRangeEl.step = range.step;
+    pdfSizeRangeEl.value = pdfInkSizes[key];
+    pdfSizeTitleEl.textContent = PDF_INK_SIZE_LABELS[key];
+    pdfSizeValueEl.textContent = pdfInkSizes[key];
+  }
+  function openPdfSizePanel(){
+    syncPdfSizeUI();
+    const r = pdfSizeBtn.getBoundingClientRect();
+    pdfSizePanel.style.left = Math.max(8, Math.min(r.left, innerWidth-216)) + 'px';
+    pdfSizePanel.style.top = (r.bottom+8) + 'px';
+    pdfSizePanel.classList.toggle('open');
+  }
+  pdfSizeRangeEl.addEventListener('input', ()=>{
+    const key = pdfSizeToolKey();
+    const val = +pdfSizeRangeEl.value;
+    savePdfInkSize(key, val);
+    pdfSizeValueEl.textContent = val;
+  });
+  pdfSizeBtn.addEventListener('click', (e)=>{ e.stopPropagation(); openPdfSizePanel(); });
+  document.addEventListener('pointerdown', (e)=>{
+    if(!e.target.closest('#pdfSizePanel') && !e.target.closest('#pdfSizeBtn')) pdfSizePanel.classList.remove('open');
+  });
+  syncPdfSizeUI();
 
   function renderPdfDrawDots(){
     pdfDrawDotsEl.innerHTML = '';
@@ -4246,7 +4334,7 @@ window.OcrEngine = (function(){
   function pdfEraseAt(pt){
     const w = pdfCanvasEl.clientWidth, h = pdfCanvasEl.clientHeight;
     if(!w || !h) return;
-    const radius = PDF_ERASER_WIDTH/2;
+    const radius = pdfInkSizes.eraser/2;
     const toRemove = [];
     for(const m of currentPdfMarks){
       if(m.page !== currentPdfPageNum || m.type !== 'ink' || !m.points || !m.points.length) continue;
@@ -4276,7 +4364,7 @@ window.OcrEngine = (function(){
     const toolName = pdfDrawTool === 'marker' ? 'highlighter' : 'pen';
     pdfCurrentStroke = {
       tool: toolName, markStyle: toolName === 'highlighter' ? currentMarkStyle : undefined, color: pdfDrawColor,
-      width: toolName === 'pen' ? PDF_PEN_WIDTH : PDF_MARKER_WIDTH,
+      width: toolName === 'pen' ? pdfInkSizes.pen : pdfInkSizes.marker,
       penStyle: toolName === 'pen' ? 'estandar' : undefined,
       points: [pt],
     };
@@ -8210,13 +8298,16 @@ window.OcrEngine = (function(){
   window.drawFreehandTail = drawFreehandTail;
   window.BUFFERED_TOOLS = BUFFERED_TOOLS;
   window.SILHOUETTE_STYLE = SILHOUETTE_STYLE;
-  // Anchos usados por el lápiz/marcador/goma del visor de PDF de la
+  // Grosor de lápiz/marcador/goma usado por el visor de PDF de la
   // biblioteca (ver más abajo, otro <script>): antes esas constantes solo
   // existían acá adentro, así que tocar/dibujar tiraba un ReferenceError
-  // silencioso y el trazo nunca se llegaba a pintar.
-  window.PDF_PEN_WIDTH = PDF_PEN_WIDTH;
-  window.PDF_MARKER_WIDTH = PDF_MARKER_WIDTH;
-  window.PDF_ERASER_WIDTH = PDF_ERASER_WIDTH;
+  // silencioso y el trazo nunca se llegaba a pintar. Ahora se comparte el
+  // mismo objeto mutable para que ajustar el grosor en un visor también
+  // se refleje en el otro.
+  window.pdfInkSizes = pdfInkSizes;
+  window.PDF_INK_SIZE_RANGE = PDF_INK_SIZE_RANGE;
+  window.PDF_INK_SIZE_LABELS = PDF_INK_SIZE_LABELS;
+  window.savePdfInkSize = savePdfInkSize;
   // Getter (no una copia fija) porque currentMarkStyle cambia en caliente
   // cuando el usuario elige otro estilo de marcador en la hoja principal.
   window.getCurrentMarkStyle = function(){ return currentMarkStyle; };
@@ -10034,6 +10125,11 @@ window.OcrEngine = (function(){
   const vpToolPenBtn = document.getElementById('vpToolPen');
   const vpToolMarkerBtn = document.getElementById('vpToolMarker');
   const vpToolEraserBtn = document.getElementById('vpToolEraser');
+  const vpSizeBtn = document.getElementById('vpSizeBtn');
+  const vpSizePanel = document.getElementById('vpSizePanel');
+  const vpSizeTitleEl = document.getElementById('vpSizeTitle');
+  const vpSizeValueEl = document.getElementById('vpSizeValue');
+  const vpSizeRangeEl = document.getElementById('vpSizeRange');
   const vpSelToolbarEl = document.getElementById('vpSelToolbar');
   const vpSelHighlightBtn = document.getElementById('vpSelHighlightBtn');
   const vpSelUnderlineBtn = document.getElementById('vpSelUnderlineBtn');
@@ -10092,11 +10188,40 @@ window.OcrEngine = (function(){
     vpInkCanvasEl.classList.toggle('drawing', tool !== 'select');
     vpTextLayerEl.classList.toggle('vp-selectable', tool === 'select');
     if(tool !== 'select') hideVpSelToolbar();
+    syncVpSizeUI();
   }
   vpToolSelectBtn.addEventListener('click', ()=> setVpTool('select'));
   vpToolPenBtn.addEventListener('click', ()=> setVpTool('pen'));
   vpToolMarkerBtn.addEventListener('click', ()=> setVpTool('marker'));
   vpToolEraserBtn.addEventListener('click', ()=> setVpTool('eraser'));
+
+  // ---------- Panel de grosor del lápiz/marcador/goma del visor de biblioteca ----------
+  function vpSizeToolKey(){ return vpDrawTool==='marker' ? 'marker' : (vpDrawTool==='eraser' ? 'eraser' : 'pen'); }
+  function syncVpSizeUI(){
+    const key = vpSizeToolKey();
+    const range = window.PDF_INK_SIZE_RANGE[key];
+    vpSizeRangeEl.min = range.min; vpSizeRangeEl.max = range.max; vpSizeRangeEl.step = range.step;
+    vpSizeRangeEl.value = window.pdfInkSizes[key];
+    vpSizeTitleEl.textContent = window.PDF_INK_SIZE_LABELS[key];
+    vpSizeValueEl.textContent = window.pdfInkSizes[key];
+  }
+  function openVpSizePanel(){
+    syncVpSizeUI();
+    const r = vpSizeBtn.getBoundingClientRect();
+    vpSizePanel.style.left = Math.max(8, Math.min(r.left, innerWidth-216)) + 'px';
+    vpSizePanel.style.top = (r.bottom+8) + 'px';
+    vpSizePanel.classList.toggle('open');
+  }
+  vpSizeRangeEl.addEventListener('input', ()=>{
+    const key = vpSizeToolKey();
+    const val = +vpSizeRangeEl.value;
+    window.savePdfInkSize(key, val);
+    vpSizeValueEl.textContent = val;
+  });
+  vpSizeBtn.addEventListener('click', (e)=>{ e.stopPropagation(); openVpSizePanel(); });
+  document.addEventListener('pointerdown', (e)=>{
+    if(!e.target.closest('#vpSizePanel') && !e.target.closest('#vpSizeBtn')) vpSizePanel.classList.remove('open');
+  });
   setVpTool('select');
 
   function vpInkStrokeFromMark(mark, w, h){
@@ -10188,7 +10313,7 @@ window.OcrEngine = (function(){
   function vpEraseAt(pt){
     const w = vbPdfViewerCanvas.clientWidth, h = vbPdfViewerCanvas.clientHeight;
     if(!w || !h) return;
-    const radius = window.PDF_ERASER_WIDTH/2;
+    const radius = window.pdfInkSizes.eraser/2;
     const toRemove = [];
     for(const m of currentVpMarks){
       if(m.page !== vbPdfViewerPageNum || m.type !== 'ink' || !m.points || !m.points.length) continue;
@@ -10217,7 +10342,7 @@ window.OcrEngine = (function(){
     const toolName = vpDrawTool === 'marker' ? 'highlighter' : 'pen';
     vpCurrentStroke = {
       tool: toolName, markStyle: toolName === 'highlighter' ? window.getCurrentMarkStyle() : undefined, color: vpDrawColor,
-      width: toolName === 'pen' ? window.PDF_PEN_WIDTH : window.PDF_MARKER_WIDTH,
+      width: toolName === 'pen' ? window.pdfInkSizes.pen : window.pdfInkSizes.marker,
       // Antes quedaba fijo en 'estandar' sin importar el estilo elegido en la
       // barra: por eso todos los lápices se veían iguales al marcar un PDF.
       penStyle: toolName === 'pen' ? vPenStyle : undefined,
