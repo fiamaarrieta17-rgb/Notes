@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=0.5, maximum-scale=3">
+<title>Lic. en Administración de Empresas — Mi avance</title>
+<style>
+  :root{
+    --bg:#0e1116;
+    --panel:#161b22;
+    --ink:#e8ecf1;
+    --muted:#8b96a5;
+    --line:#3a4250;
+    --node-fill:#1c222c;
+    --node-border:#4a5468;
+    --inicial-fill:#1d3a5f;
+    --inicial-border:#3f7ac9;
+    --verde:#3fae4e;
+    --amarillo:#e0c235;
+    --naranja:#e08a2e;
+    --rojo:#d1473f;
+    --accent:#5fa8ff;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  header{
+    padding:14px 16px 10px;
+    background:var(--panel);
+    border-bottom:1px solid var(--line);
+    position:sticky;
+    top:0;
+    z-index:20;
+  }
+  h1{
+    font-size:16px;
+    margin:0 0 2px;
+    letter-spacing:0.2px;
+    font-weight:700;
+  }
+  .subtitle{
+    font-size:12px;
+    color:var(--muted);
+    margin:0 0 10px;
+  }
+  .toolbar{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    align-items:center;
+    justify-content:space-between;
+  }
+  .legend{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px 10px;
+    font-size:11px;
+    color:var(--muted);
+  }
+  .legend span{
+    display:inline-flex;
+    align-items:center;
+    gap:5px;
+  }
+  .dot{
+    width:11px;height:11px;border-radius:50%;
+    display:inline-block;
+    border:1px solid rgba(255,255,255,0.25);
+  }
+  .dot.n{background:var(--node-fill);}
+  .dot.v{background:var(--verde);}
+  .dot.i{background:var(--inicial-fill);border-color:var(--inicial-border);}
+  .dot.b{background:var(--node-fill);opacity:0.4;}
+  .grad-bar{
+    width:64px;height:11px;border-radius:6px;
+    background:linear-gradient(90deg, var(--amarillo), var(--naranja), var(--rojo));
+    display:inline-block;
+    border:1px solid rgba(255,255,255,0.25);
+  }
+  .actions{
+    display:flex;
+    gap:8px;
+    align-items:center;
+  }
+  #progress{
+    font-size:12px;
+    color:var(--accent);
+    font-weight:600;
+    white-space:nowrap;
+  }
+  button#reset, button#exportpdf{
+    background:transparent;
+    border:1px solid var(--line);
+    color:var(--muted);
+    font-size:11px;
+    padding:6px 10px;
+    border-radius:7px;
+  }
+  button#reset:active, button#exportpdf:active{background:var(--panel);}
+  button#exportpdf{
+    border-color:var(--accent);
+    color:var(--accent);
+  }
+  .scrollwrap{
+    overflow:auto;
+    -webkit-overflow-scrolling:touch;
+    width:100%;
+  }
+  .canvas{
+    position:relative;
+    width:1650px;
+    height:1380px;
+    margin:20px auto 60px;
+  }
+  svg.lines{
+    position:absolute;
+    top:0;left:0;
+    width:100%;
+    height:100%;
+    pointer-events:none;
+  }
+  .node{
+    position:absolute;
+    border-radius:50%;
+    background:var(--node-fill);
+    border:2px solid var(--node-border);
+    color:var(--ink);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    font-size:11px;
+    line-height:1.25;
+    font-weight:600;
+    padding:8px;
+    cursor:pointer;
+    user-select:none;
+    -webkit-tap-highlight-color:transparent;
+    transition:background-color .15s ease, border-color .15s ease, transform .1s ease;
+  }
+  .node:active{transform:scale(0.96);}
+  .node.inicial{
+    background:var(--inicial-fill);
+    border-color:var(--inicial-border);
+  }
+  .node .sub{
+    display:block;
+    font-weight:400;
+    font-size:9.5px;
+    color:var(--muted);
+    margin-top:2px;
+  }
+  .node.st-verde{background:var(--verde);border-color:var(--verde);color:#0e1116;}
+  .node.st-verde .sub{color:#1f3a22;}
+  .node .sub{opacity:0.85;}
+
+  .node.locked{
+    opacity:0.38;
+    filter:grayscale(0.6);
+    cursor:not-allowed;
+  }
+  .node.locked:active{transform:none;}
+
+  .hint{
+    text-align:center;
+    font-size:11px;
+    color:var(--muted);
+    padding:8px 16px 0;
+  }
+  footer{
+    text-align:center;
+    font-size:10.5px;
+    color:var(--muted);
+    padding:6px 16px 24px;
+  }
+
+  .modal-overlay{
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,0.55);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    z-index:100;
+    padding:20px;
+  }
+  .modal-overlay.hidden{ display:none; }
+  .modal{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:18px;
+    width:100%;
+    max-width:320px;
+  }
+  .modal h3{
+    margin:0 0 14px;
+    font-size:15px;
+    line-height:1.3;
+  }
+  .modal-row{
+    display:flex;
+    gap:8px;
+    margin-bottom:14px;
+  }
+  .modal-btn{
+    flex:1;
+    padding:10px 8px;
+    border-radius:9px;
+    border:1px solid var(--line);
+    background:var(--bg);
+    color:var(--ink);
+    font-size:12.5px;
+    font-weight:600;
+  }
+  .modal-btn.verde{ background:var(--verde); border-color:var(--verde); color:#0e1116; }
+  .modal-btn.vacio{ color:var(--muted); }
+  .modal-cursando{
+    border-top:1px solid var(--line);
+    padding-top:14px;
+    margin-bottom:10px;
+  }
+  .modal-cursando p{
+    margin:0 0 8px;
+    font-size:11.5px;
+    color:var(--muted);
+  }
+  .stepper{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    margin-bottom:10px;
+  }
+  .stepper button{
+    width:38px;height:38px;
+    border-radius:9px;
+    border:1px solid var(--line);
+    background:var(--bg);
+    color:var(--ink);
+    font-size:18px;
+    font-weight:700;
+  }
+  #vezLabel{
+    font-size:13px;
+    font-weight:600;
+    flex:1;
+    text-align:center;
+  }
+  .swatch-preview{
+    height:34px;
+    border-radius:9px;
+    margin-bottom:10px;
+    border:1px solid rgba(255,255,255,0.15);
+  }
+  .modal-btn.aplicar{
+    width:100%;
+    background:var(--accent);
+    border-color:var(--accent);
+    color:#0e1116;
+  }
+  .modal-close{
+    width:100%;
+    padding:10px;
+    background:transparent;
+    border:none;
+    color:var(--muted);
+    font-size:12.5px;
+  }
+
+  #compatBanner{
+    background:#7a1f1f;
+    color:#fff;
+    padding:14px 16px;
+    font-size:13px;
+    line-height:1.5;
+    text-align:center;
+  }
+  #compatBanner b{ display:block; font-size:14px; margin-bottom:4px; }
+
+  @media print{
+    @page{ margin:10mm; }
+    *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
+    html, body{ height:100%; background:#fff; color:#0e1116; }
+    header, .toolbar, .hint, .subtitle, footer{ display:none !important; }
+    .scrollwrap{ overflow:visible; height:100%; }
+    .print-scale{
+      width:100%;
+      height:100%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      page-break-inside:avoid;
+      break-inside:avoid;
+    }
+    .canvas{
+      width:1650px;height:1380px;
+      zoom:0.5;
+      transform:rotate(90deg);
+      transform-origin:center center;
+      margin:0;
+      page-break-inside:avoid;
+      break-inside:avoid;
+    }
+    .node{ border-width:2px; box-shadow:none; }
+  }
+</style>
+</head>
+<body>
+<div id="compatBanner">
+  <b>⚠️ Este archivo no se ve interactivo</b>
+  Mantené el dedo sobre el archivo → "Compartir" → elegí <b style="display:inline;font-size:13px;">Safari</b> (o "Abrir en Safari"). No lo abras desde la vista previa de Mail, WhatsApp o Archivos.
+</div>
+
+<header>
+  <h1>Lic. en Administración de Empresas — Instituto de Industria</h1>
+  <p class="subtitle">Tocá cada materia para ir cambiando su estado</p>
+  <div class="toolbar">
+    <div class="legend">
+      <span><i class="dot n"></i>Sin cursar</span>
+      <span><i class="dot v"></i>Aprobada</span>
+      <span><i class="grad-bar"></i>Cursando (más veces → más rojo)</span>
+      <span><i class="dot i"></i>Taller inicial</span>
+      <span><i class="dot b"></i>Bloqueada (correlativas)</span>
+    </div>
+    <div class="actions">
+      <span id="progress">0 / 0 aprobadas</span>
+      <button id="exportpdf">Guardar como PDF</button>
+      <button id="reset">Reiniciar todo</button>
+    </div>
+  </div>
+</header>
+
+<p class="hint">Deslizá y hacé zoom (pellizcar) para ver el mapa completo. Los datos se guardan solos.</p>
+
+<div class="scrollwrap">
+  <div class="print-scale" id="printScale">
+    <div class="canvas" id="canvas">
+      <svg class="lines" id="lines"></svg>
+    </div>
+  </div>
+</div>
+
+<footer>Mapa de correlatividades no oficial, hecho para seguimiento personal de avance.</footer>
+
+<div class="modal-overlay hidden" id="modalOverlay">
+  <div class="modal">
+    <h3 id="modalTitle">Materia</h3>
+    <div class="modal-row">
+      <button class="modal-btn verde" id="btnAprobada">✓ Aprobada</button>
+      <button class="modal-btn vacio" id="btnVacio">Sin cursar</button>
+    </div>
+    <div class="modal-cursando">
+      <p>O marcá que la estás cursando (o recursando):</p>
+      <div class="stepper">
+        <button id="vezMenos">−</button>
+        <span id="vezLabel">Cursando — vez 1</span>
+        <button id="vezMas">+</button>
+      </div>
+      <div class="swatch-preview" id="vezSwatch"></div>
+      <button class="modal-btn aplicar" id="btnAplicarVez">Aplicar</button>
+    </div>
+    <button class="modal-close" id="btnCerrar">Cancelar</button>
+  </div>
+</div>
+
+<script>
+// ---------- Datos de materias ----------
+const NODES = [
+  {id:"ingles1", label:"Inglés con Propósito Específicos I", x:200, y:150, size:115},
+  {id:"ingles2", label:"Inglés con Propósito Específicos II", x:430, y:120, size:115},
+  {id:"ingles3", label:"Inglés con Propósito Específicos III", x:660, y:100, size:115},
+
+  {id:"sociologia_industrial", label:"Sociología Industrial", x:640, y:300, size:120},
+  {id:"direccion_estrategica", label:"Dirección Estratégica", x:870, y:280, size:120},
+  {id:"gestion_rrhh", label:"Gestión de Recursos Humanos", x:1090, y:270, size:120},
+  {id:"regimen_tributario", label:"Régimen Tributario", x:1320, y:230, size:110},
+  {id:"laboratorio", label:"Laboratorio Interdisciplinario", sub:"(13 materias aprobadas)", x:1560, y:270, size:150},
+
+  {id:"taller_lectura_disciplina", label:"Taller de Lectura y Escritura de la Disciplina", x:410, y:390, size:135},
+  {id:"planeamiento_control", label:"Planeamiento y Control Organizacional", x:710, y:430, size:140},
+  {id:"topicos_comercializacion", label:"Tópicos de Comercialización", x:940, y:400, size:120},
+  {id:"desarrollo_emprendedores", label:"Desarrollo y Gestión de Proyectos Emprendedores", x:1160, y:380, size:150},
+  {id:"ingenieria_financiera", label:"Ingeniería Financiera", x:1400, y:410, size:115},
+
+  {id:"taller_inicial_comun", label:"Taller Inicial Común: Taller de Lectura y Escritura", x:150, y:430, size:135, inicial:true},
+
+  {id:"problemas_socioeconomicos", label:"Problemas Socioeconómicos Contemporáneos", x:410, y:550, size:135},
+  {id:"organizacion_industrial", label:"Organización Industrial", x:710, y:580, size:115},
+  {id:"planificacion_decisorio", label:"Planificación y Proceso Decisorio en las Organizaciones", x:940, y:550, size:150},
+  {id:"costos_industriales", label:"Costos Industriales", x:1170, y:540, size:115},
+  {id:"empresas_publicas", label:"Empresas Públicas", x:1400, y:550, size:115},
+  {id:"taller_utilitarios", label:"Taller de Utilitarios", x:1560, y:440, size:120},
+
+  {id:"taller_inicial_orientado", label:"Taller Inicial Orientado: Cs. Exactas", x:150, y:700, size:135, inicial:true},
+
+  {id:"matematica_economistas1", label:"Matemática para Economistas I", x:410, y:700, size:135},
+  {id:"estadisticas_economistas", label:"Estadísticas para Economistas", x:710, y:720, size:125},
+  {id:"matematica_economistas2", label:"Matemática para Economistas II", x:970, y:700, size:135},
+  {id:"gestion_economia_mixta", label:"Gestión de Economía Mixta", x:1200, y:700, size:120},
+
+  {id:"teoria_organizacion", label:"Teoría de la Organización", x:150, y:870, size:115},
+  {id:"diseno_estructural", label:"Diseño Estructural y Procesos", x:410, y:850, size:130},
+  {id:"sistema_info_contable2", label:"Sistema de Información Contable II", x:1200, y:850, size:130},
+
+  {id:"derecho_administrativo", label:"Derecho Administrativo", x:640, y:940, size:115},
+  {id:"sistema_info_contable1", label:"Sistema de Información Contable I", x:980, y:920, size:130},
+  {id:"sistema_informacion", label:"Sistema de Información", x:1200, y:980, size:115},
+
+  {id:"introduccion_economia", label:"Introducción a la Economía", x:150, y:1120, size:120},
+  {id:"economia_clasica", label:"Economía Clásica", x:390, y:1110, size:110},
+  {id:"economia_neoclasica", label:"Economía Neoclásica", x:620, y:1110, size:115},
+  {id:"economia_keynesiana", label:"Economía Keynesiana", x:850, y:1110, size:115},
+  {id:"matematica_economistas3", label:"Matemática para Economistas III", x:1080, y:1130, size:130},
+
+  {id:"historia_economica", label:"Historia Económica y Social Mundial y Latinoamericana", x:390, y:1270, size:140},
+  {id:"teoria_innovacion", label:"Teoría de la Innovación y del Cambio Tecnológico", x:630, y:1270, size:140},
+];
+
+const EDGES = [
+  ["taller_inicial_comun","ingles1"],["ingles1","ingles2"],["ingles2","ingles3"],
+  ["taller_inicial_comun","taller_lectura_disciplina"],["taller_inicial_comun","problemas_socioeconomicos"],["taller_inicial_comun","introduccion_economia"],
+  ["taller_lectura_disciplina","ingles2"],["taller_lectura_disciplina","sociologia_industrial"],
+  ["problemas_socioeconomicos","sociologia_industrial"],["problemas_socioeconomicos","planeamiento_control"],["problemas_socioeconomicos","matematica_economistas1"],
+  ["planeamiento_control","direccion_estrategica"],["planeamiento_control","topicos_comercializacion"],["planeamiento_control","planificacion_decisorio"],["planeamiento_control","organizacion_industrial"],
+  ["direccion_estrategica","gestion_rrhh"],["direccion_estrategica","regimen_tributario"],["gestion_rrhh","regimen_tributario"],
+  ["topicos_comercializacion","desarrollo_emprendedores"],["desarrollo_emprendedores","costos_industriales"],
+  ["planificacion_decisorio","costos_industriales"],
+  ["costos_industriales","ingenieria_financiera"],["costos_industriales","empresas_publicas"],["costos_industriales","gestion_economia_mixta"],
+  ["taller_inicial_orientado","matematica_economistas1"],["taller_inicial_orientado","diseno_estructural"],
+  ["teoria_organizacion","diseno_estructural"],
+  ["diseno_estructural","derecho_administrativo"],["diseno_estructural","sistema_info_contable1"],
+  ["matematica_economistas1","estadisticas_economistas"],["matematica_economistas1","sociologia_industrial"],["matematica_economistas1","planeamiento_control"],
+  ["matematica_economistas1","economia_neoclasica"],["matematica_economistas1","teoria_innovacion"],
+  ["estadisticas_economistas","organizacion_industrial"],["estadisticas_economistas","planificacion_decisorio"],["estadisticas_economistas","matematica_economistas2"],
+  ["matematica_economistas2","sistema_info_contable1"],["matematica_economistas2","gestion_economia_mixta"],["matematica_economistas2","derecho_administrativo"],["matematica_economistas2","matematica_economistas3"],
+  ["sistema_info_contable1","sistema_info_contable2"],["sistema_info_contable1","sistema_informacion"],
+  ["derecho_administrativo","sistema_info_contable1"],
+  ["introduccion_economia","economia_clasica"],["introduccion_economia","historia_economica"],
+  ["economia_clasica","economia_neoclasica"],["economia_neoclasica","economia_keynesiana"],
+  ["economia_keynesiana","matematica_economistas3"],
+  ["historia_economica","teoria_innovacion"],
+  ["matematica_economistas3","sistema_info_contable1"],["matematica_economistas3","costos_industriales"],["matematica_economistas3","ingenieria_financiera"],
+];
+
+const STORAGE_KEY = "materias-estado-administracion";
+let estado = {}; // valor por materia: "verde" | número (vez cursando) | ausente
+let currentNodeId = null;
+let currentVez = 1;
+
+// Escala continua amarillo -> naranja -> rojo según la "vez" que se cursa.
+// A partir de VEZ_TOPE ya queda en rojo pleno (no hay límite de veces para marcar).
+const VEZ_TOPE = 5;
+function colorForVez(n){
+  const stops = [[224,194,53],[224,138,46],[209,71,63]]; // amarillo, naranja, rojo
+  let t = (n-1)/(VEZ_TOPE-1);
+  t = Math.max(0, Math.min(1,t));
+  const seg = t*2;
+  const i = Math.min(1, Math.floor(seg));
+  const localT = seg - i;
+  const c0 = stops[i], c1 = stops[i+1];
+  const r = Math.round(c0[0]+(c1[0]-c0[0])*localT);
+  const g = Math.round(c0[1]+(c1[1]-c0[1])*localT);
+  const b = Math.round(c0[2]+(c1[2]-c0[2])*localT);
+  return `rgb(${r},${g},${b})`;
+}
+function textColorFor(rgbStr){
+  const [r,g,b] = rgbStr.match(/\d+/g).map(Number);
+  const lum = 0.299*r+0.587*g+0.114*b;
+  return lum > 150 ? "#0e1116" : "#ffffff";
+}
+
+const canvas = document.getElementById("canvas");
+const svg = document.getElementById("lines");
+const byId = {};
+NODES.forEach(function(n){ byId[n.id] = n; });
+
+// ---------- Correlativas ----------
+const requiereAll = {};
+NODES.forEach(n=> requiereAll[n.id] = []);
+EDGES.forEach(([a,b])=>{ requiereAll[b].push(a); });
+const requiereAlMenos = {}; // este plan no tiene grupos "N de M"
+
+// Laboratorio Interdisciplinario: se desbloquea con 13 materias aprobadas (cualquiera)
+const requiereConteo = { laboratorio: 13 };
+
+function totalAprobadas(){
+  return NODES.filter(n=>!n.inicial && estado[n.id]==="verde").length;
+}
+
+function estaDesbloqueada(id){
+  const todas = requiereAll[id] || [];
+  const okTodas = todas.every(p => estado[p] === "verde");
+  const grupo = requiereAlMenos[id];
+  const okGrupo = !grupo || grupo.opciones.filter(p => estado[p]==="verde").length >= grupo.n;
+  const conteo = requiereConteo[id];
+  const okConteo = !conteo || totalAprobadas() >= conteo;
+  return okTodas && okGrupo && okConteo;
+}
+
+function faltantes(id){
+  const todas = requiereAll[id] || [];
+  const faltanTodas = todas.filter(p => estado[p] !== "verde").map(p => byId[p].label);
+  const grupo = requiereAlMenos[id];
+  let faltaGrupo = [];
+  if(grupo){
+    const aprobadas = grupo.opciones.filter(p => estado[p]==="verde").length;
+    if(aprobadas < grupo.n){
+      faltaGrupo = [`${grupo.n - aprobadas} de: ${grupo.opciones.map(p=>byId[p].label).join(", ")}`];
+    }
+  }
+  const conteo = requiereConteo[id];
+  let faltaConteo = [];
+  if(conteo){
+    const actual = totalAprobadas();
+    if(actual < conteo){
+      faltaConteo = [`${conteo - actual} materias aprobadas más (cualquiera, llevás ${actual}/${conteo})`];
+    }
+  }
+  return [...faltanTodas, ...faltaGrupo, ...faltaConteo];
+}
+
+function refreshLocks(){
+  NODES.forEach(n=>{
+    const el = document.getElementById("node-"+n.id);
+    const bloqueada = !estaDesbloqueada(n.id) && !estado[n.id];
+    el.classList.toggle("locked", bloqueada);
+  });
+}
+
+function drawLines(){
+  svg.innerHTML = EDGES.map(([a,b])=>{
+    const A = byId[a], B = byId[b];
+    if(!A||!B) return "";
+    return `<line x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}" stroke="#3a4250" stroke-width="2"/>`;
+  }).join("");
+}
+
+function renderNodes(){
+  NODES.forEach(n=>{
+    const el = document.createElement("div");
+    el.className = "node" + (n.inicial ? " inicial" : "");
+    el.id = "node-"+n.id;
+    el.style.width = n.size+"px";
+    el.style.height = n.size+"px";
+    el.style.left = (n.x - n.size/2)+"px";
+    el.style.top = (n.y - n.size/2)+"px";
+    el.innerHTML = n.label + (n.sub ? `<span class="sub">${n.sub}</span>` : "");
+    el.addEventListener("click", ()=> handleNodeClick(n.id));
+    canvas.appendChild(el);
+  });
+}
+
+function applyState(id){
+  const el = document.getElementById("node-"+id);
+  el.classList.remove("st-verde");
+  el.style.background = "";
+  el.style.borderColor = "";
+  el.style.color = "";
+  const s = estado[id];
+  if(s === "verde"){
+    el.classList.add("st-verde");
+  } else if(typeof s === "number"){
+    const col = colorForVez(s);
+    el.style.background = col;
+    el.style.borderColor = col;
+    el.style.color = textColorFor(col);
+  }
+}
+
+function handleNodeClick(id){
+  if(!estaDesbloqueada(id) && !estado[id]){
+    const falt = faltantes(id);
+    alert("Todavía no podés cursar «"+byId[id].label+"».\n\nTe falta aprobar:\n- "+falt.join("\n- "));
+    return;
+  }
+  openModal(id);
+}
+
+function setState(id, value){
+  if(value===null){ delete estado[id]; } else { estado[id] = value; }
+  applyState(id);
+  refreshLocks();
+  updateProgress();
+  save();
+}
+
+function updateVezUI(){
+  document.getElementById('vezLabel').textContent = `Cursando — vez ${currentVez}`;
+  document.getElementById('vezSwatch').style.background = colorForVez(currentVez);
+}
+
+function openModal(id){
+  currentNodeId = id;
+  document.getElementById('modalTitle').textContent = byId[id].label;
+  const cur = estado[id];
+  currentVez = (typeof cur === 'number') ? cur : 1;
+  updateVezUI();
+  document.getElementById('modalOverlay').classList.remove('hidden');
+}
+function closeModal(){
+  document.getElementById('modalOverlay').classList.add('hidden');
+  currentNodeId = null;
+}
+
+document.getElementById('vezMenos').addEventListener('click', ()=>{ currentVez = Math.max(1,currentVez-1); updateVezUI(); });
+document.getElementById('vezMas').addEventListener('click', ()=>{ currentVez = currentVez+1; updateVezUI(); });
+document.getElementById('btnAprobada').addEventListener('click', ()=>{ setState(currentNodeId,'verde'); closeModal(); });
+document.getElementById('btnVacio').addEventListener('click', ()=>{ setState(currentNodeId, null); closeModal(); });
+document.getElementById('btnAplicarVez').addEventListener('click', ()=>{ setState(currentNodeId, currentVez); closeModal(); });
+document.getElementById('btnCerrar').addEventListener('click', closeModal);
+document.getElementById('modalOverlay').addEventListener('click', (e)=>{ if(e.target.id==='modalOverlay') closeModal(); });
+
+function updateProgress(){
+  const total = NODES.filter(n=>!n.inicial).length;
+  const aprobadas = NODES.filter(n=>!n.inicial && estado[n.id]==="verde").length;
+  const pct = total ? Math.round((aprobadas/total)*100) : 0;
+  document.getElementById("progress").textContent = `${aprobadas} / ${total} aprobadas (${pct}%)`;
+}
+
+async function save(){
+  try{
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(estado));
+  }catch(e){ console.error("No se pudo guardar", e); }
+}
+
+async function load(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if(raw){ estado = JSON.parse(raw); }
+  }catch(e){ /* sin datos guardados todavía */ }
+  NODES.forEach(n=>applyState(n.id));
+  refreshLocks();
+  updateProgress();
+}
+
+document.getElementById("exportpdf").addEventListener("click", ()=>{
+  window.print();
+});
+
+document.getElementById("reset").addEventListener("click", async ()=>{
+  if(!confirm("¿Reiniciar el estado de todas las materias?")) return;
+  estado = {};
+  NODES.forEach(n=>applyState(n.id));
+  refreshLocks();
+  updateProgress();
+  await save();
+});
+
+window.addEventListener('error', function(e){
+  var hint = document.querySelector('.hint');
+  if(hint){ hint.textContent = 'Error: ' + e.message + ' (línea ' + e.lineno + ')'; hint.style.color = '#d1473f'; }
+});
+
+try{
+  drawLines();
+  renderNodes();
+  load();
+  var banner = document.getElementById('compatBanner');
+  if(banner) banner.remove();
+}catch(err){
+  var hint = document.querySelector('.hint');
+  if(hint){ hint.textContent = 'Error al iniciar: ' + err.message; hint.style.color = '#d1473f'; }
+}
+</script>
+</body>
+</html>
