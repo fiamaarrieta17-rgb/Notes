@@ -15,6 +15,8 @@
     --node-border:#4a5468;
     --inicial-fill:#1d3a5f;
     --inicial-border:#3f7ac9;
+    --requisito-fill:#4a3f63;
+    --requisito-border:#8a6fd1;
     --verde:#3fae4e;
     --amarillo:#e0c235;
     --naranja:#e08a2e;
@@ -75,6 +77,7 @@
   .dot.n{background:var(--node-fill);}
   .dot.v{background:var(--verde);}
   .dot.i{background:var(--inicial-fill);border-color:var(--inicial-border);}
+  .dot.r{background:var(--requisito-fill);border-color:var(--requisito-border);}
   .dot.b{background:var(--node-fill);opacity:0.4;}
   .dot.az{background:var(--azul);}
   .grad-bar{
@@ -148,6 +151,10 @@
   .node.inicial{
     background:var(--inicial-fill);
     border-color:var(--inicial-border);
+  }
+  .node.requisito{
+    background:var(--requisito-fill);
+    border-color:var(--requisito-border);
   }
   .node .sub{
     display:block;
@@ -330,7 +337,8 @@
       <span><i class="dot v"></i>Aprobada</span>
       <span><i class="dot az"></i>Debo final</span>
       <span><i class="grad-bar"></i>Cursando (más veces → más rojo)</span>
-      <span><i class="dot i"></i>Taller inicial</span>
+      <span><i class="dot i"></i>Taller inicial (parte de la carrera)</span>
+      <span><i class="dot r"></i>Otro requisito académico (no forma parte de la carrera)</span>
       <span><i class="dot b"></i>Bloqueada (correlativas)</span>
     </div>
     <div class="actions">
@@ -378,9 +386,9 @@
 <script>
 // ---------- Datos de materias ----------
 const NODES = [
-  {id:"ingles1", label:"Inglés con Propósito Específicos I", x:200, y:150, size:115},
-  {id:"ingles2", label:"Inglés con Propósito Específicos II", x:430, y:120, size:115},
-  {id:"ingles3", label:"Inglés con Propósito Específicos III", x:660, y:100, size:115},
+  {id:"ingles1", label:"Inglés con Propósito Específicos I", x:200, y:150, size:115, requisito:true},
+  {id:"ingles2", label:"Inglés con Propósito Específicos II", x:430, y:120, size:115, requisito:true},
+  {id:"ingles3", label:"Inglés con Propósito Específicos III", x:660, y:100, size:115, requisito:true},
 
   {id:"sociologia_industrial", label:"Sociología Industrial", x:640, y:300, size:120},
   {id:"direccion_estrategica", label:"Dirección Estratégica", x:870, y:280, size:120},
@@ -401,7 +409,7 @@ const NODES = [
   {id:"planificacion_decisorio", label:"Planificación y Proceso Decisorio en las Organizaciones", x:940, y:550, size:150},
   {id:"costos_industriales", label:"Costos Industriales", x:1170, y:540, size:115},
   {id:"empresas_publicas", label:"Empresas Públicas", x:1400, y:550, size:115},
-  {id:"taller_utilitarios", label:"Taller de Utilitarios", x:1560, y:440, size:120},
+  {id:"taller_utilitarios", label:"Taller de Utilitarios", x:1560, y:440, size:120, requisito:true},
 
   {id:"taller_inicial_orientado", label:"Taller Inicial Orientado: Cs. Exactas", x:150, y:700, size:135, inicial:true},
 
@@ -518,7 +526,13 @@ const requiereAlMenos = {}; // este plan no tiene grupos "N de M"
 const requiereConteo = { laboratorio: 13 };
 
 function totalAprobadas(){
-  return NODES.filter(n=>!n.inicial && (estado[n.id]==="verde" || estado[n.id]==="azul")).length;
+  return NODES.filter(n=>!n.requisito && (estado[n.id]==="verde" || estado[n.id]==="azul")).length;
+}
+
+// Para el Laboratorio Interdisciplinario cuentan TODAS las unidades aprobadas o
+// regularizadas, incluyendo Inglés y Taller de Utilitarios (no solo las de la carrera).
+function totalAprobadasParaLaboratorio(){
+  return NODES.filter(n=>(estado[n.id]==="verde" || estado[n.id]==="azul")).length;
 }
 
 // Para desbloquear la siguiente materia alcanza con tener la anterior
@@ -533,7 +547,7 @@ function estaDesbloqueada(id){
   const grupo = requiereAlMenos[id];
   const okGrupo = !grupo || grupo.opciones.filter(cuentaParaCorrelativa).length >= grupo.n;
   const conteo = requiereConteo[id];
-  const okConteo = !conteo || totalAprobadas() >= conteo;
+  const okConteo = !conteo || totalAprobadasParaLaboratorio() >= conteo;
   return okTodas && okGrupo && okConteo;
 }
 
@@ -551,7 +565,7 @@ function faltantes(id){
   const conteo = requiereConteo[id];
   let faltaConteo = [];
   if(conteo){
-    const actual = totalAprobadas();
+    const actual = totalAprobadasParaLaboratorio();
     if(actual < conteo){
       faltaConteo = [`${conteo - actual} materias aprobadas o regularizadas más (cualquiera, llevás ${actual}/${conteo})`];
     }
@@ -578,7 +592,7 @@ function drawLines(){
 function renderNodes(){
   NODES.forEach(n=>{
     const el = document.createElement("div");
-    el.className = "node" + (n.inicial ? " inicial" : "");
+    el.className = "node" + (n.inicial ? " inicial" : "") + (n.requisito ? " requisito" : "");
     el.id = "node-"+n.id;
     el.style.width = n.size+"px";
     el.style.height = n.size+"px";
@@ -654,8 +668,8 @@ document.getElementById('btnCerrar').addEventListener('click', closeModal);
 document.getElementById('modalOverlay').addEventListener('click', (e)=>{ if(e.target.id==='modalOverlay') closeModal(); });
 
 function updateProgress(){
-  const total = NODES.filter(n=>!n.inicial).length;
-  const aprobadas = NODES.filter(n=>!n.inicial && estado[n.id]==="verde").length;
+  const total = NODES.filter(n=>!n.requisito).length;
+  const aprobadas = NODES.filter(n=>!n.requisito && estado[n.id]==="verde").length;
   const pct = total ? Math.round((aprobadas/total)*100) : 0;
   document.getElementById("progress").textContent = `${aprobadas} / ${total} aprobadas (${pct}%)`;
 }
