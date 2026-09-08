@@ -19,6 +19,7 @@
     --amarillo:#e0c235;
     --naranja:#e08a2e;
     --rojo:#d1473f;
+    --azul:#2f6fd1;
     --accent:#5fa8ff;
   }
   *{box-sizing:border-box;}
@@ -75,6 +76,7 @@
   .dot.v{background:var(--verde);}
   .dot.i{background:var(--inicial-fill);border-color:var(--inicial-border);}
   .dot.b{background:var(--node-fill);opacity:0.4;}
+  .dot.az{background:var(--azul);}
   .grad-bar{
     width:64px;height:11px;border-radius:6px;
     background:linear-gradient(90deg, var(--amarillo), var(--naranja), var(--rojo));
@@ -156,6 +158,8 @@
   }
   .node.st-verde{background:var(--verde);border-color:var(--verde);color:#0e1116;}
   .node.st-verde .sub{color:#1f3a22;}
+  .node.st-azul{background:var(--azul);border-color:var(--azul);color:#ffffff;}
+  .node.st-azul .sub{color:#d8e6ff;}
   .node .sub{opacity:0.85;}
 
   .node.locked{
@@ -218,6 +222,7 @@
     font-weight:600;
   }
   .modal-btn.verde{ background:var(--verde); border-color:var(--verde); color:#0e1116; }
+  .modal-btn.azul{ background:var(--azul); border-color:var(--azul); color:#ffffff; }
   .modal-btn.vacio{ color:var(--muted); }
   .modal-cursando{
     border-top:1px solid var(--line);
@@ -323,6 +328,7 @@
     <div class="legend">
       <span><i class="dot n"></i>Sin cursar</span>
       <span><i class="dot v"></i>Aprobada</span>
+      <span><i class="dot az"></i>Debo final</span>
       <span><i class="grad-bar"></i>Cursando (más veces → más rojo)</span>
       <span><i class="dot i"></i>Taller inicial</span>
       <span><i class="dot b"></i>Bloqueada (correlativas)</span>
@@ -352,6 +358,7 @@
     <h3 id="modalTitle">Materia</h3>
     <div class="modal-row">
       <button class="modal-btn verde" id="btnAprobada">✓ Aprobada</button>
+      <button class="modal-btn azul" id="btnDeboFinal">Debo final</button>
       <button class="modal-btn vacio" id="btnVacio">Sin cursar</button>
     </div>
     <div class="modal-cursando">
@@ -399,7 +406,7 @@ const NODES = [
   {id:"taller_inicial_orientado", label:"Taller Inicial Orientado: Cs. Exactas", x:150, y:700, size:135, inicial:true},
 
   {id:"matematica_economistas1", label:"Matemática para Economistas I", x:410, y:700, size:135},
-  {id:"estadisticas_economistas", label:"Estadísticas para Economistas", x:710, y:720, size:125},
+  {id:"estadisticas_economistas", label:"Estadística para Economistas", x:710, y:720, size:125},
   {id:"matematica_economistas2", label:"Matemática para Economistas II", x:970, y:700, size:135},
   {id:"gestion_economia_mixta", label:"Gestión de Economía Mixta", x:1200, y:700, size:120},
 
@@ -422,29 +429,51 @@ const NODES = [
 ];
 
 const EDGES = [
-  ["taller_inicial_comun","ingles1"],["ingles1","ingles2"],["ingles2","ingles3"],
-  ["taller_inicial_comun","taller_lectura_disciplina"],["taller_inicial_comun","problemas_socioeconomicos"],["taller_inicial_comun","introduccion_economia"],
-  ["taller_lectura_disciplina","ingles2"],["taller_lectura_disciplina","sociologia_industrial"],
-  ["problemas_socioeconomicos","sociologia_industrial"],["problemas_socioeconomicos","planeamiento_control"],["problemas_socioeconomicos","matematica_economistas1"],
-  ["planeamiento_control","direccion_estrategica"],["planeamiento_control","topicos_comercializacion"],["planeamiento_control","planificacion_decisorio"],["planeamiento_control","organizacion_industrial"],
-  ["direccion_estrategica","gestion_rrhh"],["direccion_estrategica","regimen_tributario"],["gestion_rrhh","regimen_tributario"],
-  ["topicos_comercializacion","desarrollo_emprendedores"],["desarrollo_emprendedores","costos_industriales"],
-  ["planificacion_decisorio","costos_industriales"],
-  ["costos_industriales","ingenieria_financiera"],["costos_industriales","empresas_publicas"],["costos_industriales","gestion_economia_mixta"],
-  ["taller_inicial_orientado","matematica_economistas1"],["taller_inicial_orientado","diseno_estructural"],
-  ["teoria_organizacion","diseno_estructural"],
-  ["diseno_estructural","derecho_administrativo"],["diseno_estructural","sistema_info_contable1"],
-  ["matematica_economistas1","estadisticas_economistas"],["matematica_economistas1","sociologia_industrial"],["matematica_economistas1","planeamiento_control"],
-  ["matematica_economistas1","economia_neoclasica"],["matematica_economistas1","teoria_innovacion"],
-  ["estadisticas_economistas","organizacion_industrial"],["estadisticas_economistas","planificacion_decisorio"],["estadisticas_economistas","matematica_economistas2"],
-  ["matematica_economistas2","sistema_info_contable1"],["matematica_economistas2","gestion_economia_mixta"],["matematica_economistas2","derecho_administrativo"],["matematica_economistas2","matematica_economistas3"],
-  ["sistema_info_contable1","sistema_info_contable2"],["sistema_info_contable1","sistema_informacion"],
-  ["derecho_administrativo","sistema_info_contable1"],
-  ["introduccion_economia","economia_clasica"],["introduccion_economia","historia_economica"],
-  ["economia_clasica","economia_neoclasica"],["economia_neoclasica","economia_keynesiana"],
-  ["economia_keynesiana","matematica_economistas3"],
-  ["historia_economica","teoria_innovacion"],
-  ["matematica_economistas3","sistema_info_contable1"],["matematica_economistas3","costos_industriales"],["matematica_economistas3","ingenieria_financiera"],
+  // Inglés
+  ["taller_inicial_comun","ingles1"],["teoria_organizacion","ingles1"],
+  ["ingles1","ingles2"],["taller_lectura_disciplina","ingles2"],
+  ["ingles2","ingles3"],
+
+  // Talleres iniciales -> primeras materias
+  ["taller_inicial_comun","taller_lectura_disciplina"],
+  ["taller_inicial_comun","problemas_socioeconomicos"],
+  ["taller_inicial_orientado","matematica_economistas1"],["taller_inicial_comun","matematica_economistas1"],
+  ["teoria_organizacion","diseno_estructural"],["taller_inicial_orientado","diseno_estructural"],
+
+  // Rama Economía
+  ["introduccion_economia","economia_clasica"],["taller_inicial_comun","economia_clasica"],
+  ["introduccion_economia","historia_economica"],["taller_lectura_disciplina","historia_economica"],["problemas_socioeconomicos","historia_economica"],
+  ["economia_clasica","economia_neoclasica"],["matematica_economistas1","economia_neoclasica"],
+  ["economia_neoclasica","economia_keynesiana"],
+
+  // Rama contable / diseño estructural
+  ["diseno_estructural","sistema_info_contable1"],["taller_inicial_comun","sistema_info_contable1"],
+  ["sistema_info_contable1","sistema_info_contable2"],
+  ["diseno_estructural","derecho_administrativo"],
+  ["sistema_info_contable1","sistema_informacion"],
+
+  // Matemática para Economistas
+  ["matematica_economistas1","estadisticas_economistas"],
+  ["matematica_economistas1","matematica_economistas2"],
+  ["matematica_economistas2","matematica_economistas3"],["economia_neoclasica","matematica_economistas3"],
+
+  // Planeamiento y Control Organizacional (eje central)
+  ["diseno_estructural","planeamiento_control"],["problemas_socioeconomicos","planeamiento_control"],["taller_lectura_disciplina","planeamiento_control"],
+  ["planeamiento_control","costos_industriales"],["sistema_info_contable1","costos_industriales"],
+  ["planeamiento_control","topicos_comercializacion"],
+  ["estadisticas_economistas","organizacion_industrial"],["planeamiento_control","organizacion_industrial"],
+  ["diseno_estructural","sociologia_industrial"],["problemas_socioeconomicos","sociologia_industrial"],["taller_lectura_disciplina","sociologia_industrial"],
+  ["planeamiento_control","gestion_rrhh"],
+  ["planeamiento_control","direccion_estrategica"],
+  ["estadisticas_economistas","planificacion_decisorio"],["planeamiento_control","planificacion_decisorio"],
+  ["derecho_administrativo","empresas_publicas"],["planeamiento_control","empresas_publicas"],
+  ["derecho_administrativo","gestion_economia_mixta"],["planeamiento_control","gestion_economia_mixta"],
+
+  // Materias avanzadas
+  ["costos_industriales","ingenieria_financiera"],["matematica_economistas3","ingenieria_financiera"],
+  ["historia_economica","teoria_innovacion"],["economia_keynesiana","teoria_innovacion"],
+  ["gestion_rrhh","regimen_tributario"],["direccion_estrategica","regimen_tributario"],
+  ["topicos_comercializacion","desarrollo_emprendedores"],
 ];
 
 const STORAGE_KEY = "materias-estado-administracion";
@@ -489,14 +518,20 @@ const requiereAlMenos = {}; // este plan no tiene grupos "N de M"
 const requiereConteo = { laboratorio: 13 };
 
 function totalAprobadas(){
-  return NODES.filter(n=>!n.inicial && estado[n.id]==="verde").length;
+  return NODES.filter(n=>!n.inicial && (estado[n.id]==="verde" || estado[n.id]==="azul")).length;
+}
+
+// Para desbloquear la siguiente materia alcanza con tener la anterior
+// aprobada (verde) o regularizada / "debo final" (azul).
+function cuentaParaCorrelativa(id){
+  return estado[id] === "verde" || estado[id] === "azul";
 }
 
 function estaDesbloqueada(id){
   const todas = requiereAll[id] || [];
-  const okTodas = todas.every(p => estado[p] === "verde");
+  const okTodas = todas.every(cuentaParaCorrelativa);
   const grupo = requiereAlMenos[id];
-  const okGrupo = !grupo || grupo.opciones.filter(p => estado[p]==="verde").length >= grupo.n;
+  const okGrupo = !grupo || grupo.opciones.filter(cuentaParaCorrelativa).length >= grupo.n;
   const conteo = requiereConteo[id];
   const okConteo = !conteo || totalAprobadas() >= conteo;
   return okTodas && okGrupo && okConteo;
@@ -504,11 +539,11 @@ function estaDesbloqueada(id){
 
 function faltantes(id){
   const todas = requiereAll[id] || [];
-  const faltanTodas = todas.filter(p => estado[p] !== "verde").map(p => byId[p].label);
+  const faltanTodas = todas.filter(p => !cuentaParaCorrelativa(p)).map(p => byId[p].label);
   const grupo = requiereAlMenos[id];
   let faltaGrupo = [];
   if(grupo){
-    const aprobadas = grupo.opciones.filter(p => estado[p]==="verde").length;
+    const aprobadas = grupo.opciones.filter(cuentaParaCorrelativa).length;
     if(aprobadas < grupo.n){
       faltaGrupo = [`${grupo.n - aprobadas} de: ${grupo.opciones.map(p=>byId[p].label).join(", ")}`];
     }
@@ -518,7 +553,7 @@ function faltantes(id){
   if(conteo){
     const actual = totalAprobadas();
     if(actual < conteo){
-      faltaConteo = [`${conteo - actual} materias aprobadas más (cualquiera, llevás ${actual}/${conteo})`];
+      faltaConteo = [`${conteo - actual} materias aprobadas o regularizadas más (cualquiera, llevás ${actual}/${conteo})`];
     }
   }
   return [...faltanTodas, ...faltaGrupo, ...faltaConteo];
@@ -557,13 +592,15 @@ function renderNodes(){
 
 function applyState(id){
   const el = document.getElementById("node-"+id);
-  el.classList.remove("st-verde");
+  el.classList.remove("st-verde","st-azul");
   el.style.background = "";
   el.style.borderColor = "";
   el.style.color = "";
   const s = estado[id];
   if(s === "verde"){
     el.classList.add("st-verde");
+  } else if(s === "azul"){
+    el.classList.add("st-azul");
   } else if(typeof s === "number"){
     const col = colorForVez(s);
     el.style.background = col;
@@ -610,6 +647,7 @@ function closeModal(){
 document.getElementById('vezMenos').addEventListener('click', ()=>{ currentVez = Math.max(1,currentVez-1); updateVezUI(); });
 document.getElementById('vezMas').addEventListener('click', ()=>{ currentVez = currentVez+1; updateVezUI(); });
 document.getElementById('btnAprobada').addEventListener('click', ()=>{ setState(currentNodeId,'verde'); closeModal(); });
+document.getElementById('btnDeboFinal').addEventListener('click', ()=>{ setState(currentNodeId,'azul'); closeModal(); });
 document.getElementById('btnVacio').addEventListener('click', ()=>{ setState(currentNodeId, null); closeModal(); });
 document.getElementById('btnAplicarVez').addEventListener('click', ()=>{ setState(currentNodeId, currentVez); closeModal(); });
 document.getElementById('btnCerrar').addEventListener('click', closeModal);
