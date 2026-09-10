@@ -11131,6 +11131,22 @@ window.OcrEngine = (function(){
   #notesLogoutBtn{ background:transparent; color:#9aa0ad; border:1px solid #3a3e4a; }
   #notesAvatarError{ color:#ff6b6b; font-size:11px; min-height:14px; margin-top:4px; text-align:center; word-break:break-word; }
 
+  #notesAuthGuest{
+    background:transparent; color:#9aa0ad; text-decoration:underline;
+    font-weight:400; font-size:13px; margin-top:10px;
+  }
+  #notesGuestBar{
+    position:fixed; top:0; left:0; right:0; z-index:99997;
+    background:#3a2e1a; color:#f0c98a; font-size:12px;
+    display:flex; align-items:center; justify-content:center; gap:10px;
+    padding:8px 12px; font-family:Inter, system-ui, sans-serif;
+  }
+  #notesGuestBar.hidden{ display:none; }
+  #notesGuestLoginBtn{
+    background:#6c5ce7; color:#fff; border:none; border-radius:8px;
+    padding:5px 12px; font-size:12px; cursor:pointer;
+  }
+
   #notesCropOverlay{
     position:fixed; inset:0; z-index:1000000;
     background:rgba(0,0,0,.7);
@@ -11174,7 +11190,12 @@ window.OcrEngine = (function(){
     <button id="notesAuthForgot" style="background:transparent;color:#9aa0ad;text-decoration:underline;margin-top:4px;">¿Olvidaste tu contraseña?</button>
     <div id="notesAuthError"></div>
     <div id="notesAuthOk" style="color:#4cd97b;font-size:13px;margin-top:6px;min-height:16px;"></div>
+    <button id="notesAuthGuest">Usar sin cuenta (ver mis notas de este dispositivo)</button>
   </div>
+</div>
+<div id="notesGuestBar" class="hidden">
+  <span>Estás usando la app sin cuenta: tus notas quedan solo en este dispositivo y no se sincronizan.</span>
+  <button id="notesGuestLoginBtn">Iniciar sesión</button>
 </div>
 <div id="notesProfileWidget" style="display:none">
   <button id="notesProfileToggle">
@@ -11244,7 +11265,10 @@ window.OcrEngine = (function(){
     forgot: document.getElementById('notesAuthForgot'),
     error: document.getElementById('notesAuthError'),
     ok: document.getElementById('notesAuthOk'),
+    guest: document.getElementById('notesAuthGuest'),
   };
+  const guestBar = document.getElementById('notesGuestBar');
+  const guestLoginBtn = document.getElementById('notesGuestLoginBtn');
   const logoutBtn = document.getElementById('notesLogoutBtn');
   const profile = {
     widget: document.getElementById('notesProfileWidget'),
@@ -11311,6 +11335,23 @@ window.OcrEngine = (function(){
   }
   box.toggle.addEventListener('click', ()=> setMode(mode==='login' ? 'signup' : 'login'));
   box.forgot.addEventListener('click', ()=> setMode('recover'));
+
+  // ---------- Modo invitado: usar la app sin cuenta, directo sobre el
+  // localStorage del dispositivo, sin tocar ni pisar nada con Supabase.
+  // Útil por ejemplo si la sincronización se llevó puesto algo y el usuario
+  // quiere entrar a ver/recuperar lo que tiene guardado en ESTE dispositivo. ----------
+  function enterGuestMode(){
+    box.error.textContent = '';
+    box.ok.textContent = '';
+    showOverlay(false);
+    guestBar.classList.remove('hidden');
+  }
+  box.guest.addEventListener('click', enterGuestMode);
+  guestLoginBtn.addEventListener('click', ()=>{
+    guestBar.classList.add('hidden');
+    setMode('login');
+    showOverlay(true);
+  });
 
   function showOverlay(show){
     overlay.classList.toggle('hidden', !show);
@@ -11380,10 +11421,16 @@ window.OcrEngine = (function(){
     const serverKeys = new Set();
     (data||[]).forEach(row=>{
       serverKeys.add(row.key);
+      // Si esta clave tiene un push local agendado o todavía en vuelo (debounce
+      // de 800ms, o la request al servidor sin terminar todavía), el valor que
+      // acabamos de traer del servidor es viejo: NO lo pisamos, o perderíamos
+      // el cambio local recién hecho (ej: agregar una carpeta a folders-index
+      // justo antes de que la app se recargue o se vuelva a autenticar).
+      if(pendingPushKeys.has(row.key)) return;
       const current = localStorage.getItem(row.key);
       if(current !== row.value){
-        if(row.value === null) localStorage.removeItem(row.key);
-        else localStorage.setItem(row.key, row.value);
+        if(row.value === null) originalRemoveItem(row.key);
+        else originalSetItem(row.key, row.value);
         changed = true;
       }
     });
@@ -11436,14 +11483,30 @@ window.OcrEngine = (function(){
   }
 
   let pushTimers = {};
+  // Claves con un push agendado (dentro del debounce) o con la request todavía
+  // en vuelo hacia Supabase. Mientras una clave esté acá, pullAll() no debe
+  // pisarla con lo que traiga del servidor, porque sería un valor viejo.
+  const pendingPushKeys = new Set();
   function pushKey(key, value){
     clearTimeout(pushTimers[key]);
+    pendingPushKeys.add(key);
     pushTimers[key] = setTimeout(async ()=>{
-      const { data: { user } } = await notesSupabase.auth.getUser();
-      if(!user) return;
-      await notesSupabase.from(TABLE_KV).upsert({
-        user_id: user.id, key, value, updated_at: new Date().toISOString()
-      }, { onConflict: 'user_id,key' });
+      try{
+        const { data: { user } } = await notesSupabase.auth.getUser();
+        if(!user) return;
+        const { error } = await notesSupabase.from(TABLE_KV).upsert({
+          user_id: user.id, key, value, updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id,key' });
+        if(error) console.warn('notes_kv push error', key, error);
+      } catch(err){
+        console.warn('notes_kv push exception', key, err);
+      } finally {
+        // Sólo se limpia acá: si mientras tanto llegó OTRO pushKey(key,...) para
+        // la misma clave, ese clearTimeout ya canceló este setTimeout y este
+        // bloque nunca corre para esa versión vieja, así que no hay riesgo de
+        // borrar la marca de "pendiente" de un push más nuevo en camino.
+        pendingPushKeys.delete(key);
+      }
     }, 800);
   }
 
@@ -11679,6 +11742,7 @@ window.OcrEngine = (function(){
 
   async function afterAuth(){
     showOverlay(false);
+    guestBar.classList.add('hidden');
     await loadProfile();
     const changed = await pullAll();
     if(changed && !sessionStorage.getItem(RELOAD_FLAG)){
