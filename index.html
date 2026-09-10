@@ -28,6 +28,16 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&family=Inter:wght@400;500;600&family=Caveat:wght@500;600;700&family=Patrick+Hand&family=Shadows+Into+Light&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+  // ==== Configuración de Supabase ====
+  // Pegá acá la URL y la anon key de TU proyecto (Project Settings > API).
+  // La anon key es pública/segura para usar en el navegador: la seguridad
+  // real la da Row Level Security (ver notes_kv_schema.sql).
+  const SUPABASE_URL = 'https://nsxdwaxduidqlliiogqp.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5zeGR3YXhkdWlkcWxsaWlvZ3FwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0OTU2NzIsImV4cCI6MjA5NzA3MTY3Mn0.CSK-8EdPhYUBHpVzxsg-dw7m7aRJc77bwhpz1lFIPok';
+  const notesSupabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+</script>
 <script>
 // ---------- Motor de OCR compartido ----------
 // Antes había DOS copias de esta lógica (una por cada <script> de la app),
@@ -11023,6 +11033,270 @@ window.OcrEngine = (function(){
       applyTheme(button.dataset.theme || (root.dataset.theme === 'light' ? 'dark' : 'light'));
     }));
   })();
+</script>
+
+<!-- ============================================================
+     Supabase: cuenta con celular + contraseña, y almacenamiento
+     sincronizado en la nube.
+
+     Cómo funciona:
+     - Supabase Auth pide un "email" para login por contraseña. Como vos
+       querés celular sin SMS, acá el celular se transforma en un email
+       falso (phone_<numero>@notes.local) y ESO es lo que se manda a
+       Supabase. El celular real se guarda aparte, en notes_profiles.
+     - Todo lo que la app ya guarda en localStorage con el prefijo
+       "cuaderno:" se sincroniza fila por fila a la tabla notes_kv,
+       separado por usuario mediante Row Level Security (cada quien solo
+       ve sus propias filas).
+     - Al iniciar sesión, se bajan todas las filas del usuario y se
+       recarga la página para que el resto de la app (que ya lee de
+       localStorage normalmente) arranque con los datos sincronizados.
+
+     Paso manual que tenés que hacer en el panel de Supabase:
+     - Authentication > Providers > Email > desactivar "Confirm email"
+       (si no, el signUp queda pidiendo un mail de confirmación que
+       nunca va a llegar, porque el mail es falso).
+     - Correr notes_kv_schema.sql una vez en el SQL Editor.
+   ============================================================ -->
+<style>
+  #notesAuthOverlay{
+    position:fixed; inset:0; z-index:999999;
+    background:#1B1D24; color:#fff;
+    display:flex; align-items:center; justify-content:center;
+    font-family:Inter, system-ui, sans-serif;
+  }
+  #notesAuthOverlay.hidden{ display:none; }
+  #notesAuthBox{
+    width:min(340px, 90vw); padding:28px 24px; border-radius:16px;
+    background:#23262f; box-shadow:0 10px 40px rgba(0,0,0,.4);
+  }
+  #notesAuthBox h2{ margin:0 0 6px; font-size:20px; }
+  #notesAuthBox p.sub{ margin:0 0 20px; font-size:13px; color:#9aa0ad; }
+  #notesAuthBox input{
+    width:100%; box-sizing:border-box; margin-bottom:12px; padding:12px 14px;
+    border-radius:10px; border:1px solid #3a3e4a; background:#1B1D24; color:#fff; font-size:15px;
+  }
+  #notesAuthBox button{
+    width:100%; padding:12px; border-radius:10px; border:none; font-size:15px;
+    font-weight:600; cursor:pointer; margin-top:4px;
+  }
+  #notesAuthSubmit{ background:#6c5ce7; color:#fff; }
+  #notesAuthToggle{ background:transparent; color:#9aa0ad; text-decoration:underline; margin-top:14px; }
+  #notesAuthError{ color:#ff6b6b; font-size:13px; margin-top:10px; min-height:16px; }
+  #notesLogoutBtn{
+    position:fixed; bottom:14px; right:14px; z-index:99998;
+    background:#23262f; color:#9aa0ad; border:1px solid #3a3e4a;
+    border-radius:20px; padding:8px 14px; font-size:12px; cursor:pointer;
+  }
+</style>
+<div id="notesAuthOverlay" class="hidden">
+  <div id="notesAuthBox">
+    <h2 id="notesAuthTitle">Iniciar sesión</h2>
+    <p class="sub" id="notesAuthSub">Entrá con tu número de celular y tu contraseña.</p>
+    <input id="notesAuthPhone" type="tel" placeholder="Celular (ej: +54911...)" autocomplete="tel">
+    <input id="notesAuthDni" type="text" placeholder="DNI" autocomplete="off" style="display:none">
+    <input id="notesAuthPassword" type="password" placeholder="Contraseña" autocomplete="current-password">
+    <input id="notesAuthPasswordConfirm" type="password" placeholder="Confirmar nueva contraseña" autocomplete="new-password" style="display:none">
+    <button id="notesAuthSubmit">Entrar</button>
+    <button id="notesAuthToggle">¿No tenés cuenta? Registrate</button>
+    <button id="notesAuthForgot" style="background:transparent;color:#9aa0ad;text-decoration:underline;margin-top:4px;">¿Olvidaste tu contraseña?</button>
+    <div id="notesAuthError"></div>
+    <div id="notesAuthOk" style="color:#4cd97b;font-size:13px;margin-top:6px;min-height:16px;"></div>
+  </div>
+</div>
+<button id="notesLogoutBtn" style="display:none">Cerrar sesión</button>
+
+<script>
+(function(){
+  const KV_PREFIX = 'cuaderno:';      // prefijo que ya usa la app en localStorage
+  const TABLE_KV = 'notes_kv';
+  const TABLE_PROFILES = 'notes_profiles';
+  const EMAIL_DOMAIN = 'notes.local'; // dominio falso para mapear celular -> email
+  const RELOAD_FLAG = 'notes:justSynced';
+
+  function cleanPhone(raw){ return (raw||'').replace(/[^\d+]/g,''); }
+  function phoneToEmail(phone){ return 'phone_' + cleanPhone(phone).replace('+','') + '@' + EMAIL_DOMAIN; }
+
+  const overlay = document.getElementById('notesAuthOverlay');
+  const box = {
+    title: document.getElementById('notesAuthTitle'),
+    sub: document.getElementById('notesAuthSub'),
+    phone: document.getElementById('notesAuthPhone'),
+    dni: document.getElementById('notesAuthDni'),
+    pass: document.getElementById('notesAuthPassword'),
+    passConfirm: document.getElementById('notesAuthPasswordConfirm'),
+    submit: document.getElementById('notesAuthSubmit'),
+    toggle: document.getElementById('notesAuthToggle'),
+    forgot: document.getElementById('notesAuthForgot'),
+    error: document.getElementById('notesAuthError'),
+    ok: document.getElementById('notesAuthOk'),
+  };
+  const logoutBtn = document.getElementById('notesLogoutBtn');
+  let mode = 'login'; // 'login' | 'signup' | 'recover'
+
+  function setMode(m){
+    mode = m;
+    box.error.textContent = '';
+    box.ok.textContent = '';
+    box.dni.style.display = 'none';
+    box.passConfirm.style.display = 'none';
+    box.pass.style.display = '';
+    box.forgot.style.display = '';
+    if(m==='signup'){
+      box.title.textContent = 'Crear cuenta';
+      box.sub.textContent = 'Elegí tu celular, tu DNI y una contraseña.';
+      box.dni.style.display = '';
+      box.pass.placeholder = 'Contraseña';
+      box.submit.textContent = 'Registrarme';
+      box.toggle.textContent = '¿Ya tenés cuenta? Iniciá sesión';
+      box.forgot.style.display = 'none';
+    } else if(m==='recover'){
+      box.title.textContent = 'Recuperar contraseña';
+      box.sub.textContent = 'Ingresá tu celular y tu DNI para confirmar que sos vos.';
+      box.dni.style.display = '';
+      box.pass.placeholder = 'Nueva contraseña';
+      box.pass.value = '';
+      box.passConfirm.style.display = '';
+      box.submit.textContent = 'Cambiar contraseña';
+      box.toggle.textContent = 'Volver a iniciar sesión';
+      box.forgot.style.display = 'none';
+    } else {
+      box.title.textContent = 'Iniciar sesión';
+      box.sub.textContent = 'Entrá con tu número de celular y tu contraseña.';
+      box.pass.placeholder = 'Contraseña';
+      box.submit.textContent = 'Entrar';
+      box.toggle.textContent = '¿No tenés cuenta? Registrate';
+    }
+  }
+  box.toggle.addEventListener('click', ()=> setMode(mode==='login' ? 'signup' : 'login'));
+  box.forgot.addEventListener('click', ()=> setMode('recover'));
+
+  function showOverlay(show){
+    overlay.classList.toggle('hidden', !show);
+    logoutBtn.style.display = show ? 'none' : 'block';
+  }
+
+  function traducirError(msg){
+    if(!msg) return 'Ocurrió un error. Probá de nuevo.';
+    if(/already registered|already exists/i.test(msg)) return 'Ese celular ya tiene una cuenta.';
+    if(/invalid login credentials/i.test(msg)) return 'Celular o contraseña incorrectos.';
+    if(/password/i.test(msg)) return 'La contraseña debe tener al menos 6 caracteres.';
+    return msg;
+  }
+
+  async function doSubmit(){
+    const phone = cleanPhone(box.phone.value);
+    const dni = box.dni.value.trim();
+    const password = box.pass.value;
+    box.error.textContent = '';
+    box.ok.textContent = '';
+    if(phone.length < 6){ box.error.textContent = 'Ingresá un celular válido.'; return; }
+    if((mode==='signup' || mode==='recover') && dni.length < 6){ box.error.textContent = 'Ingresá tu DNI.'; return; }
+    if(password.length < 6){ box.error.textContent = 'La contraseña debe tener al menos 6 caracteres.'; return; }
+    if(mode==='recover' && password !== box.passConfirm.value){ box.error.textContent = 'Las contraseñas no coinciden.'; return; }
+    box.submit.disabled = true;
+    const email = phoneToEmail(phone);
+    try{
+      if(mode === 'signup'){
+        const { data, error } = await notesSupabase.auth.signUp({ email, password });
+        if(error) throw error;
+        if(data.user){
+          await notesSupabase.from(TABLE_PROFILES).upsert({ id: data.user.id, phone, dni });
+        }
+        await afterAuth();
+      } else if(mode === 'recover'){
+        const { data: ok, error } = await notesSupabase.rpc('notes_reset_password', {
+          p_phone: phone, p_dni: dni, p_new_password: password
+        });
+        if(error) throw error;
+        if(!ok){
+          box.error.textContent = 'El celular o el DNI no coinciden con ninguna cuenta.';
+        } else {
+          box.ok.textContent = 'Contraseña actualizada. Ya podés iniciar sesión.';
+          box.pass.value = ''; box.passConfirm.value = '';
+          setTimeout(()=> setMode('login'), 1500);
+        }
+      } else {
+        const { error } = await notesSupabase.auth.signInWithPassword({ email, password });
+        if(error) throw error;
+        await afterAuth();
+      }
+    }catch(err){
+      box.error.textContent = traducirError(err && err.message);
+    }finally{
+      box.submit.disabled = false;
+    }
+  }
+  box.submit.addEventListener('click', doSubmit);
+  box.pass.addEventListener('keydown', e=>{ if(e.key==='Enter') doSubmit(); });
+
+  // ---------- Sincronización de localStorage <-> notes_kv ----------
+  async function pullAll(){
+    const { data, error } = await notesSupabase.from(TABLE_KV).select('key,value');
+    if(error){ console.warn('notes_kv pull error', error); return false; }
+    let changed = false;
+    (data||[]).forEach(row=>{
+      const current = localStorage.getItem(row.key);
+      if(current !== row.value){
+        if(row.value === null) localStorage.removeItem(row.key);
+        else localStorage.setItem(row.key, row.value);
+        changed = true;
+      }
+    });
+    return changed;
+  }
+
+  let pushTimers = {};
+  function pushKey(key, value){
+    clearTimeout(pushTimers[key]);
+    pushTimers[key] = setTimeout(async ()=>{
+      const { data: { user } } = await notesSupabase.auth.getUser();
+      if(!user) return;
+      await notesSupabase.from(TABLE_KV).upsert({
+        user_id: user.id, key, value, updated_at: new Date().toISOString()
+      }, { onConflict: 'user_id,key' });
+    }, 800);
+  }
+
+  // Interceptamos localStorage SOLO para las claves de la app (prefijo
+  // "cuaderno:"), para que cada guardado local también viaje a Supabase.
+  const originalSetItem = localStorage.setItem.bind(localStorage);
+  localStorage.setItem = function(key, value){
+    originalSetItem(key, value);
+    if(key.indexOf(KV_PREFIX) === 0) pushKey(key, value);
+  };
+  const originalRemoveItem = localStorage.removeItem.bind(localStorage);
+  localStorage.removeItem = function(key){
+    originalRemoveItem(key);
+    if(key.indexOf(KV_PREFIX) === 0) pushKey(key, null);
+  };
+
+  async function afterAuth(){
+    showOverlay(false);
+    const changed = await pullAll();
+    if(changed && !sessionStorage.getItem(RELOAD_FLAG)){
+      sessionStorage.setItem(RELOAD_FLAG, '1');
+      location.reload();
+    }
+  }
+
+  logoutBtn.addEventListener('click', async ()=>{
+    await notesSupabase.auth.signOut();
+    sessionStorage.removeItem(RELOAD_FLAG);
+    showOverlay(true);
+  });
+
+  notesSupabase.auth.onAuthStateChange((event)=>{
+    if(event === 'SIGNED_OUT') showOverlay(true);
+  });
+
+  // ---------- Arranque ----------
+  (async function init(){
+    const { data: { session } } = await notesSupabase.auth.getSession();
+    if(session){ await afterAuth(); }
+    else { setMode('login'); showOverlay(true); }
+  })();
+})();
 </script>
 </body>
 </html>
