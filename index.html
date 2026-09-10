@@ -11372,7 +11372,16 @@ window.OcrEngine = (function(){
       profile.avatarBig.src = src;
     }catch(err){
       console.warn('avatar upload error', err);
-      profile.error.textContent = 'No se pudo subir la foto. Probá de nuevo.';
+      const raw = (err && err.message) || '';
+      if(/bucket not found/i.test(raw)){
+        profile.error.textContent = 'Falta crear el bucket en Supabase (correr el SQL).';
+      } else if(/row-level security|permission denied|not authorized/i.test(raw)){
+        profile.error.textContent = 'Permiso denegado (falta correr las políticas del SQL).';
+      } else if(raw){
+        profile.error.textContent = 'Error: ' + raw;
+      } else {
+        profile.error.textContent = 'No se pudo subir la foto. Probá de nuevo.';
+      }
     }finally{
       profile.changeBtn.disabled = false;
       profile.fileInput.value = '';
