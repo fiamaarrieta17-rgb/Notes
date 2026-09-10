@@ -11219,6 +11219,7 @@ window.OcrEngine = (function(){
   const BUCKET_AVATARS = 'notes_avatars';
   const EMAIL_DOMAIN = 'notes.local'; // dominio falso para mapear celular -> email
   const RELOAD_FLAG = 'notes:justSynced';
+  const LAST_UID_KEY = 'notes_last_uid'; // sin el prefijo "cuaderno:": no viaja a Supabase
   const DEFAULT_AVATAR = 'data:image/svg+xml;utf8,' + encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">' +
     '<circle cx="20" cy="20" r="20" fill="#3a3e4a"/>' +
@@ -11376,7 +11377,9 @@ window.OcrEngine = (function(){
     const { data, error } = await notesSupabase.from(TABLE_KV).select('key,value');
     if(error){ console.warn('notes_kv pull error', error); return false; }
     let changed = false;
+    const serverKeys = new Set();
     (data||[]).forEach(row=>{
+      serverKeys.add(row.key);
       const current = localStorage.getItem(row.key);
       if(current !== row.value){
         if(row.value === null) localStorage.removeItem(row.key);
@@ -11384,6 +11387,51 @@ window.OcrEngine = (function(){
         changed = true;
       }
     });
+
+    const localKeys = [];
+    for(let i=0;i<localStorage.length;i++){
+      const k = localStorage.key(i);
+      if(k && k.indexOf(KV_PREFIX) === 0) localKeys.push(k);
+    }
+
+    const { data: { user } } = await notesSupabase.auth.getUser();
+    const lastUid = localStorage.getItem(LAST_UID_KEY);
+    // Sólo mergeamos (subimos) las hojas locales sueltas cuando es seguro
+    // asumir que le pertenecen a ESTA cuenta:
+    //  - la cuenta es nueva y todavía no tiene nada en Supabase (recién
+    //    creada, o primer login sincronizando notas de antes del login), o
+    //  - este dispositivo ya había iniciado sesión antes con esta misma
+    //    cuenta (pueden ser cambios hechos offline).
+    // Si la cuenta YA tiene datos en el servidor y este dispositivo no la
+    // reconoce, esas hojas sueltas son de otra cuenta/uso anónimo: no se
+    // suben, para que abrir una cuenta en cualquier dispositivo muestre
+    // siempre exactamente el storage de esa cuenta, sin mezclas.
+    const isBrandNewAccount = serverKeys.size === 0;
+    const knownDevice = user && lastUid === user.id;
+    const shouldMergeLocal = isBrandNewAccount || knownDevice;
+
+    if(shouldMergeLocal){
+      // Estas claves existen en este dispositivo pero todavía no llegaron a
+      // Supabase (hojas creadas antes de iniciar sesión, u offline, o recién
+      // creada la cuenta). Se SUBEN al servidor en vez de borrarse, para no
+      // perder páginas que ya se están usando.
+      localKeys.forEach(k=>{
+        if(!serverKeys.has(k)) pushKey(k, localStorage.getItem(k));
+      });
+    } else {
+      // El dispositivo tenía datos sueltos que no pertenecen a esta cuenta
+      // (otra cuenta usada antes acá, o notas sin loguearse). Se limpian
+      // para que lo que se vea sea siempre lo que está guardado en
+      // Supabase para esta cuenta.
+      localKeys.forEach(k=>{
+        if(!serverKeys.has(k)){
+          originalRemoveItem(k);
+          changed = true;
+        }
+      });
+    }
+
+    if(user) localStorage.setItem(LAST_UID_KEY, user.id);
     return changed;
   }
 
@@ -11642,9 +11690,19 @@ window.OcrEngine = (function(){
   logoutBtn.addEventListener('click', async ()=>{
     await notesSupabase.auth.signOut();
     sessionStorage.removeItem(RELOAD_FLAG);
+    // Limpiar del dispositivo los datos de esta cuenta: si después alguien
+    // inicia sesión con OTRA cuenta en este mismo navegador, no debe heredar
+    // páginas ni carpetas de la cuenta que se acaba de ir.
+    const localKeys = [];
+    for(let i=0;i<localStorage.length;i++){
+      const k = localStorage.key(i);
+      if(k && k.indexOf(KV_PREFIX) === 0) localKeys.push(k);
+    }
+    localKeys.forEach(k => originalRemoveItem(k));
     profile.widget.style.display = 'none';
     profile.panel.classList.add('hidden');
     showOverlay(true);
+    location.reload();
   });
 
   notesSupabase.auth.onAuthStateChange((event)=>{
