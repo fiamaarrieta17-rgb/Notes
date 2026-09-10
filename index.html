@@ -11571,14 +11571,29 @@ window.OcrEngine = (function(){
     }, 'image/jpeg', 0.9);
   });
 
+  // Decodifica el "payload" de un JWT (sin verificar firma) solo para debug visual.
+  function decodeJwtPayload(token){
+    try{
+      const part = token.split('.')[1];
+      const b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+      const json = decodeURIComponent(atob(b64).split('').map(c =>
+        '%' + c.charCodeAt(0).toString(16).padStart(2, '0')
+      ).join(''));
+      return JSON.parse(json);
+    }catch(e){ return null; }
+  }
+
   async function uploadAvatarBlob(blob){
     profile.error.textContent = '';
     profile.changeBtn.disabled = true;
-    let debugUid = '?', debugPath = '?';
+    let debugUid = '?', debugPath = '?', debugJwt = '?';
     try{
-      const { data: { user } } = await notesSupabase.auth.getUser();
-      if(!user) throw new Error('sin sesión');
+      const { data: { session } } = await notesSupabase.auth.getSession();
+      if(!session) throw new Error('sin sesión');
+      const user = session.user;
       debugUid = user.id;
+      const payload = decodeJwtPayload(session.access_token);
+      debugJwt = payload ? ('sub=' + payload.sub + ' role=' + payload.role + ' aud=' + payload.aud) : 'no decodificable';
       const path = user.id + '/avatar.jpg';
       debugPath = path;
       const { error: upErr } = await notesSupabase.storage
@@ -11595,7 +11610,7 @@ window.OcrEngine = (function(){
       const raw = (err && err.message) || JSON.stringify(err) || 'error desconocido';
       const status = (err && (err.statusCode || err.status)) || '';
       profile.error.textContent = 'Error' + (status ? ' ' + status : '') + ': ' + raw +
-        ' | uid=' + debugUid + ' | path=' + debugPath;
+        ' | uid=' + debugUid + ' | path=' + debugPath + ' | jwt: ' + debugJwt;
     }finally{
       profile.changeBtn.disabled = false;
     }
