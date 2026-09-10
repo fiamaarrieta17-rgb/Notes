@@ -11083,11 +11083,37 @@ window.OcrEngine = (function(){
   #notesAuthSubmit{ background:#6c5ce7; color:#fff; }
   #notesAuthToggle{ background:transparent; color:#9aa0ad; text-decoration:underline; margin-top:14px; }
   #notesAuthError{ color:#ff6b6b; font-size:13px; margin-top:10px; min-height:16px; }
-  #notesLogoutBtn{
+  #notesProfileWidget{
     position:fixed; bottom:14px; right:14px; z-index:99998;
-    background:#23262f; color:#9aa0ad; border:1px solid #3a3e4a;
-    border-radius:20px; padding:8px 14px; font-size:12px; cursor:pointer;
+    font-family:Inter, system-ui, sans-serif;
   }
+  #notesProfileToggle{
+    display:flex; align-items:center; gap:8px;
+    background:#23262f; color:#e6e6e6; border:1px solid #3a3e4a;
+    border-radius:20px; padding:5px 14px 5px 5px; cursor:pointer; font-size:12px;
+  }
+  #notesProfileAvatar, #notesProfileAvatarBig{
+    border-radius:50%; object-fit:cover; background:#3a3e4a; display:block;
+  }
+  #notesProfileAvatar{ width:26px; height:26px; }
+  #notesProfileAvatarBig{ width:64px; height:64px; margin-bottom:8px; }
+  #notesProfilePanel{
+    position:absolute; bottom:44px; right:0; width:190px;
+    background:#23262f; border:1px solid #3a3e4a; border-radius:14px; padding:16px;
+    display:flex; flex-direction:column; align-items:center;
+    box-shadow:0 10px 30px rgba(0,0,0,.4);
+  }
+  #notesProfilePanel.hidden{ display:none; }
+  #notesProfilePhoneBig{
+    color:#e6e6e6; font-size:13px; margin-bottom:12px; word-break:break-all; text-align:center;
+  }
+  #notesChangePhotoBtn, #notesLogoutBtn{
+    width:100%; padding:9px; border-radius:8px; border:none; font-size:12px;
+    cursor:pointer; margin-top:6px;
+  }
+  #notesChangePhotoBtn{ background:#6c5ce7; color:#fff; }
+  #notesLogoutBtn{ background:transparent; color:#9aa0ad; border:1px solid #3a3e4a; }
+  #notesAvatarError{ color:#ff6b6b; font-size:11px; min-height:14px; margin-top:4px; text-align:center; }
 </style>
 <div id="notesAuthOverlay" class="hidden">
   <div id="notesAuthBox">
@@ -11104,15 +11130,35 @@ window.OcrEngine = (function(){
     <div id="notesAuthOk" style="color:#4cd97b;font-size:13px;margin-top:6px;min-height:16px;"></div>
   </div>
 </div>
-<button id="notesLogoutBtn" style="display:none">Cerrar sesión</button>
+<div id="notesProfileWidget" style="display:none">
+  <button id="notesProfileToggle">
+    <img id="notesProfileAvatar" src="" alt="">
+    <span id="notesProfilePhone"></span>
+  </button>
+  <div id="notesProfilePanel" class="hidden">
+    <img id="notesProfileAvatarBig" src="" alt="">
+    <div id="notesProfilePhoneBig"></div>
+    <input type="file" id="notesAvatarInput" accept="image/*" style="display:none">
+    <button id="notesChangePhotoBtn">Cambiar foto</button>
+    <div id="notesAvatarError"></div>
+    <button id="notesLogoutBtn">Cerrar sesión</button>
+  </div>
+</div>
 
 <script>
 (function(){
   const KV_PREFIX = 'cuaderno:';      // prefijo que ya usa la app en localStorage
   const TABLE_KV = 'notes_kv';
   const TABLE_PROFILES = 'notes_profiles';
+  const BUCKET_AVATARS = 'notes_avatars';
   const EMAIL_DOMAIN = 'notes.local'; // dominio falso para mapear celular -> email
   const RELOAD_FLAG = 'notes:justSynced';
+  const DEFAULT_AVATAR = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">' +
+    '<circle cx="20" cy="20" r="20" fill="#3a3e4a"/>' +
+    '<circle cx="20" cy="16" r="7" fill="#6b7280"/>' +
+    '<path d="M6 37c2-9 10-13 14-13s12 4 14 13" fill="#6b7280"/></svg>'
+  );
 
   function cleanPhone(raw){ return (raw||'').replace(/[^\d+]/g,''); }
   function phoneToEmail(phone){ return 'phone_' + cleanPhone(phone).replace('+','') + '@' + EMAIL_DOMAIN; }
@@ -11132,6 +11178,18 @@ window.OcrEngine = (function(){
     ok: document.getElementById('notesAuthOk'),
   };
   const logoutBtn = document.getElementById('notesLogoutBtn');
+  const profile = {
+    widget: document.getElementById('notesProfileWidget'),
+    toggle: document.getElementById('notesProfileToggle'),
+    avatar: document.getElementById('notesProfileAvatar'),
+    phone: document.getElementById('notesProfilePhone'),
+    panel: document.getElementById('notesProfilePanel'),
+    avatarBig: document.getElementById('notesProfileAvatarBig'),
+    phoneBig: document.getElementById('notesProfilePhoneBig'),
+    fileInput: document.getElementById('notesAvatarInput'),
+    changeBtn: document.getElementById('notesChangePhotoBtn'),
+    error: document.getElementById('notesAvatarError'),
+  };
   let mode = 'login'; // 'login' | 'signup' | 'recover'
 
   function setMode(m){
@@ -11173,7 +11231,6 @@ window.OcrEngine = (function(){
 
   function showOverlay(show){
     overlay.classList.toggle('hidden', !show);
-    logoutBtn.style.display = show ? 'none' : 'block';
   }
 
   function traducirError(msg){
@@ -11271,8 +11328,60 @@ window.OcrEngine = (function(){
     if(key.indexOf(KV_PREFIX) === 0) pushKey(key, null);
   };
 
+  // ---------- Perfil: celular visible + foto ----------
+  async function loadProfile(){
+    const { data: { user } } = await notesSupabase.auth.getUser();
+    if(!user) return;
+    const { data } = await notesSupabase.from(TABLE_PROFILES)
+      .select('phone,avatar_url').eq('id', user.id).maybeSingle();
+    const phoneText = data && data.phone ? '+' + data.phone.replace(/^\+/, '') : '';
+    profile.phone.textContent = phoneText;
+    profile.phoneBig.textContent = phoneText;
+    const src = (data && data.avatar_url) ? (data.avatar_url + '?t=' + Date.now()) : DEFAULT_AVATAR;
+    profile.avatar.src = src;
+    profile.avatarBig.src = src;
+    profile.widget.style.display = 'block';
+  }
+
+  profile.toggle.addEventListener('click', ()=> profile.panel.classList.toggle('hidden'));
+  document.addEventListener('click', (e)=>{
+    if(!profile.widget.contains(e.target)) profile.panel.classList.add('hidden');
+  });
+
+  profile.changeBtn.addEventListener('click', ()=> profile.fileInput.click());
+  profile.fileInput.addEventListener('change', async ()=>{
+    const file = profile.fileInput.files[0];
+    if(!file) return;
+    profile.error.textContent = '';
+    if(!file.type.startsWith('image/')){ profile.error.textContent = 'Elegí una imagen.'; return; }
+    if(file.size > 4 * 1024 * 1024){ profile.error.textContent = 'La imagen pesa demasiado (máx 4MB).'; return; }
+    profile.changeBtn.disabled = true;
+    try{
+      const { data: { user } } = await notesSupabase.auth.getUser();
+      if(!user) throw new Error('sin sesión');
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+      const path = user.id + '/avatar.' + ext;
+      const { error: upErr } = await notesSupabase.storage
+        .from(BUCKET_AVATARS)
+        .upload(path, file, { upsert: true, contentType: file.type });
+      if(upErr) throw upErr;
+      const { data: pub } = notesSupabase.storage.from(BUCKET_AVATARS).getPublicUrl(path);
+      await notesSupabase.from(TABLE_PROFILES).update({ avatar_url: pub.publicUrl }).eq('id', user.id);
+      const src = pub.publicUrl + '?t=' + Date.now();
+      profile.avatar.src = src;
+      profile.avatarBig.src = src;
+    }catch(err){
+      console.warn('avatar upload error', err);
+      profile.error.textContent = 'No se pudo subir la foto. Probá de nuevo.';
+    }finally{
+      profile.changeBtn.disabled = false;
+      profile.fileInput.value = '';
+    }
+  });
+
   async function afterAuth(){
     showOverlay(false);
+    await loadProfile();
     const changed = await pullAll();
     if(changed && !sessionStorage.getItem(RELOAD_FLAG)){
       sessionStorage.setItem(RELOAD_FLAG, '1');
@@ -11283,6 +11392,8 @@ window.OcrEngine = (function(){
   logoutBtn.addEventListener('click', async ()=>{
     await notesSupabase.auth.signOut();
     sessionStorage.removeItem(RELOAD_FLAG);
+    profile.widget.style.display = 'none';
+    profile.panel.classList.add('hidden');
     showOverlay(true);
   });
 
