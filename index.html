@@ -11114,6 +11114,35 @@ window.OcrEngine = (function(){
   #notesChangePhotoBtn{ background:#6c5ce7; color:#fff; }
   #notesLogoutBtn{ background:transparent; color:#9aa0ad; border:1px solid #3a3e4a; }
   #notesAvatarError{ color:#ff6b6b; font-size:11px; min-height:14px; margin-top:4px; text-align:center; word-break:break-word; }
+
+  #notesCropOverlay{
+    position:fixed; inset:0; z-index:1000000;
+    background:rgba(0,0,0,.7);
+    display:flex; align-items:center; justify-content:center;
+    font-family:Inter, system-ui, sans-serif;
+  }
+  #notesCropOverlay.hidden{ display:none; }
+  #notesCropBox{
+    background:#23262f; border-radius:16px; padding:20px;
+    display:flex; flex-direction:column; align-items:center; gap:14px;
+    width:min(300px, 90vw);
+  }
+  #notesCropCircle{
+    width:240px; height:240px; border-radius:50%; overflow:hidden;
+    position:relative; background:#111; touch-action:none; cursor:grab;
+  }
+  #notesCropCircle.dragging{ cursor:grabbing; }
+  #notesCropImg{
+    position:absolute; left:0; top:0; user-select:none; -webkit-user-drag:none;
+    pointer-events:none; max-width:none;
+  }
+  #notesCropZoom{ width:100%; }
+  #notesCropButtons{ display:flex; gap:10px; width:100%; }
+  #notesCropButtons button{
+    flex:1; padding:10px; border-radius:8px; border:none; font-size:13px; cursor:pointer;
+  }
+  #notesCropCancel{ background:transparent; color:#9aa0ad; border:1px solid #3a3e4a; }
+  #notesCropSave{ background:#6c5ce7; color:#fff; }
 </style>
 <div id="notesAuthOverlay" class="hidden">
   <div id="notesAuthBox">
@@ -11142,6 +11171,19 @@ window.OcrEngine = (function(){
     <button id="notesChangePhotoBtn">Cambiar foto</button>
     <div id="notesAvatarError"></div>
     <button id="notesLogoutBtn">Cerrar sesión</button>
+  </div>
+</div>
+
+<div id="notesCropOverlay" class="hidden">
+  <div id="notesCropBox">
+    <div id="notesCropCircle">
+      <img id="notesCropImg" src="" alt="">
+    </div>
+    <input id="notesCropZoom" type="range" min="1" max="3" step="0.01" value="1">
+    <div id="notesCropButtons">
+      <button id="notesCropCancel">Cancelar</button>
+      <button id="notesCropSave">Guardar</button>
+    </div>
   </div>
 </div>
 
@@ -11189,6 +11231,14 @@ window.OcrEngine = (function(){
     fileInput: document.getElementById('notesAvatarInput'),
     changeBtn: document.getElementById('notesChangePhotoBtn'),
     error: document.getElementById('notesAvatarError'),
+  };
+  const crop = {
+    overlay: document.getElementById('notesCropOverlay'),
+    circle: document.getElementById('notesCropCircle'),
+    img: document.getElementById('notesCropImg'),
+    zoom: document.getElementById('notesCropZoom'),
+    cancel: document.getElementById('notesCropCancel'),
+    save: document.getElementById('notesCropSave'),
   };
   let mode = 'login'; // 'login' | 'signup' | 'recover'
 
@@ -11349,21 +11399,119 @@ window.OcrEngine = (function(){
   });
 
   profile.changeBtn.addEventListener('click', ()=> profile.fileInput.click());
-  profile.fileInput.addEventListener('change', async ()=>{
-    const file = profile.fileInput.files[0];
-    if(!file) return;
+
+  // ---------- Modal de ajuste/recorte de la foto ----------
+  const CROP_BOX = 240;     // tamaño visible del círculo, en px
+  const OUT_SIZE = 512;     // tamaño de la imagen final que se sube
+  let cropState = { scale: 1, coverScale: 1, x: 0, y: 0, natW: 0, natH: 0 };
+  let dragState = null;
+
+  function clampCropOffsets(){
+    const w = cropState.natW * cropState.scale;
+    const h = cropState.natH * cropState.scale;
+    const minX = Math.min(0, CROP_BOX - w);
+    const minY = Math.min(0, CROP_BOX - h);
+    cropState.x = Math.max(minX, Math.min(0, cropState.x));
+    cropState.y = Math.max(minY, Math.min(0, cropState.y));
+  }
+  function applyCropTransform(){
+    const w = cropState.natW * cropState.scale;
+    const h = cropState.natH * cropState.scale;
+    crop.img.style.width = w + 'px';
+    crop.img.style.height = h + 'px';
+    crop.img.style.transform = 'translate(' + cropState.x + 'px,' + cropState.y + 'px)';
+  }
+
+  function openCropModal(dataUrl){
+    crop.img.onload = ()=>{
+      cropState.natW = crop.img.naturalWidth;
+      cropState.natH = crop.img.naturalHeight;
+      cropState.coverScale = CROP_BOX / Math.min(cropState.natW, cropState.natH);
+      cropState.scale = cropState.coverScale;
+      // Centrar la imagen dentro del círculo al abrir.
+      cropState.x = (CROP_BOX - cropState.natW * cropState.scale) / 2;
+      cropState.y = (CROP_BOX - cropState.natH * cropState.scale) / 2;
+      clampCropOffsets();
+      applyCropTransform();
+      crop.zoom.value = '1';
+    };
+    crop.img.src = dataUrl;
+    crop.overlay.classList.remove('hidden');
+  }
+  function closeCropModal(){
+    crop.overlay.classList.add('hidden');
+    crop.img.src = '';
+  }
+  crop.cancel.addEventListener('click', closeCropModal);
+
+  crop.zoom.addEventListener('input', ()=>{
+    const factor = parseFloat(crop.zoom.value); // 1..3
+    // Mantener aproximadamente el centro actual al hacer zoom.
+    const oldW = cropState.natW * cropState.scale, oldH = cropState.natH * cropState.scale;
+    const centerRatioX = (CROP_BOX/2 - cropState.x) / oldW;
+    const centerRatioY = (CROP_BOX/2 - cropState.y) / oldH;
+    cropState.scale = cropState.coverScale * factor;
+    const newW = cropState.natW * cropState.scale, newH = cropState.natH * cropState.scale;
+    cropState.x = CROP_BOX/2 - centerRatioX * newW;
+    cropState.y = CROP_BOX/2 - centerRatioY * newH;
+    clampCropOffsets();
+    applyCropTransform();
+  });
+
+  function cropPointerDown(e){
+    const p = e.touches ? e.touches[0] : e;
+    dragState = { startX: p.clientX, startY: p.clientY, origX: cropState.x, origY: cropState.y };
+    crop.circle.classList.add('dragging');
+  }
+  function cropPointerMove(e){
+    if(!dragState) return;
+    e.preventDefault();
+    const p = e.touches ? e.touches[0] : e;
+    cropState.x = dragState.origX + (p.clientX - dragState.startX);
+    cropState.y = dragState.origY + (p.clientY - dragState.startY);
+    clampCropOffsets();
+    applyCropTransform();
+  }
+  function cropPointerUp(){
+    dragState = null;
+    crop.circle.classList.remove('dragging');
+  }
+  crop.circle.addEventListener('mousedown', cropPointerDown);
+  window.addEventListener('mousemove', cropPointerMove);
+  window.addEventListener('mouseup', cropPointerUp);
+  crop.circle.addEventListener('touchstart', cropPointerDown, { passive: true });
+  crop.circle.addEventListener('touchmove', cropPointerMove, { passive: false });
+  crop.circle.addEventListener('touchend', cropPointerUp);
+
+  crop.save.addEventListener('click', ()=>{
+    const canvas = document.createElement('canvas');
+    canvas.width = OUT_SIZE;
+    canvas.height = OUT_SIZE;
+    const ctx = canvas.getContext('2d');
+    // Área visible del círculo, convertida a coordenadas de la imagen original.
+    const sx = -cropState.x / cropState.scale;
+    const sy = -cropState.y / cropState.scale;
+    const sSize = CROP_BOX / cropState.scale;
+    ctx.drawImage(crop.img, sx, sy, sSize, sSize, 0, 0, OUT_SIZE, OUT_SIZE);
+    canvas.toBlob(async (blob)=>{
+      closeCropModal();
+      if(blob) await uploadAvatarBlob(blob);
+    }, 'image/jpeg', 0.9);
+  });
+
+  async function uploadAvatarBlob(blob){
     profile.error.textContent = '';
-    if(!file.type.startsWith('image/')){ profile.error.textContent = 'Elegí una imagen.'; return; }
-    if(file.size > 4 * 1024 * 1024){ profile.error.textContent = 'La imagen pesa demasiado (máx 4MB).'; return; }
     profile.changeBtn.disabled = true;
+    let debugUid = '?', debugPath = '?';
     try{
       const { data: { user } } = await notesSupabase.auth.getUser();
       if(!user) throw new Error('sin sesión');
-      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
-      const path = user.id + '/avatar.' + ext;
+      debugUid = user.id;
+      const path = user.id + '/avatar.jpg';
+      debugPath = path;
       const { error: upErr } = await notesSupabase.storage
         .from(BUCKET_AVATARS)
-        .upload(path, file, { upsert: true, contentType: file.type });
+        .upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
       if(upErr) throw upErr;
       const { data: pub } = notesSupabase.storage.from(BUCKET_AVATARS).getPublicUrl(path);
       await notesSupabase.from(TABLE_PROFILES).update({ avatar_url: pub.publicUrl }).eq('id', user.id);
@@ -11374,11 +11522,23 @@ window.OcrEngine = (function(){
       console.warn('avatar upload error', err);
       const raw = (err && err.message) || JSON.stringify(err) || 'error desconocido';
       const status = (err && (err.statusCode || err.status)) || '';
-      profile.error.textContent = 'Error' + (status ? ' ' + status : '') + ': ' + raw;
+      profile.error.textContent = 'Error' + (status ? ' ' + status : '') + ': ' + raw +
+        ' | uid=' + debugUid + ' | path=' + debugPath;
     }finally{
       profile.changeBtn.disabled = false;
-      profile.fileInput.value = '';
     }
+  }
+
+  profile.fileInput.addEventListener('change', ()=>{
+    const file = profile.fileInput.files[0];
+    profile.fileInput.value = '';
+    if(!file) return;
+    profile.error.textContent = '';
+    if(!file.type.startsWith('image/')){ profile.error.textContent = 'Elegí una imagen.'; return; }
+    if(file.size > 8 * 1024 * 1024){ profile.error.textContent = 'La imagen pesa demasiado (máx 8MB).'; return; }
+    const reader = new FileReader();
+    reader.onload = ()=> openCropModal(reader.result);
+    reader.readAsDataURL(file);
   });
 
   async function afterAuth(){
