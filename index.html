@@ -11113,7 +11113,7 @@ window.OcrEngine = (function(){
   }
   #notesChangePhotoBtn{ background:#6c5ce7; color:#fff; }
   #notesLogoutBtn{ background:transparent; color:#9aa0ad; border:1px solid #3a3e4a; }
-  #notesAvatarError{ color:#ff6b6b; font-size:11px; min-height:14px; margin-top:4px; text-align:center; }
+  #notesAvatarError{ color:#ff6b6b; font-size:11px; min-height:14px; margin-top:4px; text-align:center; word-break:break-word; }
 </style>
 <div id="notesAuthOverlay" class="hidden">
   <div id="notesAuthBox">
@@ -11372,16 +11372,9 @@ window.OcrEngine = (function(){
       profile.avatarBig.src = src;
     }catch(err){
       console.warn('avatar upload error', err);
-      const raw = (err && err.message) || '';
-      if(/bucket not found/i.test(raw)){
-        profile.error.textContent = 'Falta crear el bucket en Supabase (correr el SQL).';
-      } else if(/row-level security|permission denied|not authorized/i.test(raw)){
-        profile.error.textContent = 'Permiso denegado (falta correr las políticas del SQL).';
-      } else if(raw){
-        profile.error.textContent = 'Error: ' + raw;
-      } else {
-        profile.error.textContent = 'No se pudo subir la foto. Probá de nuevo.';
-      }
+      const raw = (err && err.message) || JSON.stringify(err) || 'error desconocido';
+      const status = (err && (err.statusCode || err.status)) || '';
+      profile.error.textContent = 'Error' + (status ? ' ' + status : '') + ': ' + raw;
     }finally{
       profile.changeBtn.disabled = false;
       profile.fileInput.value = '';
