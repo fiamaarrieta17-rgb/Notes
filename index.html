@@ -11098,15 +11098,31 @@ window.OcrEngine = (function(){
   #notesProfileAvatar{ width:26px; height:26px; }
   #notesProfileAvatarBig{ width:64px; height:64px; margin-bottom:8px; }
   #notesProfilePanel{
-    position:absolute; bottom:44px; right:0; width:190px;
+    position:absolute; bottom:44px; right:0; width:220px;
     background:#23262f; border:1px solid #3a3e4a; border-radius:14px; padding:16px;
     display:flex; flex-direction:column; align-items:center;
     box-shadow:0 10px 30px rgba(0,0,0,.4);
   }
   #notesProfilePanel.hidden{ display:none; }
-  #notesProfilePhoneBig{
-    color:#e6e6e6; font-size:13px; margin-bottom:12px; word-break:break-all; text-align:center;
+  #notesProfileNameBig{
+    color:#fff; font-size:15px; font-weight:600; margin-top:2px; text-align:center; word-break:break-word;
   }
+  #notesProfilePhoneBig{
+    color:#9aa0ad; font-size:12px; margin-bottom:12px; word-break:break-all; text-align:center;
+  }
+  #notesProfileEditBox{
+    width:100%; margin-top:14px; padding-top:14px; border-top:1px solid #3a3e4a;
+    display:flex; flex-direction:column; gap:8px;
+  }
+  #notesProfileEditBox input{
+    width:100%; box-sizing:border-box; padding:8px 10px; border-radius:8px;
+    border:1px solid #3a3e4a; background:#1B1D24; color:#fff; font-size:12px;
+  }
+  #notesProfileEditSave{
+    width:100%; padding:8px; border-radius:8px; border:none; font-size:12px;
+    cursor:pointer; background:#3a3e4a; color:#e6e6e6;
+  }
+  #notesProfileEditMsg{ font-size:11px; min-height:14px; text-align:center; }
   #notesChangePhotoBtn, #notesLogoutBtn{
     width:100%; padding:9px; border-radius:8px; border:none; font-size:12px;
     cursor:pointer; margin-top:6px;
@@ -11149,6 +11165,7 @@ window.OcrEngine = (function(){
     <h2 id="notesAuthTitle">Iniciar sesión</h2>
     <p class="sub" id="notesAuthSub">Entrá con tu número de celular y tu contraseña.</p>
     <input id="notesAuthPhone" type="tel" placeholder="Celular (ej: +54911...)" autocomplete="tel">
+    <input id="notesAuthName" type="text" placeholder="Nombre" autocomplete="name" style="display:none">
     <input id="notesAuthDni" type="text" placeholder="DNI" autocomplete="off" style="display:none">
     <input id="notesAuthPassword" type="password" placeholder="Contraseña" autocomplete="current-password">
     <input id="notesAuthPasswordConfirm" type="password" placeholder="Confirmar nueva contraseña" autocomplete="new-password" style="display:none">
@@ -11166,10 +11183,17 @@ window.OcrEngine = (function(){
   </button>
   <div id="notesProfilePanel" class="hidden">
     <img id="notesProfileAvatarBig" src="" alt="">
+    <div id="notesProfileNameBig"></div>
     <div id="notesProfilePhoneBig"></div>
     <input type="file" id="notesAvatarInput" accept="image/*" style="display:none">
     <button id="notesChangePhotoBtn">Cambiar foto</button>
     <div id="notesAvatarError"></div>
+    <div id="notesProfileEditBox">
+      <input id="notesProfileEditName" type="text" placeholder="Nombre">
+      <input id="notesProfileEditDni" type="text" placeholder="DNI">
+      <button id="notesProfileEditSave">Guardar datos</button>
+      <div id="notesProfileEditMsg"></div>
+    </div>
     <button id="notesLogoutBtn">Cerrar sesión</button>
   </div>
 </div>
@@ -11210,6 +11234,7 @@ window.OcrEngine = (function(){
     title: document.getElementById('notesAuthTitle'),
     sub: document.getElementById('notesAuthSub'),
     phone: document.getElementById('notesAuthPhone'),
+    name: document.getElementById('notesAuthName'),
     dni: document.getElementById('notesAuthDni'),
     pass: document.getElementById('notesAuthPassword'),
     passConfirm: document.getElementById('notesAuthPasswordConfirm'),
@@ -11227,10 +11252,15 @@ window.OcrEngine = (function(){
     phone: document.getElementById('notesProfilePhone'),
     panel: document.getElementById('notesProfilePanel'),
     avatarBig: document.getElementById('notesProfileAvatarBig'),
+    nameBig: document.getElementById('notesProfileNameBig'),
     phoneBig: document.getElementById('notesProfilePhoneBig'),
     fileInput: document.getElementById('notesAvatarInput'),
     changeBtn: document.getElementById('notesChangePhotoBtn'),
     error: document.getElementById('notesAvatarError'),
+    editName: document.getElementById('notesProfileEditName'),
+    editDni: document.getElementById('notesProfileEditDni'),
+    editSave: document.getElementById('notesProfileEditSave'),
+    editMsg: document.getElementById('notesProfileEditMsg'),
   };
   const crop = {
     overlay: document.getElementById('notesCropOverlay'),
@@ -11247,12 +11277,14 @@ window.OcrEngine = (function(){
     box.error.textContent = '';
     box.ok.textContent = '';
     box.dni.style.display = 'none';
+    box.name.style.display = 'none';
     box.passConfirm.style.display = 'none';
     box.pass.style.display = '';
     box.forgot.style.display = '';
     if(m==='signup'){
       box.title.textContent = 'Crear cuenta';
-      box.sub.textContent = 'Elegí tu celular, tu DNI y una contraseña.';
+      box.sub.textContent = 'Elegí tu celular, tu nombre, tu DNI y una contraseña.';
+      box.name.style.display = '';
       box.dni.style.display = '';
       box.pass.placeholder = 'Contraseña';
       box.submit.textContent = 'Registrarme';
@@ -11293,11 +11325,13 @@ window.OcrEngine = (function(){
 
   async function doSubmit(){
     const phone = cleanPhone(box.phone.value);
+    const name = box.name.value.trim();
     const dni = box.dni.value.trim();
     const password = box.pass.value;
     box.error.textContent = '';
     box.ok.textContent = '';
     if(phone.length < 6){ box.error.textContent = 'Ingresá un celular válido.'; return; }
+    if(mode==='signup' && name.length < 2){ box.error.textContent = 'Ingresá tu nombre.'; return; }
     if((mode==='signup' || mode==='recover') && dni.length < 6){ box.error.textContent = 'Ingresá tu DNI.'; return; }
     if(password.length < 6){ box.error.textContent = 'La contraseña debe tener al menos 6 caracteres.'; return; }
     if(mode==='recover' && password !== box.passConfirm.value){ box.error.textContent = 'Las contraseñas no coinciden.'; return; }
@@ -11308,7 +11342,7 @@ window.OcrEngine = (function(){
         const { data, error } = await notesSupabase.auth.signUp({ email, password });
         if(error) throw error;
         if(data.user){
-          await notesSupabase.from(TABLE_PROFILES).upsert({ id: data.user.id, phone, dni });
+          await notesSupabase.from(TABLE_PROFILES).upsert({ id: data.user.id, phone, dni, name });
         }
         await afterAuth();
       } else if(mode === 'recover'){
@@ -11378,20 +11412,58 @@ window.OcrEngine = (function(){
     if(key.indexOf(KV_PREFIX) === 0) pushKey(key, null);
   };
 
-  // ---------- Perfil: celular visible + foto ----------
+  // ---------- Perfil: nombre + celular visibles + foto ----------
   async function loadProfile(){
     const { data: { user } } = await notesSupabase.auth.getUser();
     if(!user) return;
-    const { data } = await notesSupabase.from(TABLE_PROFILES)
-      .select('phone,avatar_url').eq('id', user.id).maybeSingle();
-    const phoneText = data && data.phone ? '+' + data.phone.replace(/^\+/, '') : '';
+    let { data } = await notesSupabase.from(TABLE_PROFILES)
+      .select('phone,dni,name,avatar_url').eq('id', user.id).maybeSingle();
+
+    if(!data){
+      // Cuenta creada antes de tener esta tabla, o el guardado inicial falló:
+      // recreamos una fila mínima recuperando el celular desde el email interno.
+      const recoveredPhone = (user.email || '')
+        .replace(/^phone_/, '').replace('@' + EMAIL_DOMAIN, '');
+      await notesSupabase.from(TABLE_PROFILES).upsert({ id: user.id, phone: recoveredPhone });
+      data = { phone: recoveredPhone, dni: null, name: null, avatar_url: null };
+    }
+
+    const phoneText = data.phone ? '+' + data.phone.replace(/^\+/, '') : '';
     profile.phone.textContent = phoneText;
     profile.phoneBig.textContent = phoneText;
-    const src = (data && data.avatar_url) ? (data.avatar_url + '?t=' + Date.now()) : DEFAULT_AVATAR;
+    profile.nameBig.textContent = data.name || '';
+    profile.editName.value = data.name || '';
+    profile.editDni.value = data.dni || '';
+    const src = data.avatar_url ? (data.avatar_url + '?t=' + Date.now()) : DEFAULT_AVATAR;
     profile.avatar.src = src;
     profile.avatarBig.src = src;
     profile.widget.style.display = 'block';
   }
+
+  profile.editSave.addEventListener('click', async ()=>{
+    const name = profile.editName.value.trim();
+    const dni = profile.editDni.value.trim();
+    profile.editMsg.style.color = '#ff6b6b';
+    profile.editMsg.textContent = '';
+    if(name.length < 2){ profile.editMsg.textContent = 'Ingresá tu nombre.'; return; }
+    profile.editSave.disabled = true;
+    try{
+      const { data: { user } } = await notesSupabase.auth.getUser();
+      if(!user) throw new Error('sin sesión');
+      const updates = { name };
+      if(dni) updates.dni = dni;
+      const { error } = await notesSupabase.from(TABLE_PROFILES).update(updates).eq('id', user.id);
+      if(error) throw error;
+      profile.nameBig.textContent = name;
+      profile.editMsg.style.color = '#4cd97b';
+      profile.editMsg.textContent = 'Guardado.';
+    }catch(err){
+      console.warn('profile save error', err);
+      profile.editMsg.textContent = 'No se pudo guardar. Probá de nuevo.';
+    }finally{
+      profile.editSave.disabled = false;
+    }
+  });
 
   profile.toggle.addEventListener('click', ()=> profile.panel.classList.toggle('hidden'));
   document.addEventListener('click', (e)=>{
