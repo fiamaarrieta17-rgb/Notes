@@ -11429,7 +11429,7 @@ window.OcrEngine = (function(){
     }
 
     const phoneText = data.phone ? '+' + data.phone.replace(/^\+/, '') : '';
-    profile.phone.textContent = phoneText;
+    profile.phone.textContent = data.name || phoneText;
     profile.phoneBig.textContent = phoneText;
     profile.nameBig.textContent = data.name || '';
     profile.editName.value = data.name || '';
@@ -11455,6 +11455,7 @@ window.OcrEngine = (function(){
       const { error } = await notesSupabase.from(TABLE_PROFILES).update(updates).eq('id', user.id);
       if(error) throw error;
       profile.nameBig.textContent = name;
+      profile.phone.textContent = name;
       profile.editMsg.style.color = '#4cd97b';
       profile.editMsg.textContent = 'Guardado.';
     }catch(err){
