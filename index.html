@@ -1166,6 +1166,24 @@ window.OcrEngine = (function(){
     font-weight:600;font-size:11.5px;padding:5px 10px;border-radius:6px;z-index:500;pointer-events:none;
   }
   #pdfSelCopiedHint.show{display:block;}
+  /* ---------- Selección rectangular para capturar una zona del PDF ---------- */
+  #pdfCaptureRect{
+    position:absolute;display:none;border:2px dashed #4f7cff;
+    background:rgba(79,124,255,.16);pointer-events:none;z-index:40;
+  }
+  #pdfCaptureHint{
+    position:fixed;display:none;align-items:center;gap:10px;
+    background:var(--panel);border:1px solid var(--panel-edge);color:var(--cream);
+    font-family:'Inter',sans-serif;font-weight:600;font-size:12px;
+    padding:8px 10px 8px 14px;border-radius:9px;z-index:520;
+    box-shadow:0 8px 24px rgba(0,0,0,.45);
+  }
+  #pdfCaptureHint.show{display:flex;}
+  #pdfCaptureHint img{width:34px;height:34px;object-fit:cover;border-radius:5px;border:1px solid var(--panel-edge);}
+  #pdfCapturePasteBtn{
+    background:var(--pine);color:#fff;border:none;border-radius:6px;
+    padding:6px 10px;font-family:inherit;font-weight:600;font-size:11.5px;cursor:pointer;white-space:nowrap;
+  }
   #pdfEmptyState{
     display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;
     text-align:center;padding:30px 20px;color:var(--cream-dim);
@@ -2606,6 +2624,9 @@ window.OcrEngine = (function(){
         <button type="button" class="tool" id="pdfToolEraser" title="Borrar trazos dibujados">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20H9l-6.5-6.5a2 2 0 010-2.83l8-8a2 2 0 012.83 0l6.5 6.5a2 2 0 010 2.83L13 20"/><path d="M6 15l6 6"/></svg>
         </button>
+        <button type="button" class="tool" id="pdfToolCapture" title="Capturar: seleccioná una zona del PDF para pegarla en la hoja">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        </button>
         <div class="pdfSelDivider"></div>
         <button type="button" class="tool" id="pdfSizeBtn" title="Elegir grosor">
           <span id="pdfSizeDot" class="pdfSizeDot"></span>
@@ -2623,6 +2644,7 @@ window.OcrEngine = (function(){
           <div id="pdfTextLayer" class="textLayer"></div>
           <div id="pdfMarksLayer"></div>
           <canvas id="pdfInkCanvas"></canvas>
+          <div id="pdfCaptureRect"></div>
         </div>
         <div id="pdfEmptyState">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
@@ -2666,6 +2688,11 @@ window.OcrEngine = (function(){
       </button>
     </div>
     <div id="pdfSelCopiedHint">Copiado</div>
+    <div id="pdfCaptureHint">
+      <img id="pdfCaptureHintImg" alt="">
+      <span>Imagen capturada</span>
+      <button type="button" id="pdfCapturePasteBtn">Pegar en la hoja</button>
+    </div>
     <div id="pdfResizeHandle"></div>
     <div id="viewport">
       <div id="liveRecognition" aria-live="polite">
@@ -2858,6 +2885,10 @@ window.OcrEngine = (function(){
     <button id="vbUploadPdfBtn" title="PDFs">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
     </button>
+    <button id="vbUploadImageBtn" title="Subir una imagen del almacenamiento">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+    </button>
+    <input type="file" id="vbImageFileInput" accept="image/*" style="display:none;">
     <div class="vb-sep"></div>
     <div id="vbSettingsWrap">
       <button id="vbSettingsBtn" title="Configuración">
@@ -3818,6 +3849,11 @@ window.OcrEngine = (function(){
   const pdfToolPenBtn = document.getElementById('pdfToolPen');
   const pdfToolMarkerBtn = document.getElementById('pdfToolMarker');
   const pdfToolEraserBtn = document.getElementById('pdfToolEraser');
+  const pdfToolCaptureBtn = document.getElementById('pdfToolCapture');
+  const pdfCaptureRectEl = document.getElementById('pdfCaptureRect');
+  const pdfCaptureHintEl = document.getElementById('pdfCaptureHint');
+  const pdfCaptureHintImgEl = document.getElementById('pdfCaptureHintImg');
+  const pdfCapturePasteBtn = document.getElementById('pdfCapturePasteBtn');
   const pdfDrawDotsEl = document.getElementById('pdfDrawDots');
   const pdfSizeBtn = document.getElementById('pdfSizeBtn');
   const pdfSizePanel = document.getElementById('pdfSizePanel');
@@ -3831,9 +3867,12 @@ window.OcrEngine = (function(){
   // Se guarda por marca (igual que resaltar/subrayar por selección) pero con
   // type:'ink' y puntos en fracción del tamaño visible del PDF (xFrac/yFrac),
   // para que sobrevivan a cambios de zoom/página igual que las otras marcas.
-  let pdfDrawTool = 'select'; // 'select' | 'pen' | 'marker' | 'eraser'
+  let pdfDrawTool = 'select'; // 'select' | 'pen' | 'marker' | 'eraser' | 'capture'
   let pdfDrawColor = MARK_COLORS[8].hex; // rojo por defecto para el lápiz
   let pdfDrawing = false, pdfCurrentStroke = null, pdfDrawPointerId = null;
+  // ---- Captura de una zona del PDF para pegarla en la hoja de apuntes ----
+  let pdfCaptureStart = null; // {x,y} en px CSS, relativo a pdfInkCanvasEl
+  let pdfCapturedImage = null; // {dataUrl, width, height} de la última captura
   // ---- Grosor ajustable de lápiz/marcador/goma sobre PDFs ----
   // Un solo estado compartido (por nombre de herramienta) entre este panel
   // de PDF junto a la hoja y el visor de biblioteca (vpTool*, otro <script>
@@ -3868,6 +3907,8 @@ window.OcrEngine = (function(){
     if(pdfInkCanvasEl){ const ic = pdfInkCanvasEl.getContext('2d'); ic.setTransform(1,0,0,1,0,0); ic.clearRect(0,0,pdfInkCanvasEl.width,pdfInkCanvasEl.height); }
     currentPdfMarks = [];
     hidePdfSelToolbar();
+    hidePdfCaptureHint();
+    if(pdfCaptureRectEl) pdfCaptureRectEl.style.display = 'none';
   }
   showPdfEmpty();
 
@@ -4271,20 +4312,22 @@ window.OcrEngine = (function(){
 
   function setPdfDrawTool(tool){
     pdfDrawTool = tool;
-    const map = { select:pdfToolSelectBtn, pen:pdfToolPenBtn, marker:pdfToolMarkerBtn, eraser:pdfToolEraserBtn };
+    const map = { select:pdfToolSelectBtn, pen:pdfToolPenBtn, marker:pdfToolMarkerBtn, eraser:pdfToolEraserBtn, capture:pdfToolCaptureBtn };
     Object.values(map).forEach(b=> b.classList.remove('active'));
     map[tool].classList.add('active');
-    // Mientras se dibuja, la capa de tinta captura el puntero (para poder
-    // trazar); en modo "seleccionar" queda transparente a los eventos para
-    // no tapar la selección de texto ni el scroll/pellizco del panel.
+    // Mientras se dibuja (o se selecciona una zona para capturar), la capa
+    // de tinta captura el puntero; en modo "seleccionar" queda transparente
+    // a los eventos para no tapar la selección de texto ni el scroll/pellizco.
     pdfInkCanvasEl.classList.toggle('drawing', tool !== 'select');
     if(tool !== 'select') hidePdfSelToolbar();
+    if(tool !== 'capture') hidePdfCaptureHint();
     syncPdfSizeUI();
   }
   pdfToolSelectBtn.addEventListener('click', ()=> setPdfDrawTool('select'));
   pdfToolPenBtn.addEventListener('click', ()=> setPdfDrawTool('pen'));
   pdfToolMarkerBtn.addEventListener('click', ()=> setPdfDrawTool('marker'));
   pdfToolEraserBtn.addEventListener('click', ()=> setPdfDrawTool('eraser'));
+  pdfToolCaptureBtn.addEventListener('click', ()=> setPdfDrawTool('capture'));
 
   // ---------- Panel de grosor del lápiz/marcador/goma sobre el PDF ----------
   function pdfSizeToolKey(){ return pdfDrawTool==='marker' ? 'marker' : (pdfDrawTool==='eraser' ? 'eraser' : 'pen'); }
@@ -4370,6 +4413,7 @@ window.OcrEngine = (function(){
     pdfDrawing = true;
     const rect = pdfInkCanvasEl.getBoundingClientRect();
     const pt = { x:e.clientX-rect.left, y:e.clientY-rect.top, p: e.pressure && e.pressure>0 ? e.pressure : 0.5 };
+    if(pdfDrawTool === 'capture'){ startPdfCapture(pt); return; }
     if(pdfDrawTool === 'eraser'){ pdfEraseAt(pt); return; }
     const toolName = pdfDrawTool === 'marker' ? 'highlighter' : 'pen';
     pdfCurrentStroke = {
@@ -4390,6 +4434,7 @@ window.OcrEngine = (function(){
     if(!pdfDrawing || e.pointerId !== pdfDrawPointerId) return;
     const rect = pdfInkCanvasEl.getBoundingClientRect();
     const pt = { x:e.clientX-rect.left, y:e.clientY-rect.top, p: e.pressure && e.pressure>0 ? e.pressure : 0.5 };
+    if(pdfDrawTool === 'capture'){ updatePdfCapture(pt); return; }
     if(pdfDrawTool === 'eraser'){ pdfEraseAt(pt); return; }
     if(!pdfCurrentStroke) return;
     const pts = pdfCurrentStroke.points;
@@ -4407,6 +4452,7 @@ window.OcrEngine = (function(){
     if(!pdfDrawing || (e && e.pointerId !== pdfDrawPointerId)) return;
     pdfDrawing = false;
     pdfDrawPointerId = null;
+    if(pdfDrawTool === 'capture'){ finishPdfCapture(); return; }
     if(pdfDrawTool === 'eraser'){ pdfCurrentStroke = null; return; }
     const stroke = pdfCurrentStroke;
     pdfCurrentStroke = null;
@@ -4440,6 +4486,72 @@ window.OcrEngine = (function(){
   }
   pdfInkCanvasEl.addEventListener('pointerup', endPdfDraw);
   pdfInkCanvasEl.addEventListener('pointercancel', endPdfDraw);
+
+  // ---------- Capturar una zona del PDF (arrastrar para marcar el recuadro) ----------
+  function startPdfCapture(pt){
+    pdfCaptureStart = pt;
+    Object.assign(pdfCaptureRectEl.style, { display:'block', left:pt.x+'px', top:pt.y+'px', width:'0px', height:'0px' });
+  }
+  function updatePdfCapture(pt){
+    if(!pdfCaptureStart) return;
+    const x = Math.min(pdfCaptureStart.x, pt.x), y = Math.min(pdfCaptureStart.y, pt.y);
+    const w = Math.abs(pt.x - pdfCaptureStart.x), h = Math.abs(pt.y - pdfCaptureStart.y);
+    Object.assign(pdfCaptureRectEl.style, { left:x+'px', top:y+'px', width:w+'px', height:h+'px' });
+  }
+  function hidePdfCaptureHint(){ pdfCaptureHintEl.classList.remove('show'); }
+  async function finishPdfCapture(){
+    if(!pdfCaptureStart){ pdfCaptureRectEl.style.display = 'none'; return; }
+    pdfCaptureStart = null;
+    pdfCaptureRectEl.style.display = 'none';
+    const cssX = parseFloat(pdfCaptureRectEl.style.left) || 0;
+    const cssY = parseFloat(pdfCaptureRectEl.style.top) || 0;
+    const cssW = parseFloat(pdfCaptureRectEl.style.width) || 0;
+    const cssH = parseFloat(pdfCaptureRectEl.style.height) || 0;
+    if(cssW < 6 || cssH < 6) return; // selección demasiado chica: la ignoramos
+    // Usamos la resolución real del canvas (devicePixelRatio) para que la
+    // captura salga nítida y no pixelada al pegarla en la hoja.
+    const scaleX = pdfCanvasEl.width / pdfCanvasEl.clientWidth;
+    const scaleY = pdfCanvasEl.height / pdfCanvasEl.clientHeight;
+    const out = document.createElement('canvas');
+    out.width = Math.max(1, Math.round(cssW * scaleX));
+    out.height = Math.max(1, Math.round(cssH * scaleY));
+    const octx = out.getContext('2d');
+    octx.drawImage(pdfCanvasEl, cssX*scaleX, cssY*scaleY, cssW*scaleX, cssH*scaleY, 0, 0, out.width, out.height);
+    // Si hay lápiz/marcador dibujado a mano sobre esa zona del PDF, lo
+    // sumamos también: la capa de tinta comparte tamaño CSS con el PDF.
+    if(pdfInkCanvasEl.clientWidth && pdfInkCanvasEl.clientHeight){
+      const inkScaleX = pdfInkCanvasEl.width / pdfInkCanvasEl.clientWidth;
+      const inkScaleY = pdfInkCanvasEl.height / pdfInkCanvasEl.clientHeight;
+      octx.drawImage(pdfInkCanvasEl, cssX*inkScaleX, cssY*inkScaleY, cssW*inkScaleX, cssH*inkScaleY, 0, 0, out.width, out.height);
+    }
+    const dataUrl = out.toDataURL('image/png');
+    pdfCapturedImage = { dataUrl, width: out.width, height: out.height };
+    // Además de dejarla lista para "Pegar en la hoja" acá al lado, probamos
+    // copiarla también al portapapeles del sistema (mejor esfuerzo: falla
+    // silenciosamente en navegadores/contextos que no lo permiten).
+    try{
+      if(navigator.clipboard && window.ClipboardItem){
+        const blob = await (await fetch(dataUrl)).blob();
+        await navigator.clipboard.write([ new ClipboardItem({ [blob.type]: blob }) ]);
+      }
+    }catch(err){}
+    pdfCaptureHintImgEl.src = dataUrl;
+    pdfCaptureHintEl.classList.add('show');
+    const wrapRect = pdfCanvasWrapEl.getBoundingClientRect();
+    pdfCaptureHintEl.style.left = Math.max(8, Math.min(wrapRect.left + 12, innerWidth - 260)) + 'px';
+    pdfCaptureHintEl.style.top = Math.max(8, wrapRect.top + 12) + 'px';
+  }
+  pdfCapturePasteBtn.addEventListener('click', ()=>{
+    if(!pdfCapturedImage) return;
+    // La hoja de apuntes vive en otro <script> (otro scope): se lo pedimos
+    // a través de la función que expone en window (ver panel vectorial).
+    if(typeof window.vbInsertImageDataUrl === 'function'){
+      window.vbInsertImageDataUrl(pdfCapturedImage.dataUrl, pdfCapturedImage.width, pdfCapturedImage.height);
+      hidePdfCaptureHint();
+    } else {
+      alert('No se pudo pegar la imagen en la hoja. Probá de nuevo.');
+    }
+  });
 
   function renderPdfSelDots(){
     pdfSelDotsEl.innerHTML = '';
@@ -4969,6 +5081,7 @@ window.OcrEngine = (function(){
     pdfPanelEl.classList.remove('open');
     pdfResizeHandleEl.classList.remove('open');
     pdfToggleBtn.classList.remove('active');
+    hidePdfCaptureHint();
   }
   function resetPdfPanelForFolder(){
     closePdfPanel();
@@ -8464,22 +8577,28 @@ window.OcrEngine = (function(){
   // al Estándar). 'texture': aplica el filtro de grano SVG definido arriba
   // para que el trazo tenga un borde irregular, como un lápiz de verdad.
   const VB_PEN_STYLES = {
-    fina:          { name:'Punta fina',      widthMul:.35,  alpha:1,   linecap:'round',  blend:false },
-    boligrafo:     { name:'Bolígrafo',        widthMul:.6,   alpha:1,   linecap:'round',  blend:false },
-    estandar:      { name:'Estándar',        widthMul:1,    alpha:1,   linecap:'round',  blend:false },
-    estilografica: { name:'Estilográfica',    widthMul:1.55, alpha:.88, linecap:'round',  blend:false },
-    caligrafico:   { name:'Caligráfico',      widthMul:2.8,  alpha:.94, linecap:'square', blend:false },
-    marcador:      { name:'Marcador seco',    widthMul:3.6,  alpha:.5,  linecap:'round',  blend:false },
-    grafito:       { name:'Lápiz grafito',    widthMul:1.15, alpha:.55, linecap:'round',  blend:true, tint:.7, texture:true },
-    pincel:        { name:'Pincel',           widthMul:1.8,  alpha:.95, linecap:'round',  blend:false },
+    // "smooth" (0 a ~0.3): cuánto se filtra el temblor de la mano para cada
+    // estilo. Los estilos finos/de precisión (punta fina, estándar) casi no
+    // se suavizan para no perder detalle en letra chica; los estilos más
+    // "fluidos" o gruesos (estilográfica, caligráfico, marcador seco,
+    // pincel) se suavizan más porque ahí se nota menos la pérdida de
+    // precisión y se gana mucho en trazo parejo.
+    fina:          { name:'Punta fina',      widthMul:.35,  alpha:1,   linecap:'round',  blend:false, smooth:.10 },
+    boligrafo:     { name:'Bolígrafo',        widthMul:.6,   alpha:1,   linecap:'round',  blend:false, smooth:.15 },
+    estandar:      { name:'Estándar',        widthMul:1,    alpha:1,   linecap:'round',  blend:false, smooth:.16 },
+    estilografica: { name:'Estilográfica',    widthMul:1.55, alpha:.88, linecap:'round',  blend:false, smooth:.20 },
+    caligrafico:   { name:'Caligráfico',      widthMul:2.8,  alpha:.94, linecap:'square', blend:false, smooth:.22 },
+    marcador:      { name:'Marcador seco',    widthMul:3.6,  alpha:.5,  linecap:'round',  blend:false, smooth:.24 },
+    grafito:       { name:'Lápiz grafito',    widthMul:1.15, alpha:.55, linecap:'round',  blend:true, tint:.7, texture:true, smooth:.18 },
+    pincel:        { name:'Pincel',           widthMul:1.8,  alpha:.95, linecap:'round',  blend:false, smooth:.24 },
   };
   let vPenStyle='estandar';
   let vMarkStyle='translucido';
   const VB_MARK_STYLES={
-    translucido:{alpha:.28,widthMul:1,blend:'multiply'},
-    pastel:{alpha:.38,widthMul:1.08,blend:'screen'},
-    neon:{alpha:.42,widthMul:1.1,blend:'screen'},
-    solido:{alpha:.62,widthMul:.95,blend:'source-over'}
+    translucido:{alpha:.28,widthMul:1,blend:'multiply',smooth:.18},
+    pastel:{alpha:.38,widthMul:1.08,blend:'screen',smooth:.18},
+    neon:{alpha:.42,widthMul:1.1,blend:'screen',smooth:.18},
+    solido:{alpha:.62,widthMul:.95,blend:'source-over',smooth:.18}
   };
   // Grosor recordado por separado para lápiz/marcador y para la goma.
   let vPenSize=3, vEraserSize=14;
@@ -8716,7 +8835,16 @@ window.OcrEngine = (function(){
     // las letras hasta verse borroneadas ("tosco"). Se sube el peso base y se
     // reduce la mezcla con el punto anterior para que el trazo siga de cerca
     // al puntero sin perder el filtrado de temblor.
-    const rawWeight=.82 + speed*.14;
+    // Además, cuánto se filtra ahora depende del estilo de lápiz/marcador
+    // activo (ver VB_PEN_STYLES/VB_MARK_STYLES, campo "smooth"): antes el
+    // mismo filtro se aplicaba siempre igual sin importar el estilo, así
+    // que un trazo fino salía igual de "planchado" que uno de pincel, y un
+    // pincel/marcador no se beneficiaba de más estabilidad para tapar el
+    // temblor de la mano en trazos gruesos y lentos.
+    let styleSmooth = .16;
+    if(vTool==='pen') styleSmooth = (VB_PEN_STYLES[vPenStyle]||VB_PEN_STYLES.estandar).smooth ?? .16;
+    else if(vTool==='highlighter') styleSmooth = (VB_MARK_STYLES[vMarkStyle]||VB_MARK_STYLES.translucido).smooth ?? .18;
+    const rawWeight=Math.min(.95, (1-styleSmooth) + speed*.14);
     const prevWeight=.03*(1-speed);
     const lastWeight=1-rawWeight-prevWeight;
     return {x:last.x*lastWeight + prev.x*prevWeight + raw.x*rawWeight, y:last.y*lastWeight + prev.y*prevWeight + raw.y*rawWeight};
@@ -8776,9 +8904,19 @@ window.OcrEngine = (function(){
     if(vTool==='highlighter'){
       const ms=VB_MARK_STYLES[vMarkStyle]||VB_MARK_STYLES.translucido;
       vStroke.setAttribute('stroke-width', Math.max(8, w*4*ms.widthMul));
-      vStroke.setAttribute('stroke-opacity',String(ms.alpha));
+      // El blend 'multiply' oscurece lo que hay debajo: se ve perfecto sobre
+      // una hoja clara (como resaltar sobre papel de verdad), pero sobre el
+      // lienzo oscuro del tema oscuro (sin hoja blanca de fondo) el color
+      // multiplicado por un fondo casi negro sale casi negro/invisible —
+      // eso es lo que hacía que el marcador "Translúcido" pareciera no
+      // funcionar. En tema oscuro usamos composición normal en su lugar,
+      // compensando la opacidad para que siga leyéndose translúcido.
+      const canMultiply = ms.blend==='multiply' && vTheme==='light';
+      const blend = ms.blend==='multiply' ? (canMultiply ? 'multiply' : 'normal') : ms.blend;
+      const alpha = (ms.blend==='multiply' && !canMultiply) ? Math.max(ms.alpha, .5) : ms.alpha;
+      vStroke.setAttribute('stroke-opacity',String(alpha));
       vStroke.setAttribute('stroke-linecap','round'); vStroke.setAttribute('stroke-linejoin','round');
-      vStroke.style.mixBlendMode=ms.blend;
+      vStroke.style.mixBlendMode=blend;
     } else {
       vStroke.dataset.baseWidth=String(Math.max(.4, w*style.widthMul));
       vStroke.setAttribute('stroke-width', Math.max(.4, w*style.widthMul));
@@ -9490,6 +9628,8 @@ window.OcrEngine = (function(){
 
   // ---------- PDFs: ventana en paralelo a la hoja, con varios PDFs guardados de forma persistente ----------
   const vbUploadPdfBtn = document.getElementById('vbUploadPdfBtn');
+  const vbUploadImageBtn = document.getElementById('vbUploadImageBtn');
+  const vbImageFileInput = document.getElementById('vbImageFileInput');
   const vbPdfPanel = document.getElementById('vbPdfPanel');
   const vbPdfPanelClose = document.getElementById('vbPdfPanelClose');
   const vbPdfPanelBody = document.getElementById('vbPdfPanelBody');
@@ -9787,11 +9927,71 @@ window.OcrEngine = (function(){
       img.setAttribute('y', cursorY);
       img.setAttribute('width', targetW);
       img.setAttribute('height', targetH);
+      img.dataset.obj = 'image';
       vbObjects.appendChild(img);
       cursorY += targetH + 40;
     }
     vbCommit();
   }
+
+  // Inserta una imagen suelta (captura de una zona del PDF, o subida del
+  // almacenamiento del dispositivo) como objeto <image> en el lienzo
+  // actual, centrada en lo que se está viendo ahora mismo, con un ancho
+  // máximo razonable y preservando la relación de aspecto original. Queda
+  // seleccionada y con la herramienta "Seleccionar y mover" activa para
+  // poder arrastrarla directo a su lugar en la hoja.
+  function vbInsertImageDataUrl(dataUrl, naturalW, naturalH){
+    const maxW = VB_A4_W * 0.55;
+    const ratio = (naturalW && naturalH) ? (naturalH / naturalW) : 0.75;
+    const w = Math.min(maxW, naturalW || maxW);
+    const h = w * ratio;
+    const r = vbBoard.getBoundingClientRect();
+    const center = vbClientWorldPoint(r.left + r.width/2, r.top + r.height/2);
+    const img = document.createElementNS(NS, 'image');
+    img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', dataUrl);
+    img.setAttribute('href', dataUrl);
+    img.setAttribute('x', center.x - w/2);
+    img.setAttribute('y', center.y - h/2);
+    img.setAttribute('width', w);
+    img.setAttribute('height', h);
+    img.dataset.obj = 'image';
+    vbObjects.appendChild(img);
+    vbCommit();
+    vbSetTool('select');
+    if(vSelected) vSelected.classList.remove('vb-selected');
+    vSelected = img;
+    vSelected.classList.add('vb-selected');
+  }
+
+  // Lee un archivo de imagen elegido del almacenamiento del dispositivo y
+  // lo inserta en la hoja con vbInsertImageDataUrl.
+  async function vbInsertImageFile(file){
+    if(!file || !file.type || !file.type.startsWith('image/')){ alert('Elegí un archivo de imagen.'); return; }
+    const dataUrl = await new Promise((resolve, reject)=>{
+      const reader = new FileReader();
+      reader.onload = ()=> resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    const dims = await new Promise((resolve)=>{
+      const im = new Image();
+      im.onload = ()=> resolve({ w: im.naturalWidth || 400, h: im.naturalHeight || 300 });
+      im.onerror = ()=> resolve({ w: 400, h: 300 });
+      im.src = dataUrl;
+    });
+    vbInsertImageDataUrl(dataUrl, dims.w, dims.h);
+  }
+  if(vbUploadImageBtn && vbImageFileInput){
+    vbUploadImageBtn.onclick = ()=> vbImageFileInput.click();
+    vbImageFileInput.onchange = ()=>{
+      const file = vbImageFileInput.files && vbImageFileInput.files[0];
+      vbImageFileInput.value = '';
+      if(file) vbInsertImageFile(file).catch(err=>{ console.error(err); alert('No se pudo subir la imagen.'); });
+    };
+  }
+  // Expuesta en window: la usa el panel de PDF al lado de la hoja (otro
+  // <script>, otro scope) para pegar una zona capturada del PDF acá.
+  window.vbInsertImageDataUrl = vbInsertImageDataUrl;
 
   // --- Almacenamiento persistente de los PDFs subidos (IndexedDB, por carpeta) ---
   const VB_PDF_DB_NAME = 'cuadernoPdfsDB';
